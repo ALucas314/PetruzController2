@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { apiConfig } from "@/services/api/config";
+import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 
 const Register = () => {
@@ -43,22 +43,25 @@ const Register = () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${apiConfig.baseURL}/api/supabase/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nome: name.trim(), email: email.trim(), password }),
+      const { data, error: err } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: { data: { nome: name.trim() } },
       });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Erro ao cadastrar. Tente novamente.");
+      if (err) {
+        setError(err.message === "User already registered" ? "Este e-mail já está cadastrado." : err.message);
         return;
       }
-      if (json.data?.id != null && json.data?.email) {
-        setUser({ id: json.data.id, email: json.data.email, nome: json.data.nome ?? null });
+      if (data.user) {
+        setUser({
+          id: data.user.id,
+          email: data.user.email ?? "",
+          nome: name.trim() || null,
+        });
       }
       navigate("/dashboard");
     } catch (e) {
-      setError("Falha de conexão. Verifique se o servidor está rodando.");
+      setError("Falha de conexão. Verifique sua internet.");
     } finally {
       setLoading(false);
     }

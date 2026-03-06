@@ -600,7 +600,7 @@ export const AppSidebar = memo(function AppSidebar() {
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent
           side="left"
-          className="w-[280px] p-0 bg-sidebar text-sidebar-foreground lg:hidden [&>button]:z-50"
+          className="w-[280px] max-w-[85vw] p-0 pt-[env(safe-area-inset-top)] bg-sidebar text-sidebar-foreground lg:hidden [&>button]:z-50"
           onInteractOutside={(e) => {
             // Permitir fechar ao clicar fora
             setMobileOpen(false);

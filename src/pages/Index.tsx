@@ -3,7 +3,7 @@ import { DollarSign, ShoppingCart, Factory, Target, Minus, Loader2 } from "lucid
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
 import { AppLayout } from "@/components/AppLayout";
-import { apiConfig, getAuthHeaders } from "@/services/api/config";
+import { getFiliais, getDashboardStats, getProductionChart, getProductionLines } from "@/services/supabaseData";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList,
@@ -45,77 +45,38 @@ const Index = () => {
     };
   };
 
-  // Carregar filiais
+  // Carregar filiais (Supabase direto)
   useEffect(() => {
-    const loadFiliais = async () => {
-      try {
-        const response = await fetch(`${apiConfig.baseURL}/api/supabase/filiais`, { headers: getAuthHeaders() });
-        const result = await response.json();
-        if (result.success && result.data) {
-          setFiliais(result.data);
-          // Definir primeira filial como padrão se não houver seleção
-          if (result.data.length > 0) {
-            setFilial((prev) => prev || result.data[0].nome);
-          }
-        }
-      } catch (error) {
-        console.error("Erro ao carregar filiais:", error);
-      }
-    };
-    loadFiliais();
+    getFiliais()
+      .then((data) => {
+        setFiliais(data.map((f) => ({ id: f.id as number, codigo: String(f.codigo ?? ""), nome: String(f.nome ?? "") })));
+        if (data.length > 0) setFilial((prev) => prev || String(data[0].nome));
+      })
+      .catch((err) => console.error("Erro ao carregar filiais:", err));
   }, []);
 
-  // Carregar dados do dashboard
+  // Carregar dados do dashboard (Supabase direto)
   useEffect(() => {
-    const loadDashboardData = async () => {
+    const run = async () => {
       setLoading(true);
       try {
         const { dataInicio: di, dataFim: df } = getDateRange();
         const filialNome = filial || undefined;
-
-        // Buscar estatísticas
-        const statsUrl = new URL(`${apiConfig.baseURL}/api/supabase/dashboard/stats`);
-        if (filialNome) statsUrl.searchParams.append("filialNome", filialNome);
-        statsUrl.searchParams.append("dataInicio", di);
-        statsUrl.searchParams.append("dataFim", df);
-
-        const statsResponse = await fetch(statsUrl.toString(), { headers: getAuthHeaders() });
-        const statsResult = await statsResponse.json();
-        if (statsResult.success) {
-          setStats(statsResult.data);
-        }
-
-        // Buscar dados do gráfico de receita/produção
-        const chartUrl = new URL(`${apiConfig.baseURL}/api/supabase/dashboard/production-chart`);
-        if (filialNome) chartUrl.searchParams.append("filialNome", filialNome);
-        chartUrl.searchParams.append("dataInicio", di);
-        chartUrl.searchParams.append("dataFim", df);
-
-        const chartResponse = await fetch(chartUrl.toString(), { headers: getAuthHeaders() });
-        const chartResult = await chartResponse.json();
-        if (chartResult.success) {
-          setRevenueData(chartResult.data);
-        }
-
-        // Buscar dados do gráfico de linhas
-        const linesUrl = new URL(`${apiConfig.baseURL}/api/supabase/dashboard/production-lines`);
-        if (filialNome) linesUrl.searchParams.append("filialNome", filialNome);
-        linesUrl.searchParams.append("dataInicio", di);
-        linesUrl.searchParams.append("dataFim", df);
-
-        const linesResponse = await fetch(linesUrl.toString(), { headers: getAuthHeaders() });
-        const linesResult = await linesResponse.json();
-        if (linesResult.success) {
-          setProductionData(linesResult.data);
-        }
+        const [statsResult, chartResult, linesResult] = await Promise.all([
+          getDashboardStats({ dataInicio: di, dataFim: df, filialNome }),
+          getProductionChart({ dataInicio: di, dataFim: df, filialNome }),
+          getProductionLines({ dataInicio: di, dataFim: df, filialNome }),
+        ]);
+        setStats(statsResult);
+        setRevenueData(chartResult);
+        setProductionData(linesResult);
       } catch (error) {
         console.error("Erro ao carregar dados do dashboard:", error);
       } finally {
         setLoading(false);
       }
     };
-
-    loadDashboardData();
+    run();
   }, [filial, dataInicio, dataFim]);
 
   // Formatar valores para exibição

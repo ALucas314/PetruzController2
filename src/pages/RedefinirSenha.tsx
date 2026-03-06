@@ -1,26 +1,32 @@
 import { useState, useEffect } from "react";
-import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { BarChart3, ArrowLeft, Lock, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiConfig } from "@/services/api/config";
+import { supabase } from "@/lib/supabase";
 
 const RedefinirSenha = () => {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const token = searchParams.get("token") || "";
-
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [recoveryReady, setRecoveryReady] = useState(false);
 
   useEffect(() => {
-    if (!token.trim()) setError("Link inválido. Solicite um novo link em Esqueci a senha.");
-  }, [token]);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const isRecovery = typeof window !== "undefined" && window.location.hash.includes("type=recovery");
+      if (session && isRecovery) setRecoveryReady(true);
+      else if (!isRecovery && !session) setError("Link inválido ou expirado. Solicite um novo em Esqueci a senha.");
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") setRecoveryReady(true);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,14 +41,9 @@ const RedefinirSenha = () => {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${apiConfig.baseURL}/api/supabase/auth/reset-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, newPassword }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Erro ao redefinir senha. O link pode ter expirado.");
+      const { error: err } = await supabase.auth.updateUser({ password: newPassword });
+      if (err) {
+        setError(err.message || "Erro ao redefinir senha. O link pode ter expirado.");
         return;
       }
       setSuccess(true);
@@ -146,7 +147,7 @@ const RedefinirSenha = () => {
               type="submit"
               size="lg"
               className="w-full h-11 rounded-xl"
-              disabled={loading || !token.trim()}
+              disabled={loading || !recoveryReady}
             >
               {loading ? (
                 <span className="flex items-center gap-2">

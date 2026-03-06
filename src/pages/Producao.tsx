@@ -1,4 +1,5 @@
 import { useState, useEffect, MouseEvent, useCallback, useRef, RefObject } from "react";
+import { useLocation } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, Sparkles, Zap, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -32,7 +33,17 @@ import {
   BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList,
 } from "recharts";
-import { apiConfig, getAuthHeaders } from "@/services/api/config";
+import {
+  getItems,
+  getLines,
+  getFiliais,
+  getItemByCode,
+  loadProducao,
+  saveProducao,
+  getDraft,
+  saveDraft,
+  getProducaoHistory,
+} from "@/services/supabaseData";
 import { useToast } from "@/hooks/use-toast";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -116,10 +127,12 @@ const DRAFT_SCREEN = "producao";
 const DRAFT_DEBOUNCE_MS = 1000;
 
 export default function Producao() {
+  const location = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
   const { setDocumentNav } = useDocumentNav();
   const producaoCardRef = useRef<HTMLDivElement>(null);
+  const openedFromStateRef = useRef(false);
   const dataInputRef = useRef<HTMLInputElement>(null);
   const isNewDocumentRef = useRef(false); // true após "Novo documento" para não recarregar do DB e manter setas habilitadas
   const justLoadedByIndexRef = useRef(false); // true após carregar doc pela seta, para o useEffect não sobrescrever com load sem filial
@@ -165,6 +178,8 @@ export default function Producao() {
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
   // Filiais (OCTF)
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string; endereco: string }>>([]);
+  const [filiaisLoadError, setFiliaisLoadError] = useState<string | null>(null);
+  const [itemCatalogLoadError, setItemCatalogLoadError] = useState<string | null>(null);
   const [filialSelecionada, setFilialSelecionada] = useState<string>("");
   // Filtros do histórico: intervalo de datas e linha
   const [historyDataInicio, setHistoryDataInicio] = useState<string>(() => {
@@ -259,71 +274,55 @@ export default function Producao() {
     return () => clearInterval(timer);
   }, []);
 
-  // Carregar catálogo de itens (OCTI) uma vez ao abrir a tela
+  // Carregar catálogo de itens (OCTI) — Supabase direto (para código → descrição ao digitar)
   useEffect(() => {
-    const loadItemCatalog = async () => {
-      try {
-        const response = await fetch(`${apiConfig.baseURL}/api/supabase/items`, { headers: getAuthHeaders() });
-        const result = await response.json();
-        if (!result.success || !Array.isArray(result.data)) return;
-
+    setItemCatalogLoadError(null);
+    getItems()
+      .then((data) => {
         const map: Record<string, { nome_item: string }> = {};
-        for (const it of result.data) {
-          if (it.codigo_item) {
-            const code = String(it.codigo_item).trim();
-            // Armazenar com o código original
-            map[code] = {
-              nome_item: it.nome_item || "",
-            };
-            // Também armazenar sem zeros à esquerda (normalizado) para busca flexível
-            const normalizedCode = code.replace(/^0+/, '') || code; // Remove zeros à esquerda, mas mantém se for só zeros
-            if (normalizedCode !== code) {
-              map[normalizedCode] = {
-                nome_item: it.nome_item || "",
-              };
-            }
+        for (const it of data) {
+          const code = String((it as { codigo_item?: string }).codigo_item ?? "").trim();
+          if (code) {
+            map[code] = { nome_item: String((it as { nome_item?: string }).nome_item ?? "") };
+            const normalizedCode = code.replace(/^0+/, "") || code;
+            if (normalizedCode !== code) map[normalizedCode] = map[code];
           }
         }
         setItemCatalog(map);
-      } catch (e) {
+      })
+      .catch((e) => {
         console.error("Erro ao carregar catálogo de itens (OCTI):", e);
-      }
-    };
+        setItemCatalogLoadError("Catálogo de itens indisponível. Verifique RLS na tabela OCTI.");
+        toast({
+          title: "Catálogo de itens",
+          description: "Não foi possível carregar itens (OCTI). Ao digitar o código, a descrição pode não preencher. Execute o script OCTI_RLS_PERMITIR_LEITURA.sql no Supabase.",
+          variant: "destructive",
+        });
+      });
+  }, [toast]);
 
-    loadItemCatalog();
+  // Carregar linhas de produção (OCLP) — Supabase direto
+  useEffect(() => {
+    getLines()
+      .then((data) => setProductionLines(data.map((l) => ({ id: l.id, line_id: l.line_id, code: l.code, name: l.name }))))
+      .catch((e) => console.error("Erro ao carregar linhas de produção (OCLP):", e));
   }, []);
 
-  // Carregar linhas de produção (OCLP) uma vez ao abrir a tela
+  // Carregar filiais (OCTF) — Supabase direto
   useEffect(() => {
-    const loadLines = async () => {
-      try {
-        const response = await fetch(`${apiConfig.baseURL}/api/supabase/lines`, { headers: getAuthHeaders() });
-        const result = await response.json();
-        if (!result.success || !Array.isArray(result.data)) return;
-        setProductionLines(result.data);
-      } catch (e) {
-        console.error("Erro ao carregar linhas de produção (OCLP):", e);
-      }
-    };
-
-    loadLines();
-  }, []);
-
-  // Carregar filiais (OCTF) uma vez ao abrir a tela
-  useEffect(() => {
-    const loadFiliais = async () => {
-      try {
-        const response = await fetch(`${apiConfig.baseURL}/api/supabase/filiais`, { headers: getAuthHeaders() });
-        const result = await response.json();
-        if (!result.success || !Array.isArray(result.data)) return;
-        setFiliais(result.data);
-      } catch (e) {
+    setFiliaisLoadError(null);
+    getFiliais()
+      .then((data) => setFiliais(data))
+      .catch((e) => {
         console.error("Erro ao carregar filiais (OCTF):", e);
-      }
-    };
-
-    loadFiliais();
-  }, []);
+        setFiliaisLoadError(e?.message || "Falha ao carregar filiais");
+        toast({
+          title: "Filiais não carregadas",
+          description: "Execute no Supabase o script OCTF_RLS_PERMITIR_LEITURA.sql (RLS) e confira se a tabela OCTF tem dados.",
+          variant: "destructive",
+        });
+      });
+  }, [toast]);
 
   // Atualizar horas restantes e hora final para cada item quando necessário
   useEffect(() => {
@@ -601,26 +600,17 @@ export default function Producao() {
               if (catalogItem && catalogItem.nome_item) {
                 updated.descricao = catalogItem.nome_item;
               } else {
-                // Se não encontrou no catálogo, buscar no backend por código
                 (async () => {
                   try {
-                    const response = await fetch(
-                      `${apiConfig.baseURL}/api/supabase/items/by-code/${encodeURIComponent(code)}`,
-                      { headers: getAuthHeaders() }
-                    );
-                    const result = await response.json();
-                    if (result.success && result.data && result.data.nome_item) {
-                      const nome = result.data.nome_item as string;
-                      const codigoBanco = String(result.data.codigo_item || code).trim();
-
-                      // Atualizar catálogo em memória
+                    const result = await getItemByCode(code);
+                    if (result && result.nome_item) {
+                      const nome = result.nome_item as string;
+                      const codigoBanco = String(result.codigo_item || code).trim();
                       setItemCatalog((prev) => ({
                         ...prev,
                         [codigoBanco]: { nome_item: nome },
                         [codigoBanco.replace(/^0+/, "") || codigoBanco]: { nome_item: nome },
                       }));
-
-                      // Atualizar o reprocesso específico na tabela
                       setReprocessos((prevReprocessos) =>
                         prevReprocessos.map((rep) =>
                           rep.id === id
@@ -761,26 +751,17 @@ export default function Producao() {
               if (catalogItem && catalogItem.nome_item) {
                 updated.descricaoItem = catalogItem.nome_item;
               } else {
-                // Se não encontrou no catálogo, buscar no backend por código
                 (async () => {
                   try {
-                    const response = await fetch(
-                      `${apiConfig.baseURL}/api/supabase/items/by-code/${encodeURIComponent(code)}`,
-                      { headers: getAuthHeaders() }
-                    );
-                    const result = await response.json();
-                    if (result.success && result.data && result.data.nome_item) {
-                      const nome = result.data.nome_item as string;
-                      const codigoBanco = String(result.data.codigo_item || code).trim();
-
-                      // Atualizar catálogo em memória
+                    const result = await getItemByCode(code);
+                    if (result && result.nome_item) {
+                      const nome = result.nome_item as string;
+                      const codigoBanco = String(result.codigo_item || code).trim();
                       setItemCatalog((prev) => ({
                         ...prev,
                         [codigoBanco]: { nome_item: nome },
                         [codigoBanco.replace(/^0+/, "") || codigoBanco]: { nome_item: nome },
                       }));
-
-                      // Atualizar a linha específica na tabela
                       setItems((prevItems) =>
                         prevItems.map((it) =>
                           it.id === id
@@ -793,7 +774,12 @@ export default function Producao() {
                       );
                     }
                   } catch (e) {
-                    console.error("Erro ao buscar item por código no backend:", e);
+                    console.error("Erro ao buscar item por código (OCTI):", e);
+                    toast({
+                      title: "Descrição não encontrada",
+                      description: "Não foi possível buscar o item pelo código. Verifique a tabela OCTI e a política RLS (OCTI_RLS_PERMITIR_LEITURA.sql).",
+                      variant: "destructive",
+                    });
                   }
                 })();
               }
@@ -845,39 +831,26 @@ export default function Producao() {
     const filialNomeCompleto = filialSelecionadaObj.nome;
 
     try {
-      const response = await fetch(`${apiConfig.baseURL}/api/supabase/producao/save`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify({
-          items: items.map((i) => ({
-            ...i,
-            quantidadePlanejada: parseFormattedNumber(i.quantidadePlanejada),
-            quantidadeRealizada: parseFormattedNumber(i.quantidadeRealizada),
-          })),
-          existingOcpdIds: items.map((i) => (i.ocpdId != null ? i.ocpdId : null)),
-          reprocessos: reprocessos.map((r) => ({
-            ...r,
-            quantidade: parseFormattedNumber(r.quantidade),
-          })),
-          data: dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
-          latasPrevista: parseFormattedNumber(latasPrevista),
-          latasRealizadas: parseFormattedNumber(latasRealizadas),
-          latasBatidas: parseFormattedNumber(latasBatidas),
-          totalCortado: parseFormattedNumber(totalCortado),
-          percentualMeta: parseFormattedNumber(percentualMeta),
-          totalReprocesso: parseFormattedNumber(totalReprocesso),
-          filialNome: filialNomeCompleto, // Nome completo da filial
-        }),
+      const result = await saveProducao({
+        dataDia: dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
+        filialNome: filialNomeCompleto,
+        items: items.map((i) => ({
+          ...i,
+          quantidadePlanejada: parseFormattedNumber(i.quantidadePlanejada),
+          quantidadeRealizada: parseFormattedNumber(i.quantidadeRealizada),
+        })),
+        existingIds: items.map((i) => (i.ocpdId != null ? i.ocpdId : null)),
+        reprocessos: reprocessos.map((r) => ({
+          ...r,
+          quantidade: parseFormattedNumber(r.quantidade),
+        })),
+        latasPrevista: parseFormattedNumber(latasPrevista),
+        latasRealizadas: parseFormattedNumber(latasRealizadas),
+        latasBatidas: parseFormattedNumber(latasBatidas),
+        totalCortado: parseFormattedNumber(totalCortado),
+        percentualMeta: parseFormattedNumber(percentualMeta),
+        totalReprocesso: parseFormattedNumber(totalReprocesso),
       });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || "Erro ao salvar dados");
-      }
 
       const wasUpdate = (result.updated ?? 0) > 0;
       const savedDate = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
@@ -964,9 +937,17 @@ export default function Producao() {
       }, 5000);
     } catch (error: any) {
       console.error("Erro ao salvar produção:", error);
+      const msg = error?.message || "Erro ao salvar dados no banco";
       setSaveStatus({
         success: false,
-        message: error.message || "Erro ao salvar dados no banco",
+        message: msg,
+      });
+      toast({
+        title: "Falha ao salvar",
+        description: msg.includes("RLS") || msg.includes("Nenhum registro foi gravado")
+          ? `${msg} Em Relatórios ou no Histórico não aparecerá nada até corrigir.`
+          : msg,
+        variant: "destructive",
       });
     } finally {
       setSaving(false);
@@ -980,19 +961,8 @@ export default function Producao() {
 
     try {
       const dataToLoad = data || dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
-      const url = new URL(`${apiConfig.baseURL}/api/supabase/producao/load`);
-      url.searchParams.set('data', dataToLoad);
       const filialNomeToUse = filialNomeOverride ?? (filialSelecionada ? filiais.find(f => f.codigo === filialSelecionada)?.nome : undefined);
-      if (filialNomeToUse) {
-        url.searchParams.set('filialNome', filialNomeToUse);
-      }
-      const response = await fetch(url.toString(), { headers: getAuthHeaders() });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || "Erro ao carregar dados");
-      }
+      const result = await loadProducao({ data: dataToLoad, filialNome: filialNomeToUse });
 
       if (result.data && result.data.length > 0) {
         // Converter dados do banco (tabela OCPD) para o formato da interface
@@ -1047,6 +1017,16 @@ export default function Producao() {
         }
 
         setItems(loadedItems);
+
+        // Controle de Latas: preencher do primeiro registro OCPD
+        if (result.data.length > 0) {
+          const first = result.data[0] as Record<string, unknown>;
+          if (first.estim_latas_previstas != null) setLatasPrevista(String(first.estim_latas_previstas).replace(".", ","));
+          if (first.estim_latas_realizadas != null) setLatasRealizadas(String(first.estim_latas_realizadas).replace(".", ","));
+          if (first.latas_ja_batidas != null) setLatasBatidas(String(first.latas_ja_batidas).replace(".", ","));
+          if (first.total_ja_cortado != null) setTotalCortado(String(first.total_ja_cortado).replace(".", ","));
+          if (first.percentual_meta != null) setPercentualMeta(String(first.percentual_meta).replace(".", ","));
+        }
 
         // Carregar reprocessos: preferir array da OCPR (múltiplos); senão usar campos do primeiro registro OCPD
         const loadedReprocessos: ReprocessoItem[] = [];
@@ -1113,10 +1093,8 @@ export default function Producao() {
   const loadDraftProducao = useCallback(async (): Promise<boolean> => {
     if (!user?.id) return false;
     try {
-      const url = `${apiConfig.baseURL}/api/supabase/draft?user_id=${encodeURIComponent(user.id)}&screen=${encodeURIComponent(DRAFT_SCREEN)}`;
-      const res = await fetch(url, { headers: getAuthHeaders() });
-      const result = await res.json();
-      if (!result.success || result.data == null) return false;
+      const result = await getDraft(user.id, DRAFT_SCREEN);
+      if (result.data == null) return false;
       const d = result.data as Record<string, unknown>;
       if (d.dataCabecalhoSelecionada) setDataCabecalhoSelecionada(String(d.dataCabecalhoSelecionada));
       if (d.filialSelecionada != null) setFilialSelecionada(String(d.filialSelecionada));
@@ -1156,11 +1134,7 @@ export default function Producao() {
         totalReprocesso,
         observacao,
       };
-      await fetch(`${apiConfig.baseURL}/api/supabase/draft`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ user_id: user.id, screen: DRAFT_SCREEN, data: payload }),
-      });
+      await saveDraft(user.id, DRAFT_SCREEN, payload);
     } catch (e) {
       console.warn("Erro ao salvar rascunho:", e);
     }
@@ -1197,14 +1171,15 @@ export default function Producao() {
         const filialNome = filiais.find(f => f.codigo === filialSelecionada)?.nome;
         if (filialNome) params.set("filialNome", filialNome);
       }
-      const response = await fetch(`${apiConfig.baseURL}/api/supabase/producao/history?${params.toString()}`, { headers: getAuthHeaders() });
-      const result = await response.json();
+      const result = await getProducaoHistory({
+        limit: params.get("limit") ? Number(params.get("limit")) : 500,
+        dataInicio: params.get("dataInicio") ?? undefined,
+        dataFim: params.get("dataFim") ?? undefined,
+        linha: params.get("linha") ?? undefined,
+        filialNome: params.get("filialNome") ?? undefined,
+      });
 
-      if (!result.success) {
-        throw new Error(result.error || "Erro ao carregar histórico");
-      }
-
-      setHistoryData(result.data || []);
+      setHistoryData(Array.isArray(result) ? result : []);
     } catch (error: any) {
       console.error("Erro ao carregar histórico:", error);
       setHistoryData([]);
@@ -1216,21 +1191,14 @@ export default function Producao() {
   // Função para carregar todos os registros ordenados (por data e ordem de criação)
   const loadAllRecords = async () => {
     try {
-      const url = new URL(`${apiConfig.baseURL}/api/supabase/producao/history`);
-      url.searchParams.set('limit', '1000');
-      if (filialSelecionada) {
-        url.searchParams.set('filialCodigo', filialSelecionada);
-      }
-      const response = await fetch(url.toString(), { headers: getAuthHeaders() });
-      const result = await response.json();
+      const filialNomeForQuery = filialSelecionada ? filiais.find((f) => f.codigo === filialSelecionada)?.nome : undefined;
+      const result = await getProducaoHistory({ limit: 1000, filialNome: filialNomeForQuery });
 
-      if (result.success && Array.isArray(result.data)) {
-        // Um documento = um cadastro (uma data + uma filial). Agrupar por (data_dia, filial_nome)
-        // para não contar cada linha da tabela como documento separado.
+      if (Array.isArray(result) && result.length > 0) {
         const recordsMap = new Map<string, any>();
         const dates = new Set<string>();
 
-        result.data.forEach((item: any) => {
+        result.forEach((item: any) => {
           const dateValue = item.data_dia || item.data_cabecalho || item.data;
           if (dateValue) {
             const dateStr = typeof dateValue === 'string'
@@ -1432,6 +1400,18 @@ export default function Producao() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Abrir documento vindo de Relatórios (navigate com state: loadData, loadFilialNome)
+  useEffect(() => {
+    const state = location.state as { loadData?: string; loadFilialNome?: string } | null;
+    if (!state?.loadData || !state?.loadFilialNome || openedFromStateRef.current || filiais.length === 0) return;
+    openedFromStateRef.current = true;
+    setDataCabecalhoSelecionada(state.loadData);
+    const filial = filiais.find((f) => (f.nome || "").trim() === (state.loadFilialNome || "").trim());
+    if (filial?.codigo) setFilialSelecionada(filial.codigo);
+    setCurrentView("cadastro");
+    loadFromDatabase(state.loadData, state.loadFilialNome);
+  }, [location.state, filiais]);
+
   // Carregar dados quando a data mudar (apenas na view de cadastro)
   useEffect(() => {
     if (currentView === "cadastro") {
@@ -1501,12 +1481,7 @@ export default function Producao() {
     return () => {
       const cur = latestDraftRef.current;
       if (!cur?.user_id || !cur.payload) return;
-      fetch(`${apiConfig.baseURL}/api/supabase/draft`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ user_id: cur.user_id, screen: DRAFT_SCREEN, data: cur.payload }),
-        keepalive: true,
-      }).catch(() => {});
+      saveDraft(cur.user_id, DRAFT_SCREEN, cur.payload).catch(() => {});
     };
   }, []);
 
@@ -1516,12 +1491,7 @@ export default function Producao() {
       if (document.hidden) {
         const cur = latestDraftRef.current;
         if (!cur?.user_id || !cur.payload) return;
-        fetch(`${apiConfig.baseURL}/api/supabase/draft`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-          body: JSON.stringify({ user_id: cur.user_id, screen: DRAFT_SCREEN, data: cur.payload }),
-          keepalive: true,
-        }).catch(() => {});
+        saveDraft(cur.user_id, DRAFT_SCREEN, cur.payload).catch(() => {});
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -1968,31 +1938,43 @@ export default function Producao() {
                     Filial:
                   </Label>
                   <Select
-                    value={filialSelecionada}
-                    onValueChange={setFilialSelecionada}
+                    value={filialSelecionada || "__nenhuma__"}
+                    onValueChange={(v) => setFilialSelecionada(v === "__nenhuma__" ? "" : v)}
                   >
                     <SelectTrigger id="filial-select" className="w-full sm:w-[400px]">
                       <SelectValue placeholder="Selecione uma filial" />
                     </SelectTrigger>
                     <SelectContent>
                       {filiais.length === 0 ? (
-                        <SelectItem value="" disabled>
+                        <SelectItem value="__nenhuma__" disabled>
                           Nenhuma filial disponível
                         </SelectItem>
                       ) : (
                         filiais.map((filial) => (
-                          <SelectItem key={filial.id} value={filial.codigo}>
+                          <SelectItem key={filial.id} value={filial.codigo ?? String(filial.id)}>
                             {filial.nome}
                           </SelectItem>
                         ))
                       )}
                     </SelectContent>
                   </Select>
+                  {(filiais.length === 0 || filiaisLoadError) && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {filiaisLoadError
+                        ? "Erro ao carregar. No Supabase: execute OCTF_RLS_PERMITIR_LEITURA.sql e confira se a tabela OCTF tem dados."
+                        : "Cadastre filiais na tabela OCTF no Supabase ou execute OCTF_INSERT_DATA.sql."}
+                    </p>
+                  )}
                 </div>
               </div>
 
               {/* Seção: Produção */}
               <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                {itemCatalogLoadError && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">
+                    {itemCatalogLoadError} Execute OCTI_RLS_PERMITIR_LEITURA.sql no Supabase para o código preencher a descrição ao digitar.
+                  </p>
+                )}
                 <div className="mb-5 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
@@ -2079,15 +2061,16 @@ export default function Producao() {
                               {productionLines.length > 0 ? (
                                 <div className="max-w-[220px]">
                                   <Select
-                                    value={item.linha || ""}
-                                    onValueChange={(value) => updateItem(item.id, "linha", value)}
+                                    value={item.linha ? String(item.linha) : "__vazio__"}
+                                    onValueChange={(value) => updateItem(item.id, "linha", value === "__vazio__" ? "" : value)}
                                   >
                                     <SelectTrigger className="h-8 sm:h-9 text-xs sm:text-sm">
                                       <SelectValue placeholder="Linha" />
                                     </SelectTrigger>
                                     <SelectContent className="max-h-72 text-xs sm:text-sm">
+                                      <SelectItem value="__vazio__">—</SelectItem>
                                       {productionLines.map((line) => (
-                                        <SelectItem key={line.id} value={line.code}>
+                                        <SelectItem key={line.id} value={line.code ? String(line.code) : `line-${line.id}`}>
                                           {line.name}
                                         </SelectItem>
                                       ))}
@@ -2873,8 +2856,8 @@ export default function Producao() {
                       <SelectContent>
                         <SelectItem value="todas">Todas as linhas</SelectItem>
                         {productionLines.map((line) => (
-                          <SelectItem key={line.id} value={line.code}>
-                            {line.name || line.code}
+                          <SelectItem key={line.id} value={line.code ? String(line.code) : `line-${line.id}`}>
+                            {line.name || line.code || `Linha ${line.id}`}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -2932,13 +2915,24 @@ export default function Producao() {
                           <TableHead className="text-xs sm:text-sm">Restante</TableHead>
                           <TableHead className="text-xs sm:text-sm">Hora final</TableHead>
                           <TableHead className="text-xs sm:text-sm">% Meta</TableHead>
+                          <TableHead className="text-xs sm:text-sm text-right w-[100px]">Ações</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {historyData.map((record, index) => {
-                          // Data no padrão 04/03/2026
+                          // Data do dia de produção (cadastrada)
                           const dataFormatada = formatDateShort(record.data_dia || record.data_cabecalho);
-                          const horaFormatada = record.hora_cabecalho || "-";
+                          const recordFilialNome = record.filial_nome != null ? String(record.filial_nome).trim() : "";
+                          const openDocument = () => {
+                            const dataDia = (record.data_dia || record.data_cabecalho) as string;
+                            if (dataDia) setDataCabecalhoSelecionada(dataDia);
+                            const filial = recordFilialNome ? filiais.find((f) => (f.nome || "").trim() === recordFilialNome) : null;
+                            if (filial?.codigo) setFilialSelecionada(filial.codigo);
+                            setCurrentView("cadastro");
+                            loadFromDatabase(dataDia, recordFilialNome || undefined);
+                          };
+                          // Hora: hora_cabecalho ou, se vazia, hora de cadastro (created_at)
+                          const horaFormatada = record.hora_cabecalho || (record.created_at ? formatHoraFinal(record.created_at) : "-");
                           const percentual = record.percentual_meta
                             ? `${parseFloat(record.percentual_meta).toFixed(0)}%`
                             : "-";
@@ -2973,6 +2967,19 @@ export default function Producao() {
                               <TableCell className="text-xs sm:text-sm font-mono">{restante}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{horaFinalStr}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right font-semibold">{percentual}</TableCell>
+                              <TableCell className="text-xs sm:text-sm text-right">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 gap-1"
+                                  onClick={(e) => { e.stopPropagation(); openDocument(); }}
+                                  title="Abrir documento para editar"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  <span className="hidden sm:inline">Abrir</span>
+                                </Button>
+                              </TableCell>
                             </TableRow>
                           );
                         })}

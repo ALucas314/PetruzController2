@@ -1,8 +1,13 @@
 /**
- * Configuração da API
+ * Configuração da API (legado — login e dados usam Supabase direto).
+ * NÃO defina VITE_API_URL como URL do próprio site (Netlify ou localhost), senão dá 404.
  */
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const envApiUrl = import.meta.env.VITE_API_URL?.trim() || "";
+const defaultApi = "http://localhost:3001";
+let API_BASE_URL = envApiUrl !== "" ? envApiUrl : defaultApi;
+if (typeof window !== "undefined" && window.location?.origin && API_BASE_URL.startsWith(window.location.origin)) {
+  API_BASE_URL = defaultApi;
+}
 
 /** URL pública do frontend para links (ex.: redefinir senha). Em produção usa a origem atual; localmente usa VITE_APP_URL ou localhost. */
 function getAppBaseUrl(): string {

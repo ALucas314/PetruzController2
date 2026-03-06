@@ -1,0 +1,10 @@
+{
+  "name": "ERP Controller Petruz",
+  "short_name": "ERP Petruz",
+  "description": "Controle de produção, análise e gestão de operações",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "orientation": "any"
+}

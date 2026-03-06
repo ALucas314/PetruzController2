@@ -36,13 +36,14 @@ import {
   Plus,
   RefreshCw,
 } from "lucide-react";
-import { apiConfig, getAuthHeaders } from "@/services/api/config";
+import * as XLSX from "xlsx";
+import { getExistingOCTIPairs, insertOCTIItems, type NewItemForInsert } from "@/services/supabaseData";
 
 interface ExcelData {
   fileName: string;
   sheetName: string;
   availableSheets: string[];
-  data: any[];
+  data: Record<string, unknown>[];
   count: number;
   headers: string[];
 }
@@ -98,42 +99,66 @@ export default function ImportarExcel() {
 
     // Carregar abas disponíveis (se for Excel)
     if (selectedFile.name.match(/\.(xlsx|xls)$/i)) {
-      await loadSheets(selectedFile);
+      loadSheets(selectedFile);
     } else {
-      // Para CSV, não precisa de aba
       setAvailableSheets([]);
     }
   };
 
-  const loadSheets = async (fileToLoad: File) => {
+  const loadSheets = (fileToLoad: File) => {
     setLoading(true);
     setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("file", fileToLoad);
-
-      const response = await fetch(`${apiConfig.baseURL}/api/excel/sheets`, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || "Erro ao ler arquivo");
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const ab = e.target?.result as ArrayBuffer;
+        if (!ab) throw new Error("Arquivo não lido");
+        const wb = XLSX.read(ab, { type: "array" });
+        const names = wb.SheetNames || [];
+        setAvailableSheets(names);
+        if (names.length > 0) setSelectedSheet(names[0]);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Erro ao carregar abas do arquivo");
+      } finally {
+        setLoading(false);
       }
-
-      setAvailableSheets(result.sheets.map((s: any) => s.name));
-      if (result.sheets.length > 0) {
-        setSelectedSheet(result.sheets[0].name);
-      }
-    } catch (err: any) {
-      setError(err.message || "Erro ao carregar abas do arquivo");
-    } finally {
+    };
+    reader.onerror = () => {
+      setError("Erro ao ler arquivo");
       setLoading(false);
-    }
+    };
+    reader.readAsArrayBuffer(fileToLoad);
+  };
+
+  const parseFileToExcelData = (): Promise<ExcelData> => {
+    if (!file) return Promise.reject(new Error("Nenhum arquivo"));
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const ab = e.target?.result as ArrayBuffer;
+          if (!ab) return reject(new Error("Arquivo não lido"));
+          const wb = XLSX.read(ab, { type: "array", raw: false });
+          const sheetName = file.name.match(/\.(xlsx|xls)$/i) ? (selectedSheet || wb.SheetNames[0]) : wb.SheetNames[0];
+          const ws = wb.Sheets[sheetName];
+          if (!ws) return reject(new Error(`Aba '${sheetName}' não encontrada`));
+          const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { raw: false, defval: "" });
+          const headers = data.length > 0 ? Object.keys(data[0]) : [];
+          resolve({
+            fileName: file.name,
+            sheetName: sheetName || "",
+            availableSheets: wb.SheetNames || [],
+            data,
+            count: data.length,
+            headers,
+          });
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error("Erro ao ler arquivo"));
+      reader.readAsArrayBuffer(file);
+    });
   };
 
   const handleUpload = async () => {
@@ -148,74 +173,67 @@ export default function ImportarExcel() {
     setInsertResult(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      if (selectedSheet) {
-        formData.append("sheetName", selectedSheet);
-      }
-
-      const response = await fetch(`${apiConfig.baseURL}/api/excel/upload`, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || "Erro ao processar arquivo");
-      }
-
+      const result = await parseFileToExcelData();
       setExcelData(result);
-      
-      // Automaticamente comparar com o banco após carregar
       await compareWithDatabase(result.data);
-    } catch (err: any) {
-      setError(err.message || "Erro ao processar arquivo Excel");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erro ao processar arquivo Excel");
     } finally {
       setLoading(false);
     }
   };
 
-  const compareWithDatabase = async (items: any[]) => {
+  const normalizeRowToItem = (row: Record<string, unknown>): NewItem | null => {
+    const codigo =
+      (row.codigo as string)?.toString().trim() ||
+      (row["Nº do item"] as string)?.toString().trim() ||
+      (row.codigo_item as string)?.toString().trim();
+    const nome =
+      (row.nome as string)?.toString().trim() ||
+      (row["Descrição do item"] as string)?.toString().trim() ||
+      (row.descricao as string)?.toString().trim() ||
+      (row.nome_item as string)?.toString().trim() ||
+      "";
+    if (!codigo) return null;
+    return {
+      codigo_item: codigo,
+      nome_item: nome,
+      unidade_medida:
+        (row.unidade as string)?.trim() ||
+        (row["Unidade de medida de compra"] as string)?.trim() ||
+        (row.unidade_medida as string)?.trim() ||
+        "",
+      grupo_itens:
+        (row.grupo as string)?.trim() ||
+        (row["Grupo de itens"] as string)?.trim() ||
+        (row.grupo_itens as string)?.trim() ||
+        "",
+    };
+  };
+
+  const compareWithDatabase = async (items: Record<string, unknown>[]) => {
     setComparing(true);
     setError(null);
-
     try {
-      // Timeout aumentado para grandes volumes de dados (5 minutos)
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
-
-      const response = await fetch(`${apiConfig.baseURL}/api/supabase/compare`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify({ items }),
-        signal: controller.signal,
+      const existing = await getExistingOCTIPairs();
+      const existingSet = new Set(
+        existing.map((i) => `${(i.Code ?? "").toString().trim().toLowerCase()}|${(i.Name ?? "").toString().trim().toLowerCase()}`)
+      );
+      const newItemsData: NewItem[] = [];
+      for (const row of items) {
+        const item = normalizeRowToItem(row);
+        if (!item) continue;
+        const key = `${item.codigo_item.toLowerCase()}|${item.nome_item.toLowerCase()}`;
+        if (!existingSet.has(key)) newItemsData.push(item);
+      }
+      setComparisonResult({
+        totalItems: items.length,
+        existingItems: existingSet.size,
+        newItems: newItemsData.length,
+        newItemsData,
       });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Erro ${response.status}: ${errorText || response.statusText}`);
-      }
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || "Erro ao comparar com banco de dados");
-      }
-
-      setComparisonResult(result);
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        setError("Tempo limite excedido. O arquivo é muito grande. Tente dividir em arquivos menores ou aguarde mais tempo.");
-      } else {
-        setError(err.message || "Erro ao comparar com banco de dados");
-      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erro ao comparar com banco de dados");
       console.error("Erro na comparação:", err);
     } finally {
       setComparing(false);
@@ -232,31 +250,17 @@ export default function ImportarExcel() {
     setError(null);
 
     try {
-      const response = await fetch(`${apiConfig.baseURL}/api/supabase/insert`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify({
-          items: comparisonResult.newItemsData,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || "Erro ao inserir itens no banco");
-      }
-
-      setInsertResult(result);
-      
-      // Atualizar comparação após inserção
-      if (excelData) {
-        await compareWithDatabase(excelData.data);
-      }
-    } catch (err: any) {
-      setError(err.message || "Erro ao inserir itens no banco");
+      const payload: NewItemForInsert[] = comparisonResult.newItemsData.map((i) => ({
+        codigo_item: i.codigo_item,
+        nome_item: i.nome_item,
+        unidade_medida: i.unidade_medida,
+        grupo_itens: i.grupo_itens,
+      }));
+      const result = await insertOCTIItems(payload);
+      setInsertResult({ inserted: result.inserted, total: result.total });
+      if (excelData) await compareWithDatabase(excelData.data);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erro ao inserir itens no banco");
     } finally {
       setInserting(false);
     }

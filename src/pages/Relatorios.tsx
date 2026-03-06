@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { FileText, DollarSign, ShoppingCart, Minus, Target, Loader2, Download } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { FileText, DollarSign, ShoppingCart, Minus, Target, Loader2, Download, Pencil } from "lucide-react";
 import { AppLayout } from "@/components/AppLayout";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { apiConfig, getAuthHeaders } from "@/services/api/config";
+import { getFiliais, getLines, getDashboardStats, getProducaoHistory } from "@/services/supabaseData";
 
 interface DashboardStats {
   totalPlanejado: string;
@@ -41,6 +42,7 @@ interface HistoryRecord {
   id?: number;
   data_dia: string;
   hora_cabecalho?: string;
+  created_at?: string | null;
   filial_nome?: string;
   linha?: string;
   op?: string;
@@ -131,7 +133,16 @@ function formatHoraCabecalho(h: string | null | undefined): string {
   return s;
 }
 
+/** Hora do registro: usa hora_cabecalho ou, se vazia, extrai do created_at (hora de cadastro). */
+function formatHoraRegistro(record: { hora_cabecalho?: string | null; created_at?: string | null }): string {
+  const h = formatHoraCabecalho(record.hora_cabecalho);
+  if (h !== "—") return h;
+  if (record.created_at) return formatTime(record.created_at);
+  return "—";
+}
+
 export default function Relatorios() {
+  const navigate = useNavigate();
   const [period, setPeriod] = useState("30d");
   const [filial, setFilial] = useState<string>("");
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
@@ -164,38 +175,18 @@ export default function Relatorios() {
   }, [linhas]);
 
   useEffect(() => {
-    const loadFiliais = async () => {
-      try {
-        const res = await fetch(`${apiConfig.baseURL}/api/supabase/filiais`, {
-          headers: getAuthHeaders(),
-        });
-        const result = await res.json();
-        if (result.success && result.data?.length) {
-          setFiliais(result.data);
-          setFilial((prev) => prev || result.data[0].nome);
-        }
-      } catch (e) {
-        console.error("Erro ao carregar filiais:", e);
-      }
-    };
-    loadFiliais();
+    getFiliais()
+      .then((data) => {
+        setFiliais(data.map((f) => ({ id: f.id as number, codigo: String(f.codigo ?? ""), nome: String(f.nome ?? "") })));
+        if (data.length > 0) setFilial((prev) => prev || String(data[0].nome));
+      })
+      .catch((e) => console.error("Erro ao carregar filiais:", e));
   }, []);
 
   useEffect(() => {
-    const loadLinhas = async () => {
-      try {
-        const res = await fetch(`${apiConfig.baseURL}/api/supabase/lines`, {
-          headers: getAuthHeaders(),
-        });
-        const result = await res.json();
-        if (result.success && result.data) {
-          setLinhas(Array.isArray(result.data) ? result.data : []);
-        }
-      } catch (e) {
-        console.error("Erro ao carregar linhas:", e);
-      }
-    };
-    loadLinhas();
+    getLines()
+      .then((data) => setLinhas(data.map((l) => ({ id: l.id as number, code: String(l.code ?? ""), name: String(l.name ?? "") }))))
+      .catch((e) => console.error("Erro ao carregar linhas:", e));
   }, []);
 
   const loadData = useCallback(async () => {
@@ -203,13 +194,8 @@ export default function Relatorios() {
     try {
       const { dataInicio, dataFim } = getDateRange(period);
       const filialNome = filial || undefined;
-      const statsRes = await fetch(
-        `${apiConfig.baseURL}/api/supabase/dashboard/stats?dataInicio=${dataInicio}&dataFim=${dataFim}${filialNome ? `&filialNome=${encodeURIComponent(filialNome)}` : ""}`,
-        { headers: getAuthHeaders() }
-      );
-      const statsJson = await statsRes.json();
-      if (statsJson.success && statsJson.data) setStats(statsJson.data);
-      else setStats(null);
+      const statsResult = await getDashboardStats({ dataInicio, dataFim, filialNome });
+      setStats(statsResult);
     } catch (e) {
       console.error("Erro ao carregar estatísticas:", e);
       setStats(null);
@@ -226,17 +212,9 @@ export default function Relatorios() {
     setHistoryLoading(true);
     try {
       const filialNome = filial || undefined;
-      const linha = linhaFilter === "all" || !linhaFilter ? "" : linhaFilter;
-      const url = new URL(`${apiConfig.baseURL}/api/supabase/producao/history`);
-      url.searchParams.set("limit", "500");
-      url.searchParams.set("dataInicio", dateDe);
-      url.searchParams.set("dataFim", dateAte);
-      if (filialNome) url.searchParams.set("filialNome", filialNome);
-      if (linha) url.searchParams.set("linha", linha);
-      const res = await fetch(url.toString(), { headers: getAuthHeaders() });
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) setHistory(json.data);
-      else setHistory([]);
+      const linha = linhaFilter === "all" || !linhaFilter ? undefined : linhaFilter;
+      const data = await getProducaoHistory({ limit: 500, dataInicio: dateDe, dataFim: dateAte, filialNome, linha });
+      setHistory(data as HistoryRecord[]);
     } catch (e) {
       console.error("Erro ao carregar histórico:", e);
       setHistory([]);
@@ -267,7 +245,7 @@ export default function Relatorios() {
     ];
     const rows = history.map((r) => [
       formatDate(r.data_dia),
-      formatHoraCabecalho(r.hora_cabecalho),
+      formatHoraRegistro(r),
       r.op ?? "-",
       r.codigo_item ?? "",
       (r.descricao_item ?? "").replace(/"/g, '""'),
@@ -466,6 +444,7 @@ export default function Relatorios() {
                     <TableHead className="text-xs sm:text-sm whitespace-nowrap">Restante</TableHead>
                     <TableHead className="text-xs sm:text-sm whitespace-nowrap">Hora final</TableHead>
                     <TableHead className="text-xs sm:text-sm text-right whitespace-nowrap">% Meta</TableHead>
+                    <TableHead className="text-xs sm:text-sm text-right whitespace-nowrap w-[90px]">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -475,7 +454,7 @@ export default function Relatorios() {
                         {formatDate(r.data_dia)}
                       </TableCell>
                       <TableCell className="text-xs sm:text-sm whitespace-nowrap">
-                        {formatHoraCabecalho(r.hora_cabecalho)}
+                        {formatHoraRegistro(r)}
                       </TableCell>
                       <TableCell className="text-xs sm:text-sm whitespace-nowrap font-mono">
                         {r.op ?? "—"}
@@ -509,6 +488,26 @@ export default function Relatorios() {
                       </TableCell>
                       <TableCell className="text-xs sm:text-sm text-right tabular-nums">
                         {r.percentual_meta != null ? `${Number(r.percentual_meta)}%` : "—"}
+                      </TableCell>
+                      <TableCell className="text-xs sm:text-sm text-right">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1"
+                          onClick={() =>
+                            navigate("/analise-producao", {
+                              state: {
+                                loadData: r.data_dia,
+                                loadFilialNome: r.filial_nome ?? "",
+                              },
+                            })
+                          }
+                          title="Abrir documento para editar"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">Abrir</span>
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}

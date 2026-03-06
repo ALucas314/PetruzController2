@@ -1,18 +1,17 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { BarChart3, ArrowLeft, Mail, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiConfig, APP_BASE_URL } from "@/services/api/config";
+import { APP_BASE_URL } from "@/services/api/config";
+import { supabase } from "@/lib/supabase";
 
 const ForgotPassword = () => {
-  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [resetLink, setResetLink] = useState("");
-  const [message, setMessage] = useState("");
+  const [sent, setSent] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,26 +19,16 @@ const ForgotPassword = () => {
     if (!emailTrim) return;
     setLoading(true);
     setError("");
-    setResetLink("");
-    setMessage("");
     try {
-      const res = await fetch(`${apiConfig.baseURL}/api/supabase/auth/forgot-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailTrim }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Erro ao solicitar link. Tente novamente.");
+      const redirectTo = `${APP_BASE_URL || window.location.origin}/redefinir-senha`;
+      const { error: err } = await supabase.auth.resetPasswordForEmail(emailTrim, { redirectTo });
+      if (err) {
+        setError(err.message);
         return;
       }
-      setMessage(json.message || "Se este e-mail estiver cadastrado, use o link abaixo.");
-      if (json.token) {
-        // Usa APP_BASE_URL: em produção (Netlify) use VITE_APP_URL; local usa window.location.origin
-        setResetLink(`${APP_BASE_URL}/redefinir-senha?token=${json.token}`);
-      }
+      setSent(true);
     } catch (e) {
-      setError("Falha de conexão. Verifique se o servidor está rodando.");
+      setError("Falha de conexão. Verifique sua internet.");
     } finally {
       setLoading(false);
     }
@@ -60,10 +49,10 @@ const ForgotPassword = () => {
         <div className="rounded-2xl border border-border/60 bg-card shadow-xl p-6 sm:p-8">
           <h1 className="text-2xl font-bold text-foreground">Esqueceu a senha?</h1>
           <p className="mt-2 text-muted-foreground text-sm">
-            Informe seu e-mail. Se estiver cadastrado, você verá um link para redefinir sua senha.
+            Informe seu e-mail. Se estiver cadastrado, você receberá um link para redefinir sua senha.
           </p>
 
-          {!resetLink ? (
+          {!sent ? (
             <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
               {error && (
                 <div className="rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-3 flex items-center gap-2 text-sm text-destructive">
@@ -93,7 +82,7 @@ const ForgotPassword = () => {
                     Enviando...
                   </span>
                 ) : (
-                  "Gerar link de redefinição"
+                  "Enviar link de redefinição"
                 )}
               </Button>
             </form>
@@ -101,17 +90,10 @@ const ForgotPassword = () => {
             <div className="mt-6 space-y-4">
               <div className="rounded-xl bg-success/10 border border-success/20 px-4 py-3 flex items-start gap-2 text-sm text-green-800 dark:text-green-200">
                 <CheckCircle2 className="h-5 w-5 shrink-0 mt-0.5" />
-                <span>{message}</span>
+                <span>Se este e-mail estiver cadastrado, você receberá um link para redefinir sua senha. Verifique sua caixa de entrada e o spam.</span>
               </div>
-              <p className="text-sm font-medium text-foreground">Clique no link abaixo (válido por 1 hora):</p>
-              <a
-                href={resetLink}
-                className="block break-all rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
-              >
-                {resetLink}
-              </a>
-              <Button variant="outline" size="sm" className="w-full rounded-xl" onClick={() => navigate("/login")}>
-                Ir para o login
+              <Button variant="outline" size="sm" className="w-full rounded-xl" asChild>
+                <Link to="/login">Ir para o login</Link>
               </Button>
             </div>
           )}

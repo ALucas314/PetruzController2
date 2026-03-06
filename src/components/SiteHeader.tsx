@@ -176,16 +176,16 @@ export function SiteHeader() {
                     {user.nome || "Perfil"}
                   </span>
                   <span className="text-xs text-muted-foreground truncate">{user.email}</span>
-                  <span className="text-xs text-muted-foreground font-mono mt-1">
-                    Código: {user.id}
+                  <span className="text-xs text-muted-foreground font-mono mt-1 truncate max-w-[140px]" title={user.id}>
+                    ID: {String(user.id).slice(0, 8)}…
                   </span>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive cursor-pointer"
-                onClick={() => {
-                  logout();
+                onClick={async () => {
+                  await logout();
                   navigate("/login");
                 }}
               >

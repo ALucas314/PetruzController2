@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Factory, Plus, Edit, Trash2, Loader2, CheckCircle2, AlertCircle, Save } from "lucide-react";
-import { apiConfig, getAuthHeaders } from "@/services/api/config";
+import { getLines, createLine, updateLine, deleteLine } from "@/services/supabaseData";
 import { useToast } from "@/hooks/use-toast";
 
 interface Linha {
@@ -36,7 +36,7 @@ export default function CadastroLinhas() {
     const [saving, setSaving] = useState(false);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [editingLinha, setEditingLinha] = useState<Linha | null>(null);
-    const [formData, setFormData] = useState({ name: "" });
+    const [formData, setFormData] = useState({ code: "", name: "" });
     const { toast } = useToast();
 
     // Carregar linhas
@@ -47,25 +47,23 @@ export default function CadastroLinhas() {
     const loadLinhas = async () => {
         try {
             setLoading(true);
-            const response = await fetch(`${apiConfig.baseURL}/api/supabase/lines`, { headers: getAuthHeaders() });
-            const result = await response.json();
-            if (result.success) {
-                setLinhas(result.data || []);
-            } else {
-                toast({
-                    title: "Erro",
-                    description: result.error || "Erro ao carregar linhas",
-                    variant: "destructive",
-                });
-            }
+            const data = await getLines();
+            const list = data.map((l) => ({ id: l.id as number, line_id: l.line_id as number, code: String(l.code ?? ""), name: String(l.name ?? "") }));
+            // Ordenar por código: numérico do menor ao maior (1, 2, 3, ..., 10, 11), depois alfabético
+            list.sort((a, b) => {
+                const na = Number(a.code);
+                const nb = Number(b.code);
+                if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+                if (!Number.isNaN(na)) return -1;
+                if (!Number.isNaN(nb)) return 1;
+                return a.code.localeCompare(b.code, undefined, { numeric: true });
+            });
+            setLinhas(list);
         } catch (error: any) {
             console.error("Erro ao carregar linhas:", error);
-            const errorMessage = error.message?.includes("Failed to fetch") || error.message?.includes("ERR_CONNECTION_REFUSED")
-                ? "Servidor backend não está rodando. Execute 'npm run dev' na pasta 'server'"
-                : "Erro ao carregar linhas do servidor";
             toast({
-                title: "Erro de Conexão",
-                description: errorMessage,
+                title: "Erro",
+                description: error?.message || "Erro ao carregar linhas",
                 variant: "destructive",
             });
         } finally {
@@ -76,10 +74,10 @@ export default function CadastroLinhas() {
     const handleOpenDialog = (linha?: Linha) => {
         if (linha) {
             setEditingLinha(linha);
-            setFormData({ name: linha.name });
+            setFormData({ code: linha.code, name: linha.name });
         } else {
             setEditingLinha(null);
-            setFormData({ name: "" });
+            setFormData({ code: "", name: "" });
         }
         setIsDialogOpen(true);
     };
@@ -87,31 +85,38 @@ export default function CadastroLinhas() {
     const handleCloseDialog = () => {
         setIsDialogOpen(false);
         setEditingLinha(null);
-        setFormData({ name: "" });
+        setFormData({ code: "", name: "" });
+    };
+
+    // Próximo código automático: maior código numérico + 1 (ex: 1,2,3,10 → 11)
+    const getNextCode = (list: Linha[]): string => {
+        const numeros = list.map((l) => Number(l.code)).filter((n) => !Number.isNaN(n) && n >= 0);
+        const max = numeros.length ? Math.max(...numeros) : 0;
+        return String(max + 1);
     };
 
     const handleSave = async () => {
-        if (!formData.name.trim()) {
+        const nameTrim = formData.name.trim();
+        if (!nameTrim) {
             toast({
                 title: "Validação",
-                description: "Preencha o nome da linha",
+                description: "Preencha a descrição da linha",
                 variant: "destructive",
             });
             return;
         }
 
-        // Verificar duplicata no frontend (opcional, mas melhora UX)
-        const nameLower = formData.name.trim().toLowerCase();
-        const isDuplicate = linhas.some(
+        // Nome duplicado
+        const nameLower = nameTrim.toLowerCase();
+        const isDuplicateName = linhas.some(
             (linha) =>
                 linha.name.toLowerCase() === nameLower &&
                 (!editingLinha || linha.id !== editingLinha.id)
         );
-
-        if (isDuplicate) {
+        if (isDuplicateName) {
             toast({
                 title: "Validação",
-                description: "Já existe uma linha com este nome",
+                description: "Já existe uma linha com esta descrição",
                 variant: "destructive",
             });
             return;
@@ -119,24 +124,14 @@ export default function CadastroLinhas() {
 
         try {
             setSaving(true);
-            const url = editingLinha
-                ? `${apiConfig.baseURL}/api/supabase/lines/${editingLinha.id}`
-                : `${apiConfig.baseURL}/api/supabase/lines`;
+            if (editingLinha) {
+                await updateLine(editingLinha.id, { Name: nameTrim });
+            } else {
+                const codeAuto = getNextCode(linhas);
+                await createLine({ Code: codeAuto, Name: nameTrim });
+            }
 
-            const method = editingLinha ? "PUT" : "POST";
-
-            const response = await fetch(url, {
-                method,
-                headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-                body: JSON.stringify({
-                    name: formData.name.trim(),
-                    ...(editingLinha && { code: editingLinha.code }), // Manter código na edição
-                }),
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
+            {
                 toast({
                     title: "Sucesso",
                     description: editingLinha
@@ -145,21 +140,12 @@ export default function CadastroLinhas() {
                 });
                 handleCloseDialog();
                 loadLinhas();
-            } else {
-                toast({
-                    title: "Erro",
-                    description: result.error || "Erro ao salvar linha",
-                    variant: "destructive",
-                });
             }
         } catch (error: any) {
             console.error("Erro ao salvar linha:", error);
-            const errorMessage = error.message?.includes("Failed to fetch") || error.message?.includes("ERR_CONNECTION_REFUSED")
-                ? "Servidor backend não está rodando. Execute 'npm run dev' na pasta 'server'"
-                : "Erro ao salvar linha no servidor";
             toast({
-                title: "Erro de Conexão",
-                description: errorMessage,
+                title: "Erro",
+                description: error?.message || "Erro ao salvar linha",
                 variant: "destructive",
             });
         } finally {
@@ -173,31 +159,15 @@ export default function CadastroLinhas() {
         }
 
         try {
-            const response = await fetch(`${apiConfig.baseURL}/api/supabase/lines/${id}`, {
-                method: "DELETE",
-                headers: getAuthHeaders(),
+            await deleteLine(id);
+            toast({
+                title: "Sucesso",
+                description: "Linha excluída com sucesso",
             });
-
-            const result = await response.json();
-
-            if (result.success) {
-                toast({
-                    title: "Sucesso",
-                    description: "Linha excluída com sucesso",
-                });
-                loadLinhas();
-            } else {
-                toast({
-                    title: "Erro",
-                    description: result.error || "Erro ao excluir linha",
-                    variant: "destructive",
-                });
-            }
+            loadLinhas();
         } catch (error: any) {
             console.error("Erro ao excluir linha:", error);
-            const errorMessage = error.message?.includes("Failed to fetch") || error.message?.includes("ERR_CONNECTION_REFUSED")
-                ? "Servidor backend não está rodando. Execute 'npm run dev' na pasta 'server'"
-                : "Erro ao excluir linha do servidor";
+            const errorMessage = error?.message || "Erro ao excluir linha";
             toast({
                 title: "Erro de Conexão",
                 description: errorMessage,
@@ -330,30 +300,36 @@ export default function CadastroLinhas() {
                     <div className="space-y-4 py-4">
                         {editingLinha && (
                             <div className="space-y-2">
-                                <Label htmlFor="code">Código da Linha</Label>
+                                <Label>Código</Label>
                                 <Input
-                                    id="code"
                                     value={editingLinha.code}
                                     disabled
+                                    readOnly
                                     className="bg-muted"
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    O código não pode ser alterado
+                                    O código é gerado automaticamente e não pode ser alterado.
                                 </p>
                             </div>
                         )}
 
+                        {!editingLinha && (
+                            <p className="text-xs text-muted-foreground">
+                                O código da linha será gerado automaticamente (próximo número disponível).
+                            </p>
+                        )}
+
                         <div className="space-y-2">
-                            <Label htmlFor="name">Descrição da Linha *</Label>
+                            <Label htmlFor="name">Descrição *</Label>
                             <Input
                                 id="name"
                                 value={formData.name}
                                 onChange={(e) =>
-                                    setFormData({ ...formData, name: e.target.value })
+                                    setFormData((prev) => ({ ...prev, name: e.target.value }))
                                 }
-                                placeholder="Ex: LINHA 01"
+                                placeholder="Ex: MIX - Tetra Pak + Tropical"
                                 disabled={saving}
-                                maxLength={100}
+                                maxLength={255}
                             />
                         </div>
                     </div>

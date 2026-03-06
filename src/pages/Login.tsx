@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { apiConfig } from "@/services/api/config";
+import { supabase, hasSupabaseConfig, setRememberMe } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 
 const Login = () => {
@@ -14,35 +14,49 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(() => {
+    try {
+      return localStorage.getItem("sb:remember") !== "0";
+    } catch {
+      return true;
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password) return;
+    if (!hasSupabaseConfig) {
+      setError(
+        "Supabase não configurado. Crie um arquivo .env na raiz do projeto com VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY (copie de .env.example)."
+      );
+      return;
+    }
     setLoading(true);
     setError("");
+    setRememberMe(remember);
     try {
-      const res = await fetch(`${apiConfig.baseURL}/api/supabase/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+      const { data, error: err } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
       });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Erro ao entrar. Tente novamente.");
+      if (err) {
+        const msg = err.message;
+        if (msg === "Invalid login credentials") setError("E-mail ou senha inválidos.");
+        else if (msg === "Email not confirmed") setError("E-mail ainda não confirmado. Verifique sua caixa de entrada (e spam) e clique no link enviado. Ou desative a confirmação em Supabase → Authentication → Providers → Email.");
+        else setError(msg);
         return;
       }
-      if (json.data?.id != null && json.data?.email) {
-        setUser(
-          { id: json.data.id, email: json.data.email, nome: json.data.nome ?? null },
-          json.token ?? null
-        );
+      if (data.user) {
+        const nome = (data.user.user_metadata?.nome as string) ?? (data.user.user_metadata?.name as string) ?? null;
+        setUser({ id: data.user.id, email: data.user.email ?? "", nome });
       }
       navigate("/dashboard");
     } catch (e) {
-      setError("Falha de conexão. Verifique se o servidor está rodando.");
+      setError(
+        "Falha de conexão. Verifique sua internet. Rodando local? Confira o .env com VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY."
+      );
     } finally {
       setLoading(false);
     }
