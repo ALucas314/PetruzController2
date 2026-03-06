@@ -1,0 +1,35 @@
+{
+    "name": "erp-controller-petruz-server",
+    "version": "1.0.0",
+    "type": "module",
+    "description": "Backend API para ERP Controller Petruz - Conexão com SAP Business One",
+    "main": "index.js",
+    "scripts": {
+        "dev": "node --watch index.js",
+        "start": "node index.js"
+    },
+    "keywords": [
+        "sap",
+        "b1",
+        "api",
+        "express"
+    ],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "@supabase/supabase-js": "^2.39.0",
+        "bcryptjs": "^2.4.3",
+        "cors": "^2.8.5",
+        "dotenv": "^16.3.1",
+        "express": "^4.18.2",
+        "jsonwebtoken": "^9.0.3",
+        "multer": "^1.4.5-lts.1",
+        "odbc": "^2.4.8",
+        "xlsx": "^0.18.5"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/node": "^22.16.5"
+    }
+}

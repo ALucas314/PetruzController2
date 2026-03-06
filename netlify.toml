@@ -1,0 +1,12 @@
+# Deploy do frontend (React/Vite) no Netlify
+# O backend (Node/Express) precisa estar em outro serviço (Render, Railway, etc.)
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA: todas as rotas (login, redefinir-senha, dashboard, etc.) caem no index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

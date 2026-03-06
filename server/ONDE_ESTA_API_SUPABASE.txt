@@ -1,0 +1,52 @@
+═══════════════════════════════════════════════════════════════
+  📍 ONDE ENCONTRAR A API DO SUPABASE
+═══════════════════════════════════════════════════════════════
+
+1️⃣  Acesse: https://supabase.com/dashboard
+
+2️⃣  Selecione o projeto: "ERP Controller Petruz"
+
+3️⃣  No menu lateral ESQUERDO, clique em:
+    ⚙️  Settings (Configurações)
+
+4️⃣  No submenu, clique em:
+    🔑  API
+
+5️⃣  Você verá:
+
+    ┌─────────────────────────────────────────────┐
+    │ Project URL                                  │
+    │ https://lijveprlmfmpejghmysn.supabase.co    │
+    │                                              │
+    │ API Keys                                     │
+    │                                              │
+    │ anon public                                  │
+    │ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...    │
+    │ [Reveal] [Copy]                              │
+    │                                              │
+    │ service_role                                 │
+    │ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...    │
+    │ [Reveal] [Copy]                              │
+    └─────────────────────────────────────────────┘
+
+6️⃣  Copie:
+    ✅ Project URL → SUPABASE_URL
+    ✅ anon public → SUPABASE_ANON_KEY
+    ✅ service_role → SUPABASE_SERVICE_ROLE_KEY
+
+7️⃣  Crie arquivo .env na pasta server/ com:
+
+    SUPABASE_URL=https://lijveprlmfmpejghmysn.supabase.co
+    SUPABASE_ANON_KEY=cole-aqui-a-chave-anon
+    SUPABASE_SERVICE_ROLE_KEY=cole-aqui-a-chave-service-role
+
+═══════════════════════════════════════════════════════════════
+  📂 CAMINHO NO DASHBOARD
+═══════════════════════════════════════════════════════════════
+
+Dashboard
+  └── ERP Controller Petruz
+      └── Settings ⬅️ CLIQUE AQUI
+          └── API ⬅️ CLIQUE AQUI
+
+═══════════════════════════════════════════════════════════════
