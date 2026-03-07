@@ -134,6 +134,10 @@ export default function Producao() {
   const { setDocumentNav } = useDocumentNav();
   const producaoCardRef = useRef<HTMLDivElement>(null);
   const historicoCardRef = useRef<HTMLDivElement>(null);
+  const chartPlanejadoRealizadoRef = useRef<HTMLDivElement>(null);
+  const chartDiferencaItemRef = useRef<HTMLDivElement>(null);
+  const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
+  const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
   const openedFromStateRef = useRef(false);
   const dataInputRef = useRef<HTMLInputElement>(null);
   const isNewDocumentRef = useRef(false); // true após "Novo documento" para não recarregar do DB e manter setas habilitadas
@@ -2561,17 +2565,18 @@ export default function Producao() {
                 {/* Seção: Análise Gráfica */}
                 <div className="space-y-6">
                   {/* Gráfico 1: Planejado vs Realizado */}
-                  <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                    <div className="mb-5 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+                  <div ref={chartPlanejadoRealizadoRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
                           <Target className="h-5 w-5 text-primary" />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <h3 className="text-base sm:text-lg font-bold text-card-foreground">Planejado vs Realizado</h3>
                           <p className="text-xs sm:text-sm text-muted-foreground/70">Comparação por item de produção</p>
                         </div>
                       </div>
+                      <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="grafico-planejado-realizado" expandScrollable={false} className="shrink-0" />
                     </div>
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart
@@ -2626,17 +2631,18 @@ export default function Producao() {
                   {/* Gráficos em Grid */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Gráfico 2: Diferença por Item - barras horizontais: nome à esquerda, valor à direita */}
-                    <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                      <div className="mb-5 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10 border border-warning/20">
+                    <div ref={chartDiferencaItemRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning/10 border border-warning/20">
                             <TrendingUp className="h-5 w-5 text-warning" />
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <h3 className="text-base sm:text-lg font-bold text-card-foreground">Diferença por Item</h3>
                             <p className="text-xs sm:text-sm text-muted-foreground">Variação entre planejado e realizado</p>
                           </div>
                         </div>
+                        <ExportToPng targetRef={chartDiferencaItemRef} filenamePrefix="grafico-diferenca-item" expandScrollable={false} className="shrink-0" />
                       </div>
                       <ResponsiveContainer width="100%" height={Math.max(220, items.length * 40)}>
                         <BarChart
@@ -2670,9 +2676,9 @@ export default function Producao() {
                     </div>
 
                     {/* Gráfico 3: Status de Produção - reflete o % do quadro Percentual Meta */}
-                    <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                      <div className="mb-4 sm:mb-5 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                    <div ref={chartStatusProducaoRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                      <div className="mb-4 sm:mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3 min-w-0">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 border border-success/20">
                             <Factory className="h-5 w-5 text-success" />
                           </div>
@@ -2681,6 +2687,7 @@ export default function Producao() {
                             <p className="text-xs sm:text-sm text-muted-foreground">Mesmo percentual do quadro “Percentual Meta” (total realizado ÷ total planejado)</p>
                           </div>
                         </div>
+                        <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="grafico-status-producao" expandScrollable={false} className="shrink-0" />
                       </div>
                       <ResponsiveContainer width="100%" height={250}>
                         <PieChart>
@@ -2745,17 +2752,18 @@ export default function Producao() {
                     })).filter(d => d.valor > 0 || d.meta > 0);
                     if (productionDataLinha.length === 0) return null;
                     return (
-                      <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                        <div className="mb-5 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+                      <div ref={chartProducaoLinhaRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
                               <Factory className="h-5 w-5 text-primary" />
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <h3 className="text-base sm:text-lg font-bold text-card-foreground">Produção por Linha</h3>
                               <p className="text-xs sm:text-sm text-muted-foreground">Valor realizado vs meta por linha</p>
                             </div>
                           </div>
+                          <ExportToPng targetRef={chartProducaoLinhaRef} filenamePrefix="grafico-producao-linha" expandScrollable={false} className="shrink-0" />
                         </div>
                         <div className="overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:h-2" style={{ minHeight: 320 }}>
                           <div className="min-w-[280px]" style={{ minWidth: Math.max(280, productionDataLinha.length * 72) }}>

@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { DollarSign, ShoppingCart, Factory, Target, Minus, Loader2 } from "lucide-react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
 import { AppLayout } from "@/components/AppLayout";
+import { ExportToPng } from "@/components/ExportToPng";
 import { getFiliais, getDashboardStats, getProductionChart, getProductionLines } from "@/services/supabaseData";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -27,6 +28,9 @@ const Index = () => {
   const [loading, setLoading] = useState(true);
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [productionData, setProductionData] = useState<any[]>([]);
+  const chartPlanejadoRealizadoRef = useRef<HTMLDivElement>(null);
+  const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
+  const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
 
   // Função para calcular datas: usa intervalo (dataInicio/dataFim) se ambos preenchidos; senão últimos 30 dias
   const getDateRange = () => {
@@ -189,7 +193,7 @@ const Index = () => {
           {/* Seção: Análise Gráfica */}
           <div className="space-y-6">
             {/* Gráfico único: Planejado vs Realizado vs Diferença por período */}
-            <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+            <div ref={chartPlanejadoRealizadoRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
               <div className="mb-4 sm:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
@@ -200,6 +204,7 @@ const Index = () => {
                     <p className="text-xs sm:text-sm text-muted-foreground/70">Comparação por período — use o intervalo de datas acima para filtrar</p>
                   </div>
                 </div>
+                <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="dashboard-planejado-realizado-diferenca" expandScrollable={false} className="shrink-0" />
               </div>
               <ResponsiveContainer width="100%" height={320}>
                 <BarChart
@@ -255,9 +260,9 @@ const Index = () => {
             </div>
 
             {/* Gráfico: Status de Produção — mesmo percentual do quadro Percentual Meta */}
-            <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                <div className="mb-4 sm:mb-5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+            <div ref={chartStatusProducaoRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                <div className="mb-4 sm:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 border border-success/20">
                       <Factory className="h-5 w-5 text-success" />
                     </div>
@@ -266,6 +271,7 @@ const Index = () => {
                       <p className="text-xs sm:text-sm text-muted-foreground">Mesmo percentual do quadro “Percentual Meta” (total realizado ÷ total planejado)</p>
                     </div>
                   </div>
+                  <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="dashboard-status-producao" expandScrollable={false} className="shrink-0" />
                 </div>
                 <ResponsiveContainer width="100%" height={250}>
                   <PieChart>
@@ -298,10 +304,10 @@ const Index = () => {
 
             {/* Gráfico: Produção por Linha */}
             {productionData.length > 0 && (
-              <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                <div className="mb-5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+              <div ref={chartProducaoLinhaRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                <div className="mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
                       <Factory className="h-5 w-5 text-primary" />
                     </div>
                     <div>
@@ -309,6 +315,7 @@ const Index = () => {
                       <p className="text-xs sm:text-sm text-muted-foreground">Valor realizado vs meta por linha</p>
                     </div>
                   </div>
+                  <ExportToPng targetRef={chartProducaoLinhaRef} filenamePrefix="dashboard-producao-linha" expandScrollable={false} className="shrink-0" />
                 </div>
                 {/* No mobile: scroll horizontal para os nomes das linhas não ficarem comprimidos */}
                 <div className="overflow-x-auto -mx-1 px-1 sm:overflow-visible sm:mx-0 sm:px-0" style={{ minHeight: 320 }}>
