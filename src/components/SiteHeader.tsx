@@ -183,7 +183,7 @@ export function SiteHeader() {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                className="text-destructive focus:text-destructive cursor-pointer"
+                className="text-destructive focus:text-destructive focus:bg-destructive/10 data-[highlighted]:bg-destructive/10 cursor-pointer"
                 onClick={async () => {
                   await logout();
                   navigate("/login");

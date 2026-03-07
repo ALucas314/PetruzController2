@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
+import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -938,15 +938,20 @@ export default function Producao() {
     } catch (error: any) {
       console.error("Erro ao salvar produção:", error);
       const msg = error?.message || "Erro ao salvar dados no banco";
+      const hintReprocessos = /reprocessos/i.test(msg)
+        ? " Execute no Supabase o script OCPD_ADD_COLUMN_REPROCESSOS_JSONB.sql para salvar vários reprocessos."
+        : "";
       setSaveStatus({
         success: false,
-        message: msg,
+        message: msg + hintReprocessos,
       });
       toast({
         title: "Falha ao salvar",
         description: msg.includes("RLS") || msg.includes("Nenhum registro foi gravado")
           ? `${msg} Em Relatórios ou no Histórico não aparecerá nada até corrigir.`
-          : msg,
+          : msg.includes("reprocessos")
+            ? `Coluna "reprocessos" não existe no banco. Execute no Supabase o script OCPD_ADD_COLUMN_REPROCESSOS_JSONB.sql e tente salvar de novo.`
+            : msg + hintReprocessos,
         variant: "destructive",
       });
     } finally {
@@ -1614,7 +1619,7 @@ export default function Producao() {
     // Tela de menu inicial
     if (currentView === "menu") {
       return (
-        <div className="space-y-6">
+        <div className="space-y-6 pt-6 sm:pt-8">
           {/* Header compacto */}
           <div className="text-center mb-6 space-y-2">
             <div className="inline-flex items-center justify-center mb-2">
@@ -1737,14 +1742,16 @@ export default function Producao() {
     // Conteúdo do cadastro
     if (currentView === "cadastro") {
       return (
-        <div className="space-y-6">
-          {/* Botão de voltar - full width no mobile para área de toque */}
+        <div className="space-y-6 min-w-0">
+          {/* Botão de voltar - só seta, área de toque adequada no mobile */}
           <Button
             variant="ghost"
+            size="icon"
             onClick={() => setCurrentView("menu")}
-            className="mb-4 min-h-[44px] w-full sm:w-auto justify-center sm:justify-start"
+            className="mt-6 mb-4 size-11 min-h-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md transition-all"
+            aria-label="Voltar ao menu"
           >
-            ← Voltar ao Menu
+            <ArrowLeft className="size-5 text-foreground" strokeWidth={2.5} />
           </Button>
 
           {/* Card: Acompanhamento diário da produção */}
@@ -2391,7 +2398,7 @@ export default function Producao() {
                       </div>
                       <div className="flex items-center justify-start lg:justify-end">
                         <div className="w-20 sm:w-24 h-8 sm:h-9 flex items-center justify-center rounded-md bg-green-700 text-white font-bold text-xs sm:text-sm">
-                          {percentualMeta ? `${parseFloat(percentualMeta.replace(",", ".") || "0").toFixed(0)}% ` : "0%"}
+                          {percentualMeta ? `${parseFloat(percentualMeta.replace(",", ".") || "0").toFixed(2).replace(".", ",")}%` : "0,00%"}
                         </div>
                       </div>
                     </div>
@@ -2524,7 +2531,9 @@ export default function Producao() {
                             .filter((r) => r.tipo === "Cortado")
                             .reduce((sum, r) => {
                               const qtd = parseFloat(r.quantidade.replace(",", ".")) || 0;
-                              return sum + qtd;
+                              const codigoNum = parseFloat(String(r.codigo || "").trim().replace(",", "."));
+                              const qtdToAdd = (r.codigo && !Number.isNaN(codigoNum) && Math.abs(qtd - codigoNum) < 0.01) ? 0 : qtd;
+                              return sum + qtdToAdd;
                             }, 0)
                             .toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
@@ -2536,7 +2545,9 @@ export default function Producao() {
                             .filter((r) => r.tipo === "Usado")
                             .reduce((sum, r) => {
                               const qtd = parseFloat(r.quantidade.replace(",", ".")) || 0;
-                              return sum + qtd;
+                              const codigoNum = parseFloat(String(r.codigo || "").trim().replace(",", "."));
+                              const qtdToAdd = (r.codigo && !Number.isNaN(codigoNum) && Math.abs(qtd - codigoNum) < 0.01) ? 0 : qtd;
+                              return sum + qtdToAdd;
                             }, 0)
                             .toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
@@ -2657,13 +2668,13 @@ export default function Producao() {
                     </div>
 
                     {/* Gráfico 3: Status de Produção - reflete o % do quadro Percentual Meta */}
-                    <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                      <div className="mb-5 flex items-center justify-between">
+                    <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                      <div className="mb-4 sm:mb-5 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 border border-success/20">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 border border-success/20">
                             <Factory className="h-5 w-5 text-success" />
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <h3 className="text-base sm:text-lg font-bold text-card-foreground">Status de Produção</h3>
                             <p className="text-xs sm:text-sm text-muted-foreground">Mesmo percentual do quadro “Percentual Meta” (total realizado ÷ total planejado)</p>
                           </div>
@@ -2671,54 +2682,46 @@ export default function Producao() {
                       </div>
                       <ResponsiveContainer width="100%" height={250}>
                         <PieChart>
-                          <Pie
-                            data={(() => {
-                              const { totalPlanejada, totalRealizada } = calcularTotaisProducao();
-                              const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
-                              if (totalPlanejada === 0) {
-                                return [{ name: "Sem meta definida", value: 100, color: "#6b7280" }];
-                              }
-                              if (perc >= 100) {
-                                return [{ name: "Meta atingida (≥100%)", value: 100, color: "#10b981" }];
-                              }
-                              return [
-                                { name: `Meta atingida (${perc.toFixed(0)}%)`, value: perc, color: "#10b981" },
-                                { name: `Faltando (${(100 - perc).toFixed(0)}%)`, value: 100 - perc, color: "#ef4444" },
-                              ];
-                            })()}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={({ name, percent }) => `${name}`}
-                            outerRadius={80}
-                            fill="#8884d8"
-                            dataKey="value"
-                          >
-                            {(() => {
-                              const { totalPlanejada, totalRealizada } = calcularTotaisProducao();
-                              const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
-                              if (totalPlanejada === 0) {
-                                return [<Cell key="cell-0" fill="#6b7280" />];
-                              }
-                              if (perc >= 100) {
-                                return [<Cell key="cell-0" fill="#10b981" />];
-                              }
-                              return [
-                                <Cell key="cell-0" fill="#10b981" />,
-                                <Cell key="cell-1" fill="#ef4444" />,
-                              ];
-                            })()}
-                          </Pie>
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: "hsl(var(--card))",
-                              border: "1px solid hsl(var(--border))",
-                              borderRadius: "8px",
-                              padding: "8px",
-                            }}
-                            formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
-                          />
-                          <Legend />
+                          {(() => {
+                            const { totalPlanejada, totalRealizada } = calcularTotaisProducao();
+                            const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
+                            const statusData =
+                              totalPlanejada === 0
+                                ? [{ name: "Sem meta definida", value: 100, color: "#6b7280" }]
+                                : perc >= 100
+                                  ? [{ name: "Meta atingida (≥100%)", value: 100, color: "#10b981" }]
+                                  : [
+                                      { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "#10b981" },
+                                      { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "#ef4444" },
+                                    ];
+                            return (
+                              <>
+                                <Pie
+                                  data={statusData}
+                                  cx="50%"
+                                  cy="50%"
+                                  labelLine={false}
+                                  outerRadius={80}
+                                  fill="#8884d8"
+                                  dataKey="value"
+                                >
+                                  {statusData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                  ))}
+                                </Pie>
+                                <Tooltip
+                                  contentStyle={{
+                                    backgroundColor: "hsl(var(--card))",
+                                    border: "1px solid hsl(var(--border))",
+                                    borderRadius: "8px",
+                                    padding: "8px",
+                                  }}
+                                  formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
+                                />
+                                <Legend />
+                              </>
+                            );
+                          })()}
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
@@ -2752,27 +2755,41 @@ export default function Producao() {
                             </div>
                           </div>
                         </div>
-                        <ResponsiveContainer width="100%" height={300}>
-                          <BarChart
-                            data={productionDataLinha}
-                            margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                            <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                        <div className="overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:h-2" style={{ minHeight: 320 }}>
+                          <div className="min-w-[280px]" style={{ minWidth: Math.max(280, productionDataLinha.length * 72) }}>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <BarChart
+                                data={productionDataLinha}
+                                margin={{ top: 20, right: 20, left: 0, bottom: 56 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                                <XAxis
+                                  dataKey="name"
+                                  stroke="hsl(var(--muted-foreground))"
+                                  fontSize={11}
+                                  tickLine={false}
+                                  axisLine={false}
+                                  angle={-35}
+                                  textAnchor="end"
+                                  height={48}
+                                  interval={0}
+                                />
                             <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
                             <Tooltip
                               contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", padding: "8px" }}
                               labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
                             />
-                            <Legend />
+                            <Legend verticalAlign="top" height={36} />
                             <Bar dataKey="valor" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Realizado">
                               <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="valor" />} position="top" />
                             </Bar>
                             <Bar dataKey="meta" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} name="Meta" opacity={0.5}>
                               <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="meta" />} position="top" />
                             </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
                       </div>
                     );
                   })()}
@@ -2787,17 +2804,38 @@ export default function Producao() {
     // Conteúdo do histórico
     if (currentView === "historico") {
       return (
-        <div className="space-y-6">
-          {/* Botão de voltar */}
+        <div className="space-y-6 min-w-0 overflow-x-hidden">
+          {/* Botão de voltar - só seta */}
           <Button
             variant="ghost"
+            size="icon"
             onClick={() => setCurrentView("menu")}
-            className="mb-4"
+            className="mt-6 mb-4 size-11 min-h-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md transition-all"
+            aria-label="Voltar ao menu"
           >
-            ← Voltar ao Menu
+            <ArrowLeft className="size-5 text-foreground" strokeWidth={2.5} />
           </Button>
 
-          {/* Card: Histórico de Análise de Produção */}
+          {/* Título e descrição — acima do card (layout reorganizado para mobile) */}
+          <div className="relative mb-4 sm:mb-5 rounded-2xl p-4 sm:py-5 sm:px-0 transition-all duration-500 group/button">
+            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/30 via-white/10 to-transparent opacity-0 group-hover/button:opacity-100 transition-opacity duration-500 pointer-events-none" />
+            <div className="relative z-10 flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3 sm:gap-5 text-center sm:text-left">
+              <div className="relative flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 shadow-[0_4px_16px_rgba(59,130,246,0.2)] group-hover/button:shadow-[0_8px_24px_rgba(59,130,246,0.4)] group-hover/button:scale-110 transition-all duration-500 border border-primary/30 backdrop-blur-sm">
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/30 via-white/10 to-transparent opacity-0 group-hover/button:opacity-100 transition-opacity duration-500" />
+                <Database className="relative h-6 w-6 sm:h-7 sm:w-7 text-primary drop-shadow-lg" />
+              </div>
+              <div className="space-y-1 min-w-0">
+                <h2 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent group-hover/button:from-primary group-hover/button:to-primary/80 transition-all duration-500">
+                  Histórico de Análise de Produção
+                </h2>
+                <p className="text-sm text-muted-foreground/80 font-medium">
+                  Visualize registros anteriores de produção
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Card: filtros + tabela */}
           <div className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] transition-all duration-500 overflow-hidden group/card">
             {/* Efeito de brilho sutil */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/2 via-primary/0.5 to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-500 pointer-events-none z-0 rounded-2xl" />
@@ -2805,52 +2843,41 @@ export default function Producao() {
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />
 
             <div className="relative z-10">
-              <div className="relative w-full flex items-center justify-between p-6 sm:p-8 transition-all duration-500 group/button bg-gradient-to-r from-transparent via-primary/2 to-transparent">
-                <div className="flex flex-wrap items-center gap-2 sm:gap-5">
-                  {/* Ícone */}
-                  <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 shadow-[0_4px_16px_rgba(59,130,246,0.2)] group-hover/button:shadow-[0_8px_24px_rgba(59,130,246,0.4)] group-hover/button:scale-110 transition-all duration-500 border border-primary/30 backdrop-blur-sm">
-                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/30 via-white/10 to-transparent opacity-0 group-hover/button:opacity-100 transition-opacity duration-500" />
-                    <Database className="relative h-7 w-7 text-primary drop-shadow-lg" />
-                  </div>
-
-                  <div className="text-left space-y-2">
-                    <h2 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent group-hover/button:from-primary group-hover/button:to-primary/80 transition-all duration-500">
-                      Histórico de Análise de Produção
-                    </h2>
-                    <p className="text-sm text-muted-foreground/80 font-medium">
-                      Visualize registros anteriores de produção
-                    </p>
-                  </div>
-                </div>
-
-                {/* Filtros: intervalo de datas e linha */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor="history-data-inicio" className="text-xs text-muted-foreground whitespace-nowrap">De</Label>
+              {/* Filtros: intervalo de datas e linha — em coluna abaixo de 791px */}
+              <div className="flex flex-col gap-4 min-[791px]:flex-row min-[791px]:flex-nowrap min-[791px]:items-center min-[791px]:justify-between w-full p-4 min-[791px]:p-6 min-[791px]:pb-5 min-[791px]:pt-6 lg:p-8 transition-all duration-500 bg-gradient-to-r from-transparent via-primary/2 to-transparent rounded-t-2xl overflow-visible">
+                <div className="flex flex-col gap-3 min-[791px]:flex-row min-[791px]:flex-nowrap min-[791px]:items-center min-[791px]:gap-2 overflow-visible">
+                  <div className="flex items-center gap-2 w-full min-w-0 min-[791px]:flex-1 min-[791px]:flex-initial min-[791px]:min-w-[160px] overflow-visible">
+                    <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
+                      <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
+                    </span>
+                    <Label htmlFor="history-data-inicio" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">De</Label>
                     <Input
                       id="history-data-inicio"
                       type="date"
                       value={historyDataInicio}
                       onChange={(e) => setHistoryDataInicio(e.target.value)}
-                      className="h-9 w-[140px] text-sm"
+                      className="h-9 flex-1 min-w-[120px] w-full min-[791px]:w-[140px] text-sm overflow-visible"
                       title="Data inicial do intervalo"
                     />
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor="history-data-fim" className="text-xs text-muted-foreground whitespace-nowrap">Até</Label>
+                  <div className="flex items-center gap-2 w-full min-w-0 min-[791px]:flex-1 min-[791px]:flex-initial min-[791px]:min-w-[160px] overflow-visible">
+                    <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
+                      <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
+                    </span>
+                    <Label htmlFor="history-data-fim" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Até</Label>
                     <Input
                       id="history-data-fim"
                       type="date"
                       value={historyDataFim}
                       onChange={(e) => setHistoryDataFim(e.target.value)}
-                      className="h-9 w-[140px] text-sm"
+                      className="h-9 flex-1 min-w-[120px] w-full min-[791px]:w-[140px] text-sm overflow-visible"
                       title="Data final do intervalo"
                     />
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor="history-linha" className="text-xs text-muted-foreground whitespace-nowrap">Linha</Label>
+                  <div className="flex items-center gap-2 w-full min-w-0 min-[791px]:w-auto">
+                    <Label htmlFor="history-linha" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Linha</Label>
                     <Select value={historyLinhaFilter || "todas"} onValueChange={(v) => setHistoryLinhaFilter(v === "todas" ? "" : v)}>
-                      <SelectTrigger id="history-linha" className="h-9 w-[160px] text-sm">
+                      <SelectTrigger id="history-linha" className="h-9 w-full min-w-0 min-[791px]:w-[160px] text-sm">
                         <SelectValue placeholder="Todas as linhas" />
                       </SelectTrigger>
                       <SelectContent>
@@ -2870,7 +2897,7 @@ export default function Producao() {
                       loadHistory();
                     }}
                     disabled={historyLoading}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full min-[791px]:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Filtrar histórico pelo intervalo e linha"
                   >
                     {historyLoading ? (
@@ -2878,13 +2905,13 @@ export default function Producao() {
                     ) : (
                       <Database className="h-4 w-4" />
                     )}
-                    <span className="hidden sm:inline">{historyLoading ? "Carregando..." : "Filtrar"}</span>
+                    <span className="hidden min-[791px]:inline">{historyLoading ? "Carregando..." : "Filtrar"}</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            <div className="border-t border-border/40 bg-gradient-to-b from-transparent via-muted/10 to-muted/20 p-5 sm:p-7">
+            <div className="border-t border-border/40 bg-gradient-to-b from-transparent via-muted/10 to-muted/20 p-5 sm:p-7 min-w-0">
               {historyLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -2897,25 +2924,25 @@ export default function Producao() {
                   <p className="text-xs text-muted-foreground/70 mt-1">Os registros salvos aparecerão aqui</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto -mx-4 sm:mx-0">
+                <div className="overflow-x-auto -mx-4 sm:mx-0 rounded-lg border border-border/40 [&::-webkit-scrollbar]:h-2">
                   <div className="inline-block min-w-full align-middle">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="text-xs sm:text-sm">Data</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Hora</TableHead>
-                          <TableHead className="text-xs sm:text-sm">OP</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Código</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Descrição</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Linha</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Qtd. Planejada</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Qtd. Realizada</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Diferença</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Kg/h</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Restante</TableHead>
-                          <TableHead className="text-xs sm:text-sm">Hora final</TableHead>
-                          <TableHead className="text-xs sm:text-sm">% Meta</TableHead>
-                          <TableHead className="text-xs sm:text-sm text-right w-[100px]">Ações</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Data</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Hora</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">OP</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Código</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Descrição</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Linha</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Planejada</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Realizada</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Diferença</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Kg/h</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Restante</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Hora final</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">% Meta</TableHead>
+                          <TableHead className="text-xs sm:text-sm text-right w-[100px] whitespace-nowrap">Ações</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2933,8 +2960,8 @@ export default function Producao() {
                           };
                           // Hora: hora_cabecalho ou, se vazia, hora de cadastro (created_at)
                           const horaFormatada = record.hora_cabecalho || (record.created_at ? formatHoraFinal(record.created_at) : "-");
-                          const percentual = record.percentual_meta
-                            ? `${parseFloat(record.percentual_meta).toFixed(0)}%`
+                          const percentual = record.percentual_meta != null && record.percentual_meta !== ""
+                            ? `${parseFloat(String(record.percentual_meta)).toFixed(2).replace(".", ",")}%`
                             : "-";
                           // Nome da linha (OCLP): exibir nome em vez do número/código
                           const linhaStr = record.linha != null ? String(record.linha).trim() : "";
@@ -2999,7 +3026,7 @@ export default function Producao() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
+      <div className="space-y-6 min-w-0">
         {renderContent()}
 
         {/* Calculadora */}

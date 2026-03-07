@@ -375,13 +375,15 @@ export default function PlanejamentoPCP() {
                                         <Label htmlFor="data" className="text-xs text-muted-foreground">
                                             Data
                                         </Label>
-                                        <Input
-                                            id="data"
-                                            type="date"
-                                            value={data}
-                                            onChange={(e) => setData(e.target.value)}
-                                            className="h-9 w-40 text-sm"
-                                        />
+                                        <div className="overflow-visible min-w-0">
+                                            <Input
+                                                id="data"
+                                                type="date"
+                                                value={data}
+                                                onChange={(e) => setData(e.target.value)}
+                                                className="h-9 w-40 min-w-[120px] text-sm overflow-visible"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                                 <Button

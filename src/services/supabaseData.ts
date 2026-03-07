@@ -203,7 +203,18 @@ export async function loadProducao(params: { data?: string; filialNome?: string 
   const rows = producaoData || [];
   const reprocessos: Array<{ numero: number; tipo: string; codigo: string | null; descricao: string | null; quantidade: number }> = [];
   const first = rows[0] as Record<string, unknown> | undefined;
-  if (first && (first.reprocesso_numero != null || first.reprocesso_codigo != null || first.reprocesso_descricao != null)) {
+  // Preferir array completo na coluna JSONB "reprocessos"; senão usar campos únicos do primeiro registro
+  if (first?.reprocessos && Array.isArray(first.reprocessos) && first.reprocessos.length > 0) {
+    for (const r of first.reprocessos as Array<Record<string, unknown>>) {
+      reprocessos.push({
+        numero: Number(r.numero ?? 1),
+        tipo: String(r.tipo ?? "Cortado"),
+        codigo: (r.codigo != null ? String(r.codigo) : null),
+        descricao: (r.descricao != null ? String(r.descricao) : null),
+        quantidade: parseFloat(String(r.quantidade ?? 0)),
+      });
+    }
+  } else if (first && (first.reprocesso_numero != null || first.reprocesso_codigo != null || first.reprocesso_descricao != null)) {
     reprocessos.push({
       numero: Number(first.reprocesso_numero ?? 1),
       tipo: String(first.reprocesso_tipo ?? "Cortado"),
@@ -267,13 +278,25 @@ export async function saveProducao(payload: {
     }
   };
 
+  // Array completo para a coluna JSONB "reprocessos" (gravado só no primeiro registro OCPD)
+  const reprocessosPayload =
+    (reprocessos?.length ?? 0) > 0
+      ? (reprocessos || []).map((r: Record<string, unknown>) => ({
+          numero: Number(r.numero ?? 0),
+          tipo: String(r.tipo ?? "Cortado"),
+          codigo: r.codigo != null ? String(r.codigo) : null,
+          descricao: r.descricao != null ? String(r.descricao) : null,
+          quantidade: parseFloat(String(r.quantidade ?? 0).replace(",", ".")) || 0,
+        }))
+      : null;
+
   const buildRow = (item: Record<string, unknown>, index: number) => {
     const linhaCode = String(item.linha ?? "").trim();
     const lineId = lineIdByCode[linhaCode] ?? (item.line_id != null ? Number(item.line_id) : 0);
     const dataDiaItem = (item.dataDia as string) || dataDia;
     const horaFinalRaw = item.horaFinal ?? item.hora_final ?? null;
     const horaFinalTimestamp = toTimestamp(dataDiaItem, horaFinalRaw);
-    return {
+    const row: Record<string, unknown> = {
     data_dia: dataDiaItem,
     filial_nome: filialNome || null,
     line_id: lineId,
@@ -305,10 +328,14 @@ export async function saveProducao(payload: {
     reprocesso_tipo: index === 0 && firstRep ? String(firstRep.tipo ?? "") : null,
     reprocesso_codigo: index === 0 && firstRep ? (firstRep.codigo != null ? String(firstRep.codigo) : null) : null,
     reprocesso_descricao: index === 0 && firstRep ? (firstRep.descricao != null ? String(firstRep.descricao) : null) : null,
-    reprocesso_quantidade: index === 0 && firstRep ? parseFloat(String(firstRep.quantidade ?? 0)) : 0,
+    reprocesso_quantidade: index === 0 && firstRep ? parseFloat(String(firstRep.quantidade ?? 0).replace(",", ".")) : 0,
     reprocesso_total_cortado: 0,
     reprocesso_total_usado: index === 0 ? totalReprocesso : parseFloat(String(totalRep)),
   };
+    if (index === 0 && reprocessosPayload && reprocessosPayload.length > 0) {
+      row.reprocessos = reprocessosPayload;
+    }
+    return row;
   };
 
   let updated = 0;

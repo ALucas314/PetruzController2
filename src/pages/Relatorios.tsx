@@ -270,8 +270,8 @@ export default function Relatorios() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <div>
+      <div className="space-y-6 pt-4 sm:pt-6">
+        <div className="text-center">
           <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
             Relatórios
           </h1>
@@ -334,7 +334,7 @@ export default function Relatorios() {
             />
             <KpiCard
               title="Percentual Meta"
-              value={stats ? `${parseFloat(stats.percentualMeta).toFixed(2)}%` : "0%"}
+              value={stats ? `${parseFloat(String(stats.percentualMeta).replace(",", ".")).toFixed(2).replace(".", ",")}%` : "0,00%"}
               change={stats?.variacaoPercentual ?? 0}
               icon={Target}
             />
@@ -357,25 +357,25 @@ export default function Relatorios() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 overflow-visible">
+            <div className="space-y-2 overflow-visible min-w-0">
               <Label htmlFor="date-de">De</Label>
               <Input
                 id="date-de"
                 type="date"
                 value={dateDe}
                 onChange={(e) => setDateDe(e.target.value)}
-                className="w-full"
+                className="w-full overflow-visible min-w-[120px]"
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 overflow-visible min-w-0">
               <Label htmlFor="date-ate">Até</Label>
               <Input
                 id="date-ate"
                 type="date"
                 value={dateAte}
                 onChange={(e) => setDateAte(e.target.value)}
-                className="w-full"
+                className="w-full overflow-visible min-w-[120px]"
               />
             </div>
             <div className="space-y-2">

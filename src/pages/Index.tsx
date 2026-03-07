@@ -21,8 +21,6 @@ interface DashboardStats {
 const Index = () => {
   const [dataInicio, setDataInicio] = useState<string>("");
   const [dataFim, setDataFim] = useState<string>("");
-  const [sector, setSector] = useState("all");
-  const [status, setStatus] = useState("all");
   const [filial, setFilial] = useState<string>(""); // Nome completo da filial
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -127,8 +125,8 @@ const Index = () => {
       return [{ name: "Meta atingida (≥100%)", value: 100, color: "#10b981" }];
     }
     return [
-      { name: `Meta atingida (${perc.toFixed(0)}%)`, value: perc, color: "#10b981" },
-      { name: `Faltando (${(100 - perc).toFixed(0)}%)`, value: 100 - perc, color: "#ef4444" },
+      { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "#10b981" },
+      { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "#ef4444" },
     ];
   })();
 
@@ -144,12 +142,10 @@ const Index = () => {
             Visão geral do desempenho da empresa
           </p>
         </div>
-        <div className="w-full">
+        <div className="w-full min-w-0">
           <DashboardFilters
             dataInicio={dataInicio} setDataInicio={setDataInicio}
             dataFim={dataFim} setDataFim={setDataFim}
-            sector={sector} setSector={setSector}
-            status={status} setStatus={setStatus}
             filial={filial} setFilial={setFilial}
             filiais={filiais}
           />
@@ -184,7 +180,7 @@ const Index = () => {
             />
             <KpiCard
               title="Percentual Meta"
-              value={stats ? `${parseFloat(stats.percentualMeta).toFixed(2)}%` : "0%"}
+              value={stats ? `${parseFloat(String(stats.percentualMeta).replace(",", ".")).toFixed(2).replace(".", ",")}%` : "0,00%"}
               change={stats?.variacaoPercentual || 0}
               icon={Target}
             />
@@ -258,16 +254,14 @@ const Index = () => {
               </ResponsiveContainer>
             </div>
 
-            {/* Gráficos em Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-              {/* Gráfico: Status de Produção — mesmo percentual do quadro Percentual Meta */}
-              <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+            {/* Gráfico: Status de Produção — mesmo percentual do quadro Percentual Meta */}
+            <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
                 <div className="mb-4 sm:mb-5 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 border border-success/20">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 border border-success/20">
                       <Factory className="h-5 w-5 text-success" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="text-base sm:text-lg font-bold text-card-foreground">Status de Produção</h3>
                       <p className="text-xs sm:text-sm text-muted-foreground">Mesmo percentual do quadro “Percentual Meta” (total realizado ÷ total planejado)</p>
                     </div>
@@ -300,10 +294,9 @@ const Index = () => {
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>
-              </div>
             </div>
 
-            {/* Gráfico 4: Produção por Linha */}
+            {/* Gráfico: Produção por Linha */}
             {productionData.length > 0 && (
               <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
                 <div className="mb-5 flex items-center justify-between">
@@ -317,19 +310,26 @@ const Index = () => {
                     </div>
                   </div>
                 </div>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart
-                    data={productionData}
-                    margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} vertical={false} />
-                    <XAxis
-                      dataKey="name"
-                      stroke="hsl(var(--muted-foreground))"
-                      fontSize={12}
-                      tickLine={false}
-                      axisLine={false}
-                    />
+                {/* No mobile: scroll horizontal para os nomes das linhas não ficarem comprimidos */}
+                <div className="overflow-x-auto -mx-1 px-1 sm:overflow-visible sm:mx-0 sm:px-0" style={{ minHeight: 320 }}>
+                  <div className="min-w-[280px]" style={{ minWidth: Math.max(280, productionData.length * 72) }}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart
+                        data={productionData}
+                        margin={{ top: 20, right: 20, left: 0, bottom: 56 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} vertical={false} />
+                        <XAxis
+                          dataKey="name"
+                          stroke="hsl(var(--muted-foreground))"
+                          fontSize={11}
+                          tickLine={false}
+                          axisLine={false}
+                          angle={-35}
+                          textAnchor="end"
+                          height={48}
+                          interval={0}
+                        />
                     <YAxis
                       stroke="hsl(var(--muted-foreground))"
                       fontSize={12}
@@ -345,7 +345,7 @@ const Index = () => {
                       }}
                       labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
                     />
-                    <Legend />
+                    <Legend verticalAlign="top" height={36} />
                     <Bar
                       dataKey="valor"
                       fill="hsl(var(--primary))"
@@ -369,8 +369,10 @@ const Index = () => {
                         position="top"
                       />
                     </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               </div>
             )}
           </div>
