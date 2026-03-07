@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
+import { ExportToPng } from "@/components/ExportToPng";
 import {
   Dialog,
   DialogContent,
@@ -132,6 +133,7 @@ export default function Producao() {
   const { user } = useAuth();
   const { setDocumentNav } = useDocumentNav();
   const producaoCardRef = useRef<HTMLDivElement>(null);
+  const historicoCardRef = useRef<HTMLDivElement>(null);
   const openedFromStateRef = useRef(false);
   const dataInputRef = useRef<HTMLInputElement>(null);
   const isNewDocumentRef = useRef(false); // true após "Novo documento" para não recarregar do DB e manter setas habilitadas
@@ -2836,7 +2838,7 @@ export default function Producao() {
           </div>
 
           {/* Card: filtros + tabela */}
-          <div className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] transition-all duration-500 overflow-hidden group/card">
+          <div ref={historicoCardRef} className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] transition-all duration-500 overflow-hidden group/card">
             {/* Efeito de brilho sutil */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/2 via-primary/0.5 to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-500 pointer-events-none z-0 rounded-2xl" />
             {/* Borda superior com gradiente */}
@@ -2907,6 +2909,13 @@ export default function Producao() {
                     )}
                     <span className="hidden min-[791px]:inline">{historyLoading ? "Carregando..." : "Filtrar"}</span>
                   </button>
+                  <ExportToPng
+                    targetRef={historicoCardRef}
+                    filenamePrefix="historico-analise-producao"
+                    disabled={historyLoading || historyData.length === 0}
+                    className="w-full min-[791px]:w-auto gap-2"
+                    label="Exportar PNG"
+                  />
                 </div>
               </div>
             </div>

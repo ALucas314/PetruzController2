@@ -1,0 +1,230 @@
+import { useState, type RefObject } from "react";
+import { toPng } from "html-to-image";
+import { Button } from "@/components/ui/button";
+import { ImageDown, Loader2 } from "lucide-react";
+
+export interface ExportToPngProps {
+  /** Ref do elemento DOM a ser capturado (ex.: card da tabela) */
+  targetRef: RefObject<HTMLElement | null>;
+  /** Prefixo do nome do arquivo (será sufixado com data e .png) */
+  filenamePrefix?: string;
+  /** Desabilita o botão (ex.: durante loading ou sem dados) */
+  disabled?: boolean;
+  /** Classes adicionais no botão */
+  className?: string;
+  /** Texto do botão */
+  label?: string;
+  /** Se true, expande containers com overflow para capturar tabela/conteúdo inteiro */
+  expandScrollable?: boolean;
+}
+
+type RestoreStyle = { el: HTMLElement; styles: Record<string, string> };
+
+/** Expande temporariamente overflow e tamanhos para capturar conteúdo completo (ex.: tabela inteira no celular). */
+function expandScrollableContainers(root: HTMLElement): RestoreStyle[] {
+  const restores: RestoreStyle[] = [];
+  const toExpand: HTMLElement[] = [];
+
+  const collect = (el: HTMLElement) => {
+    const cls = el.className?.toString() ?? "";
+    const computed = window.getComputedStyle(el);
+    const overflowX = computed.overflowX;
+    const overflowY = computed.overflowY;
+    const hasOverflowClass = /overflow-x-auto|overflow-y-auto|overflow-auto/.test(cls);
+    const isScrollableComputed = overflowX === "auto" || overflowX === "scroll" || overflowY === "auto" || overflowY === "scroll";
+    const hasScrollContent = el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth;
+    const shouldExpand = (isScrollableComputed && hasScrollContent) || hasOverflowClass;
+    if (shouldExpand) toExpand.push(el);
+    for (let i = 0; i < el.children.length; i++) {
+      const child = el.children[i];
+      if (child instanceof HTMLElement) collect(child);
+    }
+  };
+
+  collect(root);
+
+  // Primeiro expande os filhos (do mais interno ao mais externo), assim scrollHeight do root fica correto
+  toExpand.forEach((el) => {
+    const backup: Record<string, string> = {
+      overflow: el.style.overflow,
+      overflowX: el.style.overflowX,
+      overflowY: el.style.overflowY,
+      height: el.style.height,
+      maxHeight: el.style.maxHeight,
+      width: el.style.width,
+      maxWidth: el.style.maxWidth,
+      minHeight: el.style.minHeight,
+      minWidth: el.style.minWidth,
+    };
+    el.style.overflow = "visible";
+    el.style.overflowX = "visible";
+    el.style.overflowY = "visible";
+    el.style.minHeight = "0";
+    el.style.minWidth = "0";
+    el.style.height = `${el.scrollHeight}px`;
+    el.style.maxHeight = "none";
+    el.style.width = `${el.scrollWidth}px`;
+    el.style.maxWidth = "none";
+    restores.push({ el, styles: backup });
+  });
+
+  // Por último expande o root para o tamanho total do conteúdo (assim a captura pega a tabela inteira)
+  const rootComputed = window.getComputedStyle(root);
+  const rootClips = rootComputed.overflow !== "visible" || rootComputed.overflowX !== "visible" || rootComputed.overflowY !== "visible" || rootComputed.overflow === "hidden";
+  if (rootClips || toExpand.length > 0) {
+    const backup: Record<string, string> = {
+      overflow: root.style.overflow,
+      overflowX: root.style.overflowX,
+      overflowY: root.style.overflowY,
+      height: root.style.height,
+      maxHeight: root.style.maxHeight,
+      width: root.style.width,
+      maxWidth: root.style.maxWidth,
+      minHeight: root.style.minHeight,
+      minWidth: root.style.minWidth,
+    };
+    root.style.overflow = "visible";
+    root.style.overflowX = "visible";
+    root.style.overflowY = "visible";
+    root.style.minHeight = "0";
+    root.style.minWidth = "0";
+    root.style.maxHeight = "none";
+    root.style.maxWidth = "none";
+    root.style.height = `${root.scrollHeight}px`;
+    root.style.width = `${root.scrollWidth}px`;
+    restores.push({ el: root, styles: backup });
+  }
+  return restores;
+}
+
+function restoreStyles(restores: RestoreStyle[]) {
+  restores.forEach(({ el, styles }) => {
+    Object.entries(styles).forEach(([key, value]) => {
+      (el.style as Record<string, string>)[key] = value;
+    });
+  });
+}
+
+/**
+ * Botão que exporta o elemento referenciado por targetRef como PNG.
+ * Usado para exportar o Histórico de Análise de Produção (e outros blocos) como imagem.
+ */
+export function ExportToPng({
+  targetRef,
+  filenamePrefix = "historico-analise-producao",
+  disabled = false,
+  className,
+  label = "Exportar PNG",
+  expandScrollable = true,
+}: ExportToPngProps) {
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    if (!targetRef?.current || exporting) return;
+
+    setExporting(true);
+
+    let restores: RestoreStyle[] = [];
+
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+
+      const element = targetRef.current;
+
+      if (expandScrollable) {
+        restores = expandScrollableContainers(element);
+        element.style.overflow = "visible";
+        element.style.maxHeight = "none";
+        // Reflow: espera o layout atualizar (importante no mobile para pegar tabela inteira)
+        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
+      const dataUrl = await toPng(element, {
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+        quality: 1.0,
+        cacheBust: true,
+        skipAutoScale: false,
+        skipFonts: false,
+        filter: () => true,
+      });
+
+      const img = new Image();
+      img.src = dataUrl;
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => {
+          try {
+            const padding = 40;
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width + padding * 2;
+            canvas.height = img.height + padding * 2;
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+              ctx.fillStyle = "#ffffff";
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, padding, padding);
+            }
+            // Nome seguro: só letras, números, hífen e underscore (evita "Ol.png" ou nome truncado no Windows)
+            const safePrefix = (filenamePrefix || "historico-analise-producao").replace(/[^a-zA-Z0-9_-]/g, "-");
+            const date = new Date();
+            const dateStr = date.toISOString().slice(0, 10); // YYYY-MM-DD
+            const timeStr = date.toTimeString().slice(0, 8).replace(/:/g, ""); // HHmmss
+            const fileName = `${safePrefix}-${dateStr}-${timeStr}.png`;
+
+            canvas.toBlob(
+              (blob) => {
+                if (!blob) {
+                  reject(new Error("Falha ao gerar PNG"));
+                  return;
+                }
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.download = fileName;
+                link.href = url;
+                link.click();
+                setTimeout(() => URL.revokeObjectURL(url), 200);
+                resolve();
+              },
+              "image/png",
+              1.0
+            );
+          } catch (e) {
+            reject(e);
+          }
+        };
+        img.onerror = () => reject(new Error("Falha ao carregar imagem"));
+      });
+    } catch (err) {
+      console.error("Export to PNG failed:", err);
+      if (typeof window !== "undefined" && "toast" in window) {
+        (window as unknown as { toast: { error: (m: string) => void } }).toast?.error?.(
+          "Não foi possível exportar a imagem. Tente novamente."
+        );
+      }
+    } finally {
+      if (restores.length) restoreStyles(restores);
+      setExporting(false);
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={handleExport}
+      disabled={disabled || exporting}
+      className={`gap-2 ${className ?? ""}`}
+      title="Baixar histórico como imagem PNG"
+    >
+      {exporting ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <ImageDown className="h-4 w-4 shrink-0" />
+      )}
+      <span className="hidden min-[791px]:inline">{label}</span>
+    </Button>
+  );
+}
