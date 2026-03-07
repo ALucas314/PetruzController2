@@ -122,8 +122,7 @@ Depois de salvar, faça **Trigger deploy** para um novo build.
 
 ## 4. Backend (API) — banco e “Esqueci a senha”
 
-O Netlify só publica o frontend (HTML/JS). O **backend (Node/Express)** precisa estar em outro serviço para o banco e o “Esqueci a senha” funcionarem.
-
+O Netlify só publica o frontend (HTML/JS). O **backend (Node/Express)** só é necessário para a API (ex.: importar Excel). Banco e “Esqueci a senha” funcionam pelo frontend + Supabase. Não “Esqueci a senha” 
 ### 4.1 RLS no Supabase
 
 No **Supabase → SQL Editor**, execute `src/Data/PostgressSQL/SUPABASE_RLS_AND_DRAFT_AUTH.sql` para criar OCTU_DRAFT_AUTH e políticas RLS (OCPD, OCLP, OCTI, OCTF, OCPR).

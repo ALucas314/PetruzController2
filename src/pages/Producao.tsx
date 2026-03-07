@@ -1982,12 +1982,12 @@ export default function Producao() {
                     {itemCatalogLoadError} Execute OCTI_RLS_PERMITIR_LEITURA.sql no Supabase para o código preencher a descrição ao digitar.
                   </p>
                 )}
-                <div className="mb-5 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+                <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
                       <Factory className="h-5 w-5 text-primary" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="text-base sm:text-lg font-bold text-card-foreground">Produção</h3>
                       <p className="text-xs text-muted-foreground/70 mt-0.5">
                         Gerencie sua produção
@@ -2002,11 +2002,11 @@ export default function Producao() {
                       addItem();
                     }}
                     size="sm"
-                    className="gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
+                    className="w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
                     type="button"
                   >
-                    <Plus className="h-4 w-4" />
-                    Adicionar Linha
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span className="truncate">Adicionar Linha</span>
                   </Button>
                 </div>
 
@@ -2407,12 +2407,12 @@ export default function Producao() {
 
                 {/* Seção: Reprocesso */}
                 <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                  <div className="mb-5 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+                  <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
                         <Factory className="h-5 w-5 text-primary" />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <h3 className="text-base sm:text-lg font-bold text-card-foreground">Reprocesso</h3>
                         <p className="text-xs text-muted-foreground/70 mt-0.5">
                           Gerencie os reprocessos
@@ -2427,11 +2427,11 @@ export default function Producao() {
                         addReprocesso();
                       }}
                       size="sm"
-                      className="gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
+                      className="w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
                       type="button"
                     >
-                      <Plus className="h-4 w-4" />
-                      Adicionar Reprocesso
+                      <Plus className="h-4 w-4 shrink-0" />
+                      <span className="truncate">Adicionar Reprocesso</span>
                     </Button>
                   </div>
 

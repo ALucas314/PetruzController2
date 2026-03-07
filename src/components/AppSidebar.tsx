@@ -72,7 +72,7 @@ const SidebarLogo = memo(({ collapsed }: { collapsed: boolean }) => (
       <div className="flex-1 min-w-0 relative z-10">
         <div className="space-y-0.5">
           <span className="text-base font-bold text-sidebar-accent-foreground tracking-tight leading-tight block whitespace-nowrap">
-            ERP Controller
+            ERP Controladoria
           </span>
           <span className="text-sm font-semibold text-sidebar-primary block whitespace-nowrap bg-gradient-to-r from-sidebar-primary to-sidebar-primary/80 bg-clip-text text-transparent">
             Petruz
