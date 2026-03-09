@@ -134,6 +134,7 @@ export default function Producao() {
   const { setDocumentNav } = useDocumentNav();
   const producaoCardRef = useRef<HTMLDivElement>(null);
   const historicoCardRef = useRef<HTMLDivElement>(null);
+  const reprocessoCardRef = useRef<HTMLDivElement>(null);
   const chartPlanejadoRealizadoRef = useRef<HTMLDivElement>(null);
   const chartDiferencaItemRef = useRef<HTMLDivElement>(null);
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
@@ -188,12 +189,8 @@ export default function Producao() {
   const [filiaisLoadError, setFiliaisLoadError] = useState<string | null>(null);
   const [itemCatalogLoadError, setItemCatalogLoadError] = useState<string | null>(null);
   const [filialSelecionada, setFilialSelecionada] = useState<string>("");
-  // Filtros do histórico: intervalo de datas e linha
-  const [historyDataInicio, setHistoryDataInicio] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split("T")[0];
-  });
+  // Filtros do histórico: intervalo de datas e linha (padrão = data de hoje, permitindo seleção)
+  const [historyDataInicio, setHistoryDataInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyDataFim, setHistoryDataFim] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyLinhaFilter, setHistoryLinhaFilter] = useState<string>("");
 
@@ -2428,7 +2425,10 @@ export default function Producao() {
                 </div>
 
                 {/* Seção: Reprocesso */}
-                <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
+                <div
+                  ref={reprocessoCardRef}
+                  className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.1)]"
+                >
                   <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
@@ -2441,20 +2441,28 @@ export default function Producao() {
                         </p>
                       </div>
                     </div>
-                    <Button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.nativeEvent.stopImmediatePropagation();
-                        addReprocesso();
-                      }}
-                      size="sm"
-                      className="w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
-                      type="button"
-                    >
-                      <Plus className="h-4 w-4 shrink-0" />
-                      <span className="truncate">Adicionar Reprocesso</span>
-                    </Button>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
+                      <Button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          e.nativeEvent.stopImmediatePropagation();
+                          addReprocesso();
+                        }}
+                        size="sm"
+                        className="w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
+                        type="button"
+                      >
+                        <Plus className="h-4 w-4 shrink-0" />
+                        <span className="truncate">Adicionar Reprocesso</span>
+                      </Button>
+                      <ExportToPng
+                        targetRef={reprocessoCardRef}
+                        filenamePrefix="reprocesso"
+                        className="w-full sm:w-auto shrink-0 gap-2"
+                        label="Exportar PNG"
+                      />
+                    </div>
                   </div>
 
                   <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -2597,7 +2605,7 @@ export default function Producao() {
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart
                         data={items.map((item) => ({
-                          name: item.descricaoItem || item.codigoItem || item.op || `Item ${item.numero}`,
+                          name: item.codigoItem || item.descricaoItem || item.op || `Item ${item.numero}`,
                           planejado: parseFormattedNumber(item.quantidadePlanejada),
                           realizado: parseFormattedNumber(item.quantidadeRealizada),
                           diferenca: item.diferenca,

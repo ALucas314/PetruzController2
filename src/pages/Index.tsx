@@ -20,8 +20,9 @@ interface DashboardStats {
 }
 
 const Index = () => {
-  const [dataInicio, setDataInicio] = useState<string>("");
-  const [dataFim, setDataFim] = useState<string>("");
+  // Filtros de data do dashboard: começam com a data de hoje, mas o usuário pode alterar
+  const [dataInicio, setDataInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [dataFim, setDataFim] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [filial, setFilial] = useState<string>(""); // Nome completo da filial
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
