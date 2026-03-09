@@ -1,4 +1,4 @@
-import { useState, useEffect, MouseEvent, useCallback, useRef, RefObject } from "react";
+import { useState, useEffect, useMemo, MouseEvent, useCallback, useRef, RefObject } from "react";
 import { useLocation } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
+import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList } from "lucide-react";
 import { ExportToPng } from "@/components/ExportToPng";
 import {
   Dialog,
@@ -44,6 +44,11 @@ import {
   getDraft,
   saveDraft,
   getProducaoHistory,
+  getOCTPByInicio,
+  insertOCTP,
+  updateOCTP,
+  deleteOCTP,
+  type OCTPRow,
 } from "@/services/supabaseData";
 import { useToast } from "@/hooks/use-toast";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
@@ -83,6 +88,28 @@ interface ReprocessoItem {
   descricao: string;
   quantidade: string;
 }
+
+/** Item do card OCTP (Problema, Ação, Responsável, Hora, Início, Descrição do Status) */
+interface OCTPItem {
+  id: number;
+  numero: number;
+  problema: string;
+  acao: string;
+  responsavel: string;
+  hora: string | null; // ISO ou vazio (exibição formatada)
+  inicio: string; // YYYY-MM-DD
+  descricao_status: string; // chave do status (ex: "Cancelada", "Concluída")
+}
+
+/** Opções de status do OCTP com cor da bolinha */
+const OCTP_STATUS_OPTIONS = [
+  { id: "Cancelada", label: "Cancelada", color: "#6b7280" },           // Cinza
+  { id: "Atrasada", label: "Atrasada", color: "#ef4444" },             // Vermelha
+  { id: "Concluída", label: "Concluída", color: "#22c55e" },           // Verde
+  { id: "Concluída com atraso", label: "Concluída com atraso", color: "#f97316" }, // Laranja
+  { id: "Em andamento", label: "Em andamento", color: "#eab308" },     // Amarelo
+  { id: "A iniciar", label: "A iniciar", color: "#3b82f6" },           // Azul
+] as const;
 
 // Componente customizado para renderizar labels nos gráficos de barra
 const CustomBarLabel = (props: any) => {
@@ -136,6 +163,8 @@ export default function Producao() {
   const historicoCardRef = useRef<HTMLDivElement>(null);
   const reprocessoCardRef = useRef<HTMLDivElement>(null);
   const reprocessoExportRestoreRef = useRef<{ input: HTMLInputElement; wrapper: HTMLDivElement }[]>([]);
+  const octpCardRef = useRef<HTMLDivElement>(null);
+  const octpExportRestoreRef = useRef<{ el: HTMLElement; wrapper: HTMLDivElement }[]>([]);
   const chartPlanejadoRealizadoRef = useRef<HTMLDivElement>(null);
   const chartDiferencaItemRef = useRef<HTMLDivElement>(null);
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
@@ -185,6 +214,10 @@ export default function Producao() {
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   // Reprocessos
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
+  // OCTP (Problema, Ação, Responsável, Hora, Início, Descrição do Status)
+  const [octpInicio, setOctpInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
+  const [octpLoading, setOctpLoading] = useState(false);
   // Filiais (OCTF)
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string; endereco: string }>>([]);
   const [filiaisLoadError, setFiliaisLoadError] = useState<string | null>(null);
@@ -654,6 +687,124 @@ export default function Producao() {
   const removeReprocesso = (id: number) => {
     setReprocessos(reprocessos.filter((r) => r.id !== id));
   };
+
+  // Carregar OCTP por data (início)
+  const loadOCTP = useCallback(async () => {
+    setOctpLoading(true);
+    try {
+      const rows = await getOCTPByInicio(octpInicio);
+      setOctpItems(
+        rows.map((r: OCTPRow) => ({
+          id: r.id,
+          numero: r.numero,
+          problema: r.problema ?? "",
+          acao: r.acao ?? "",
+          responsavel: r.responsavel ?? "",
+          hora: r.hora ?? null,
+          inicio: r.inicio ?? octpInicio,
+          descricao_status: r.descricao_status ?? "",
+        }))
+      );
+    } catch (e) {
+      console.error("Erro ao carregar OCTP:", e);
+      toast({ title: "Erro", description: "Não foi possível carregar os registros OCTP.", variant: "destructive" });
+      setOctpItems([]);
+    } finally {
+      setOctpLoading(false);
+    }
+  }, [octpInicio, toast]);
+
+  useEffect(() => {
+    if (currentView === "cadastro") loadOCTP();
+  }, [currentView, loadOCTP]);
+
+  const formatOCTPHora = (hora: string | null) => {
+    if (!hora) return "—";
+    try {
+      const d = new Date(hora);
+      return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch {
+      return hora;
+    }
+  };
+
+  const addOCTPItem = async () => {
+    const newNumero = octpItems.length > 0 ? Math.max(...octpItems.map((o) => o.numero)) + 1 : 1;
+    try {
+      const inserted = await insertOCTP({
+        numero: newNumero,
+        problema: "",
+        acao: "",
+        responsavel: "",
+        inicio: octpInicio,
+        descricao_status: "",
+      });
+      setOctpItems((prev) => [
+        ...prev,
+        {
+          id: inserted.id,
+          numero: inserted.numero,
+          problema: inserted.problema ?? "",
+          acao: inserted.acao ?? "",
+          responsavel: inserted.responsavel ?? "",
+          hora: inserted.hora ?? null,
+          inicio: inserted.inicio ?? octpInicio,
+          descricao_status: inserted.descricao_status ?? "",
+        },
+      ]);
+    } catch (e) {
+      console.error("Erro ao adicionar OCTP:", e);
+      toast({ title: "Erro", description: "Não foi possível adicionar o registro.", variant: "destructive" });
+    }
+  };
+
+  const updateOCTPItem = (id: number, field: keyof OCTPItem, value: string | number) => {
+    const item = octpItems.find((o) => o.id === id);
+    if (!item) return;
+    const updated = { ...item, [field]: value };
+    setOctpItems(octpItems.map((o) => (o.id === id ? updated : o)));
+    const payload: Record<string, unknown> = {};
+    if (field === "numero") payload.numero = value as number;
+    else if (field === "problema") payload.problema = value as string;
+    else if (field === "acao") payload.acao = value as string;
+    else if (field === "responsavel") payload.responsavel = value as string;
+    else if (field === "inicio") payload.inicio = value as string;
+    else if (field === "descricao_status") payload.descricao_status = value as string;
+    if (Object.keys(payload).length > 0) {
+      updateOCTP(id, payload as Parameters<typeof updateOCTP>[1]).catch((e) => {
+        console.error("Erro ao atualizar OCTP:", e);
+        toast({ title: "Erro", description: "Não foi possível salvar a alteração.", variant: "destructive" });
+      });
+    }
+  };
+
+  const removeOCTPItem = async (id: number) => {
+    try {
+      await deleteOCTP(id);
+      setOctpItems(octpItems.filter((o) => o.id !== id));
+    } catch (e) {
+      console.error("Erro ao remover OCTP:", e);
+      toast({ title: "Erro", description: "Não foi possível remover o registro.", variant: "destructive" });
+    }
+  };
+
+  /** Dados do gráfico de pizza: porcentagem por status (OCTP) */
+  const octpStatusPieData = useMemo(() => {
+    const countBy: Record<string, number> = {};
+    OCTP_STATUS_OPTIONS.forEach((o) => { countBy[o.id] = 0; });
+    octpItems.forEach((item) => {
+      const k = item.descricao_status?.trim() || "";
+      if (k && OCTP_STATUS_OPTIONS.some((o) => o.id === k)) countBy[k]++;
+      else if (k) countBy[k] = (countBy[k] || 0) + 1;
+    });
+    const total = octpItems.length;
+    return OCTP_STATUS_OPTIONS.map((o) => ({
+      name: o.label,
+      value: total > 0 ? Math.round(((countBy[o.id] ?? 0) / total) * 100) : 0,
+      count: countBy[o.id] ?? 0,
+      color: o.color,
+    })).filter((d) => d.count > 0);
+  }, [octpItems]);
 
   // Remover linha
   const removeItem = (id: number) => {
@@ -2610,6 +2761,268 @@ export default function Producao() {
                         </span>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* Seção: OCTP (Problema, Ação, Responsável, Hora, Início, Descrição do Status) */}
+                <div
+                  ref={octpCardRef}
+                  className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.1)]"
+                >
+                  <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+                        <ClipboardList className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-base sm:text-lg font-bold text-card-foreground">Problemas e Ações</h3>
+                        <p className="text-xs text-muted-foreground/70 mt-0.5">
+                          Registro de problema, ação, responsável e status
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor="octp-inicio" className="text-xs text-muted-foreground whitespace-nowrap">Início</Label>
+                        <Input
+                          id="octp-inicio"
+                          type="date"
+                          value={octpInicio}
+                          onChange={(e) => setOctpInicio(e.target.value)}
+                          className="h-9 w-[140px] text-sm"
+                        />
+                      </div>
+                      <Button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          addOCTPItem();
+                        }}
+                        disabled={octpLoading}
+                        size="sm"
+                        className="w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
+                        type="button"
+                      >
+                        {octpLoading ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : <Plus className="h-4 w-4 shrink-0" />}
+                        <span className="truncate">Adicionar registro</span>
+                      </Button>
+                      <ExportToPng
+                        targetRef={octpCardRef}
+                        filenamePrefix="octp-problemas-acoes"
+                        className="w-full sm:w-auto shrink-0 gap-2"
+                        label="Exportar PNG"
+                        onBeforeCapture={() => {
+                          const card = octpCardRef.current;
+                          if (!card) return;
+                          octpExportRestoreRef.current = [];
+                          const rows = card.querySelectorAll("table tbody tr");
+                          rows.forEach((row, rowIndex) => {
+                            // Colunas 2, 3, 4: inputs (Problema, Ação, Responsável)
+                            [2, 3, 4].forEach((colNum) => {
+                              const cell = row.querySelector(`td:nth-child(${colNum})`);
+                              if (!cell) return;
+                              const input = cell.querySelector("input");
+                              if (!input) return;
+                              const el = input as HTMLInputElement;
+                              const value = el.value ?? "";
+                              const wrapper = document.createElement("div");
+                              wrapper.setAttribute("data-export-octp", "true");
+                              wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[120px]";
+                              wrapper.textContent = value || "—";
+                              el.style.display = "none";
+                              cell.appendChild(wrapper);
+                              octpExportRestoreRef.current.push({ el, wrapper });
+                            });
+                            // Coluna 7: Status (Select) — exibir label com bolinha colorida
+                            const cell7 = row.querySelector("td:nth-child(7)");
+                            if (!cell7 || rowIndex >= octpItems.length) return;
+                            const item = octpItems[rowIndex];
+                            const statusKey = item.descricao_status?.trim() || "";
+                            const statusOpt = OCTP_STATUS_OPTIONS.find((o) => o.id === statusKey);
+                            const label = statusOpt ? statusOpt.label : (statusKey || "—");
+                            const color = statusOpt ? statusOpt.color : "#6b7280";
+                            const firstChild = cell7.firstElementChild as HTMLElement | null;
+                            if (!firstChild) return;
+                            const wrapper = document.createElement("div");
+                            wrapper.setAttribute("data-export-octp", "true");
+                            wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[120px] flex items-center gap-2";
+                            const dot = document.createElement("span");
+                            dot.className = "h-2.5 w-2.5 rounded-full shrink-0";
+                            dot.style.backgroundColor = color;
+                            const text = document.createElement("span");
+                            text.textContent = label;
+                            wrapper.appendChild(dot);
+                            wrapper.appendChild(text);
+                            firstChild.style.display = "none";
+                            cell7.appendChild(wrapper);
+                            octpExportRestoreRef.current.push({ el: firstChild, wrapper });
+                          });
+                        }}
+                        onAfterCapture={() => {
+                          octpExportRestoreRef.current.forEach(({ el, wrapper }) => {
+                            wrapper.remove();
+                            el.style.display = "";
+                          });
+                          octpExportRestoreRef.current = [];
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto -mx-4 sm:mx-0">
+                    <div className="inline-block min-w-full align-middle">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-12 sm:w-16 text-center text-xs sm:text-sm">N°</TableHead>
+                            <TableHead className="min-w-[120px] sm:min-w-[160px] text-xs sm:text-sm">Problema</TableHead>
+                            <TableHead className="min-w-[120px] sm:min-w-[160px] text-xs sm:text-sm">Ação</TableHead>
+                            <TableHead className="min-w-[100px] sm:min-w-[140px] text-xs sm:text-sm">Responsável</TableHead>
+                            <TableHead className="min-w-[80px] sm:min-w-[90px] text-xs sm:text-sm">Hora</TableHead>
+                            <TableHead className="min-w-[100px] sm:min-w-[120px] text-xs sm:text-sm">Início</TableHead>
+                            <TableHead className="min-w-[150px] sm:min-w-[200px] text-xs sm:text-sm">Descrição do Status</TableHead>
+                            <TableHead className="w-12 sm:w-16"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {octpLoading && octpItems.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
+                                Carregando...
+                              </TableCell>
+                            </TableRow>
+                          ) : octpItems.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
+                                Nenhum registro. Selecione a data de início e clique em &quot;Adicionar registro&quot;.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            octpItems.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell className="text-center font-medium text-xs sm:text-sm">{item.numero}</TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Input
+                                    value={item.problema}
+                                    onChange={(e) => updateOCTPItem(item.id, "problema", e.target.value)}
+                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                    placeholder="Problema"
+                                  />
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Input
+                                    value={item.acao}
+                                    onChange={(e) => updateOCTPItem(item.id, "acao", e.target.value)}
+                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                    placeholder="Ação"
+                                  />
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Input
+                                    value={item.responsavel}
+                                    onChange={(e) => updateOCTPItem(item.id, "responsavel", e.target.value)}
+                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                    placeholder="Responsável"
+                                  />
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4 text-xs sm:text-sm text-muted-foreground">
+                                  {formatOCTPHora(item.hora)}
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Input
+                                    type="date"
+                                    value={item.inicio}
+                                    onChange={(e) => updateOCTPItem(item.id, "inicio", e.target.value)}
+                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                  />
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Select
+                                    value={item.descricao_status || "__vazio__"}
+                                    onValueChange={(v) => updateOCTPItem(item.id, "descricao_status", v === "__vazio__" ? "" : v)}
+                                  >
+                                    <SelectTrigger className="h-8 sm:h-9 text-xs sm:text-sm min-w-[160px]">
+                                      <SelectValue placeholder="Status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__vazio__">
+                                        <span className="flex items-center gap-2">
+                                          <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50 shrink-0" />
+                                          —
+                                        </span>
+                                      </SelectItem>
+                                      {OCTP_STATUS_OPTIONS.map((opt) => (
+                                        <SelectItem key={opt.id} value={opt.id}>
+                                          <span className="flex items-center gap-2">
+                                            <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: opt.color }} />
+                                            {opt.label}
+                                          </span>
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => removeOCTPItem(item.id)}
+                                    className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+
+                  {/* Gráfico de pizza: porcentagem por status */}
+                  <div className="mt-6 pt-5 border-t border-border/50">
+                    <h4 className="text-sm font-semibold text-card-foreground mb-4">Status (porcentagens)</h4>
+                    {octpStatusPieData.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-6 text-center">Selecione os status nos registros acima para ver o gráfico.</p>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row gap-4 items-center">
+                        <div className="w-full sm:w-[220px] h-[220px] shrink-0">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={octpStatusPieData}
+                                dataKey="value"
+                                nameKey="name"
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={50}
+                                outerRadius={90}
+                                paddingAngle={2}
+                                label={({ name, value }) => `${name} ${value}%`}
+                              >
+                                {octpStatusPieData.map((entry, index) => (
+                                  <Cell key={entry.name} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip
+                                formatter={(value: number, name: string, props: { payload?: { count?: number } }) => [`${value}% (${props?.payload?.count ?? 0} registro(s))`, name]}
+                                contentStyle={{ borderRadius: "8px", backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
+                              />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <ul className="flex flex-wrap gap-x-4 gap-y-2 text-xs sm:text-sm">
+                          {octpStatusPieData.map((d) => (
+                            <li key={d.name} className="flex items-center gap-2">
+                              <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+                              <span className="text-muted-foreground">{d.name}:</span>
+                              <span className="font-medium">{d.value}%</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </div>
 

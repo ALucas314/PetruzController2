@@ -32,6 +32,12 @@ DROP POLICY IF EXISTS "octi_authenticated_all" ON "OCTI";
 CREATE POLICY "octi_authenticated_all" ON "OCTI"
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- OCTP (problemas e ações / status)
+ALTER TABLE "OCTP" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "octp_authenticated_all" ON "OCTP";
+CREATE POLICY "octp_authenticated_all" ON "OCTP"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- OCTU_DRAFT_AUTH (rascunho por usuário logado)
 ALTER TABLE "OCTU_DRAFT_AUTH" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "octu_draft_auth_own" ON "OCTU_DRAFT_AUTH";

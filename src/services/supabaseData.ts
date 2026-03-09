@@ -490,3 +490,92 @@ export async function insertOCTIItems(
     skipped: valid.length - inserted,
   };
 }
+
+// --- OCTP (Problemas / Ações / Status) ---
+export interface OCTPRow {
+  id: number;
+  numero: number;
+  problema: string | null;
+  acao: string | null;
+  responsavel: string | null;
+  hora: string | null; // ISO timestamp from DB
+  inicio: string | null; // YYYY-MM-DD
+  descricao_status: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export async function getOCTPByInicio(inicio: string): Promise<OCTPRow[]> {
+  const { data, error } = await supabase
+    .from("OCTP")
+    .select("id, numero, problema, acao, responsavel, hora, inicio, descricao_status, created_at, updated_at")
+    .eq("inicio", inicio)
+    .order("numero", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r: Record<string, unknown>) => ({
+    id: Number(r.id),
+    numero: Number(r.numero ?? 0),
+    problema: r.problema != null ? String(r.problema) : null,
+    acao: r.acao != null ? String(r.acao) : null,
+    responsavel: r.responsavel != null ? String(r.responsavel) : null,
+    hora: r.hora != null ? String(r.hora) : null,
+    inicio: r.inicio != null ? String(r.inicio) : null,
+    descricao_status: r.descricao_status != null ? String(r.descricao_status) : null,
+    created_at: r.created_at != null ? String(r.created_at) : undefined,
+    updated_at: r.updated_at != null ? String(r.updated_at) : undefined,
+  }));
+}
+
+export async function insertOCTP(payload: {
+  numero: number;
+  problema?: string | null;
+  acao?: string | null;
+  responsavel?: string | null;
+  inicio?: string | null;
+  descricao_status?: string | null;
+}): Promise<OCTPRow> {
+  const row = {
+    numero: payload.numero,
+    problema: payload.problema ?? null,
+    acao: payload.acao ?? null,
+    responsavel: payload.responsavel ?? null,
+    inicio: payload.inicio ?? new Date().toISOString().slice(0, 10),
+    descricao_status: payload.descricao_status ?? null,
+  };
+  const { data, error } = await supabase.from("OCTP").insert(row).select().single();
+  if (error) throw error;
+  const r = data as Record<string, unknown>;
+  return {
+    id: Number(r.id),
+    numero: Number(r.numero ?? 0),
+    problema: r.problema != null ? String(r.problema) : null,
+    acao: r.acao != null ? String(r.acao) : null,
+    responsavel: r.responsavel != null ? String(r.responsavel) : null,
+    hora: r.hora != null ? String(r.hora) : null,
+    inicio: r.inicio != null ? String(r.inicio) : null,
+    descricao_status: r.descricao_status != null ? String(r.descricao_status) : null,
+    created_at: r.created_at != null ? String(r.created_at) : undefined,
+    updated_at: r.updated_at != null ? String(r.updated_at) : undefined,
+  };
+}
+
+export async function updateOCTP(
+  id: number,
+  payload: { numero?: number; problema?: string | null; acao?: string | null; responsavel?: string | null; inicio?: string | null; descricao_status?: string | null }
+): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (payload.numero !== undefined) body.numero = payload.numero;
+  if (payload.problema !== undefined) body.problema = payload.problema;
+  if (payload.acao !== undefined) body.acao = payload.acao;
+  if (payload.responsavel !== undefined) body.responsavel = payload.responsavel;
+  if (payload.inicio !== undefined) body.inicio = payload.inicio;
+  if (payload.descricao_status !== undefined) body.descricao_status = payload.descricao_status;
+  if (Object.keys(body).length === 0) return;
+  const { error } = await supabase.from("OCTP").update(body).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteOCTP(id: number): Promise<void> {
+  const { error } = await supabase.from("OCTP").delete().eq("id", id);
+  if (error) throw error;
+}
