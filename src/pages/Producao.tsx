@@ -153,6 +153,7 @@ export default function Producao() {
   const [calculatorOperation, setCalculatorOperation] = useState<string | null>(null);
   const [calculatorShouldReset, setCalculatorShouldReset] = useState(false);
   const [calculatorExpression, setCalculatorExpression] = useState("");
+  const [calculatorTargetItemId, setCalculatorTargetItemId] = useState<number | null>(null);
   const [horaFinal, setHoraFinal] = useState("");
   const [restanteHoras, setRestanteHoras] = useState("");
   const [observacao, setObservacao] = useState("");
@@ -523,8 +524,13 @@ export default function Producao() {
   };
 
   const handleCalculatorUseResult = () => {
-    const result = calculatorDisplay.replace(",", ".");
-    setHorasTrabalhadas(result);
+    const result = calculatorDisplay;
+    // Atualiza o campo \"Calculo 1 Horas\" do item que abriu a calculadora
+    if (calculatorTargetItemId != null) {
+      updateItem(calculatorTargetItemId, "horasTrabalhadas", result);
+    }
+    // Mantém também no estado geral (caso algum fluxo legado ainda use)
+    setHorasTrabalhadas(result.replace(",", "."));
     setCalculatorOpen(false);
     setCalculatorDisplay("0");
     setCalculatorPreviousValue(null);
@@ -542,6 +548,9 @@ export default function Producao() {
       setCalculatorOperation(null);
       setCalculatorShouldReset(false);
       setCalculatorExpression("");
+    } else {
+      // Ao fechar, limpa o alvo para evitar aplicar em item errado depois
+      setCalculatorTargetItemId(null);
     }
   };
 
@@ -2248,7 +2257,10 @@ export default function Producao() {
                             variant="ghost"
                             size="icon"
                             className="h-5 w-5 sm:h-6 sm:w-6 shrink-0"
-                            onClick={() => setCalculatorOpen(true)}
+                            onClick={() => {
+                              setCalculatorTargetItemId(item.id);
+                              setCalculatorOpen(true);
+                            }}
                             title="Abrir calculadora"
                           >
                             <Calculator className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -2887,7 +2899,7 @@ export default function Producao() {
                   <div className="flex items-center gap-2 w-full min-w-0 min-[791px]:w-auto">
                     <Label htmlFor="history-linha" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Linha</Label>
                     <Select value={historyLinhaFilter || "todas"} onValueChange={(v) => setHistoryLinhaFilter(v === "todas" ? "" : v)}>
-                      <SelectTrigger id="history-linha" className="h-9 w-full min-w-0 min-[791px]:w-[160px] text-sm">
+                      <SelectTrigger id="history-linha" className="h-9 w-full min-w-0 min-[791px]:w-[260px] text-sm">
                         <SelectValue placeholder="Todas as linhas" />
                       </SelectTrigger>
                       <SelectContent>
@@ -2977,9 +2989,13 @@ export default function Producao() {
                           };
                           // Hora: hora_cabecalho ou, se vazia, hora de cadastro (created_at)
                           const horaFormatada = record.hora_cabecalho || (record.created_at ? formatHoraFinal(record.created_at) : "-");
-                          const percentual = record.percentual_meta != null && record.percentual_meta !== ""
-                            ? `${parseFloat(String(record.percentual_meta)).toFixed(2).replace(".", ",")}%`
-                            : "-";
+                          // Percentual de meta por linha: (qtd_realizada ÷ qtd_planejada) * 100
+                          const qtdPlanejadaNum = parseFloat(String(record.qtd_planejada ?? "0").toString().replace(",", "."));
+                          const qtdRealizadaNum = parseFloat(String(record.qtd_realizada ?? "0").toString().replace(",", "."));
+                          const percentual =
+                            qtdPlanejadaNum > 0
+                              ? `${((qtdRealizadaNum / qtdPlanejadaNum) * 100).toFixed(2).replace(".", ",")}%`
+                              : "-";
                           // Nome da linha (OCLP): exibir nome em vez do número/código
                           const linhaStr = record.linha != null ? String(record.linha).trim() : "";
                           const linhaNome = productionLines.find(
