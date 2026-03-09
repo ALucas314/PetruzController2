@@ -1388,6 +1388,7 @@ export default function Producao() {
         observacao: "",
       },
     ]);
+    setReprocessos([]);
     setLatasPrevista("");
     setLatasRealizadas("");
     setLatasBatidas("");
