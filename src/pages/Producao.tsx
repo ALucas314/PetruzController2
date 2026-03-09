@@ -3015,10 +3015,10 @@ export default function Producao() {
                             <TableRow key={record.id || index}>
                               <TableCell className="text-xs sm:text-sm font-mono">{dataFormatada}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{horaFormatada}</TableCell>
-                              <TableCell className="text-xs sm:text-sm">{record.op || "-"}</TableCell>
-                              <TableCell className="text-xs sm:text-sm font-mono">{record.codigo_item || "-"}</TableCell>
-                              <TableCell className="text-xs sm:text-sm max-w-[200px] truncate font-semibold">{record.descricao_item || "-"}</TableCell>
-                              <TableCell className="text-xs sm:text-sm">{linhaNome}</TableCell>
+                              <TableCell className="text-xs sm:text-sm font-semibold">{record.op || "-"}</TableCell>
+                              <TableCell className="text-xs sm:text-sm font-mono font-semibold">{record.codigo_item || "-"}</TableCell>
+                              <TableCell className="text-xs sm:text-sm font-semibold break-words">{record.descricao_item || "-"}</TableCell>
+                              <TableCell className="text-xs sm:text-sm font-semibold">{linhaNome}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_planejada) || 0)}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_realizada) || 0)}</TableCell>
                               <TableCell className={`text-xs sm:text-sm text-right ${parseFloat(record.diferenca) < 0 ? "text-destructive" :
