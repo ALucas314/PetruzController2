@@ -135,6 +135,7 @@ export default function Producao() {
   const producaoCardRef = useRef<HTMLDivElement>(null);
   const historicoCardRef = useRef<HTMLDivElement>(null);
   const reprocessoCardRef = useRef<HTMLDivElement>(null);
+  const reprocessoExportRestoreRef = useRef<{ input: HTMLInputElement; wrapper: HTMLDivElement }[]>([]);
   const chartPlanejadoRealizadoRef = useRef<HTMLDivElement>(null);
   const chartDiferencaItemRef = useRef<HTMLDivElement>(null);
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
@@ -2461,6 +2462,32 @@ export default function Producao() {
                         filenamePrefix="reprocesso"
                         className="w-full sm:w-auto shrink-0 gap-2"
                         label="Exportar PNG"
+                        onBeforeCapture={() => {
+                          const card = reprocessoCardRef.current;
+                          if (!card) return;
+                          reprocessoExportRestoreRef.current = [];
+                          const cells = card.querySelectorAll("table tbody tr td:nth-child(4)");
+                          cells.forEach((cell) => {
+                            const input = cell.querySelector("input");
+                            if (!input) return;
+                            const el = input as HTMLInputElement;
+                            const value = el.value ?? "";
+                            const wrapper = document.createElement("div");
+                            wrapper.setAttribute("data-export-descricao", "true");
+                            wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[200px]";
+                            wrapper.textContent = value || "—";
+                            el.style.display = "none";
+                            cell.appendChild(wrapper);
+                            reprocessoExportRestoreRef.current.push({ input: el, wrapper });
+                          });
+                        }}
+                        onAfterCapture={() => {
+                          reprocessoExportRestoreRef.current.forEach(({ input, wrapper }) => {
+                            wrapper.remove();
+                            input.style.display = "";
+                          });
+                          reprocessoExportRestoreRef.current = [];
+                        }}
                       />
                     </div>
                   </div>

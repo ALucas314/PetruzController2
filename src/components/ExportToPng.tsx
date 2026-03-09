@@ -16,6 +16,10 @@ export interface ExportToPngProps {
   label?: string;
   /** Se true, expande containers com overflow para capturar tabela/conteúdo inteiro */
   expandScrollable?: boolean;
+  /** Chamado antes da captura (ex.: substituir inputs por texto para aparecer completo no PNG) */
+  onBeforeCapture?: () => void | Promise<void>;
+  /** Chamado depois da captura (ex.: restaurar DOM) */
+  onAfterCapture?: () => void | Promise<void>;
 }
 
 type RestoreStyle = { el: HTMLElement; styles: Record<string, string> };
@@ -116,6 +120,8 @@ export function ExportToPng({
   className,
   label = "Exportar PNG",
   expandScrollable = true,
+  onBeforeCapture,
+  onAfterCapture,
 }: ExportToPngProps) {
   const [exporting, setExporting] = useState(false);
 
@@ -130,6 +136,11 @@ export function ExportToPng({
       await new Promise((r) => setTimeout(r, 300));
 
       const element = targetRef.current;
+
+      if (onBeforeCapture) {
+        await Promise.resolve(onBeforeCapture());
+        await new Promise((r) => setTimeout(r, 50));
+      }
 
       if (expandScrollable) {
         restores = expandScrollableContainers(element);
@@ -205,6 +216,7 @@ export function ExportToPng({
       }
     } finally {
       if (restores.length) restoreStyles(restores);
+      if (onAfterCapture) await Promise.resolve(onAfterCapture());
       setExporting(false);
     }
   };
