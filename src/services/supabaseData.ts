@@ -316,6 +316,7 @@ export async function saveProducao(payload: {
     restante_horas: item.restanteHoras ?? item.restante ?? null,
     hora_final: horaFinalTimestamp,
     percentual_meta: parseFloat(String(item.percentualMeta ?? item.percentual_meta ?? pct)),
+    observacao: item.observacao != null && String(item.observacao).trim() !== "" ? String(item.observacao).trim() : null,
     total_qtd_planejada: 0,
     total_qtd_realizada: 0,
     total_diferenca: 0,

@@ -897,6 +897,9 @@ export default function Producao() {
 
       await loadAllRecords();
 
+      // Evitar que o useEffect recarregue do banco e sobrescreva os itens (ex.: observação por linha)
+      if (wasUpdate) skipNextDataLoadRef.current = true;
+
       // Se era edição (registro já existia), mantém os dados na tela; senão reseta para novo cadastro
       if (!wasUpdate) {
         const hoje = new Date().toISOString().split("T")[0];
