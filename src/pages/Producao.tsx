@@ -3017,7 +3017,7 @@ export default function Producao() {
                               <TableCell className="text-xs sm:text-sm font-mono">{horaFormatada}</TableCell>
                               <TableCell className="text-xs sm:text-sm">{record.op || "-"}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{record.codigo_item || "-"}</TableCell>
-                              <TableCell className="text-xs sm:text-sm max-w-[200px] truncate">{record.descricao_item || "-"}</TableCell>
+                              <TableCell className="text-xs sm:text-sm max-w-[200px] truncate font-semibold">{record.descricao_item || "-"}</TableCell>
                               <TableCell className="text-xs sm:text-sm">{linhaNome}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_planejada) || 0)}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_realizada) || 0)}</TableCell>
