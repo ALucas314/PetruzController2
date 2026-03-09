@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import {
   LayoutDashboard,
   Factory,
-  FileText,
   ChevronLeft,
   ChevronRight,
   BarChart3,
@@ -49,7 +48,6 @@ const menuItems: MenuItem[] = [
     ]
   },
   { title: "Importar Excel", url: "/importar-excel", icon: FileSpreadsheet },
-  { title: "Relatórios", url: "/relatorios", icon: FileText },
 ];
 
 // ============================================================================
