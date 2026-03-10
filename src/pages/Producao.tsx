@@ -223,10 +223,11 @@ export default function Producao() {
   const [filiaisLoadError, setFiliaisLoadError] = useState<string | null>(null);
   const [itemCatalogLoadError, setItemCatalogLoadError] = useState<string | null>(null);
   const [filialSelecionada, setFilialSelecionada] = useState<string>("");
-  // Filtros do histórico: intervalo de datas e linha (padrão = data de hoje, permitindo seleção)
+  // Filtros do histórico: intervalo de datas, linha e filial (padrão = data de hoje, permitindo seleção)
   const [historyDataInicio, setHistoryDataInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyDataFim, setHistoryDataFim] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyLinhaFilter, setHistoryLinhaFilter] = useState<string>("");
+  const [historyFilialFilter, setHistoryFilialFilter] = useState<string>("todas");
 
   const [items, setItems] = useState<ProductionItem[]>([
     {
@@ -1341,8 +1342,8 @@ export default function Producao() {
     observacao,
   ]);
 
-  // Função para carregar histórico de produção (intervalo de datas e filtro por linha)
-  const loadHistory = async (opts?: { data?: string; dataInicio?: string; dataFim?: string; linha?: string }) => {
+  // Função para carregar histórico de produção (intervalo de datas, filtro por linha e filial)
+  const loadHistory = async (opts?: { data?: string; dataInicio?: string; dataFim?: string; linha?: string; filialCodigo?: string }) => {
     setHistoryLoading(true);
     try {
       const params = new URLSearchParams({ limit: "500" });
@@ -1350,13 +1351,19 @@ export default function Producao() {
       const dataInicio = opts?.dataInicio ?? historyDataInicio;
       const dataFim = opts?.dataFim ?? historyDataFim;
       const linha = opts?.linha ?? historyLinhaFilter;
+      const filialCodigo = opts?.filialCodigo ?? historyFilialFilter;
       if (dataInicio) params.set("dataInicio", dataInicio);
       if (dataFim) params.set("dataFim", dataFim);
       if (linha && linha.trim() !== "") params.set("linha", linha.trim());
       // Data única (legado, quando não usa intervalo)
       if (!dataInicio && !dataFim && opts?.data) params.set("data", opts.data);
-      if (filialSelecionada) {
-        const filialNome = filiais.find(f => f.codigo === filialSelecionada)?.nome;
+      // Filial: se filtro estiver em "todas", não filtra; caso contrário, usa a filial escolhida
+      const filialCodigoEfetivo =
+        filialCodigo && filialCodigo !== "todas"
+          ? filialCodigo
+          : filialSelecionada || "";
+      if (filialCodigoEfetivo) {
+        const filialNome = filiais.find(f => f.codigo === filialCodigoEfetivo)?.nome;
         if (filialNome) params.set("filialNome", filialNome);
       }
       const result = await getProducaoHistory({
@@ -3333,10 +3340,10 @@ export default function Producao() {
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />
 
             <div className="relative z-10">
-              {/* Filtros: intervalo de datas e linha — em coluna abaixo de 791px */}
-              <div className="flex flex-col gap-4 min-[791px]:flex-row min-[791px]:flex-nowrap min-[791px]:items-center min-[791px]:justify-between w-full p-4 min-[791px]:p-6 min-[791px]:pb-5 min-[791px]:pt-6 lg:p-8 transition-all duration-500 bg-gradient-to-r from-transparent via-primary/2 to-transparent rounded-t-2xl overflow-visible">
-                <div className="flex flex-col gap-3 min-[791px]:flex-row min-[791px]:flex-nowrap min-[791px]:items-center min-[791px]:gap-2 overflow-visible">
-                  <div className="flex items-center gap-2 w-full min-w-0 min-[791px]:flex-1 min-[791px]:flex-initial min-[791px]:min-w-[160px] overflow-visible">
+              {/* Filtros: intervalo de datas, filial e linha — coluna em telas menores, linha apenas em telas grandes (mais espaço com sidebar) */}
+              <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between w-full p-4 lg:p-8 lg:pb-5 lg:pt-6 transition-all duration-500 bg-gradient-to-r from-card via-card to-card rounded-t-2xl overflow-visible">
+                <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 overflow-visible">
+                  <div className="flex items-center gap-2 w-full min-w-0 lg:flex-1 lg:min-w-[150px] overflow-visible">
                     <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
                       <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
                     </span>
@@ -3346,11 +3353,11 @@ export default function Producao() {
                       type="date"
                       value={historyDataInicio}
                       onChange={(e) => setHistoryDataInicio(e.target.value)}
-                      className="h-9 flex-1 min-w-[120px] w-full min-[791px]:w-[140px] text-sm overflow-visible"
+                      className="h-9 flex-1 min-w-[120px] w-full lg:w-[130px] text-sm overflow-visible"
                       title="Data inicial do intervalo"
                     />
                   </div>
-                  <div className="flex items-center gap-2 w-full min-w-0 min-[791px]:flex-1 min-[791px]:flex-initial min-[791px]:min-w-[160px] overflow-visible">
+                  <div className="flex items-center gap-2 w-full min-w-0 lg:flex-1 lg:min-w-[150px] overflow-visible">
                     <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
                       <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
                     </span>
@@ -3360,14 +3367,41 @@ export default function Producao() {
                       type="date"
                       value={historyDataFim}
                       onChange={(e) => setHistoryDataFim(e.target.value)}
-                      className="h-9 flex-1 min-w-[120px] w-full min-[791px]:w-[140px] text-sm overflow-visible"
+                      className="h-9 flex-1 min-w-[120px] w-full lg:w-[130px] text-sm overflow-visible"
                       title="Data final do intervalo"
                     />
                   </div>
-                  <div className="flex items-center gap-2 w-full min-w-0 min-[791px]:w-auto">
+                  <div className="flex items-center gap-2 w-full min-w-0 lg:w-auto">
+                    <Label htmlFor="history-filial" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                      Filial
+                    </Label>
+                    <Select
+                      value={historyFilialFilter}
+                      onValueChange={(v) => setHistoryFilialFilter(v)}
+                    >
+                      <SelectTrigger
+                        id="history-filial"
+                        className="h-9 w-full min-w-0 lg:w-[220px] text-sm"
+                      >
+                        <SelectValue placeholder="Todas as filiais" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todas">Todas as filiais</SelectItem>
+                        {filiais.map((filial) => (
+                          <SelectItem
+                            key={filial.id}
+                            value={filial.codigo ?? String(filial.id)}
+                          >
+                            {filial.nome}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2 w-full min-w-0 lg:w-auto">
                     <Label htmlFor="history-linha" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Linha</Label>
                     <Select value={historyLinhaFilter || "todas"} onValueChange={(v) => setHistoryLinhaFilter(v === "todas" ? "" : v)}>
-                      <SelectTrigger id="history-linha" className="h-9 w-full min-w-0 min-[791px]:w-[260px] text-sm">
+                      <SelectTrigger id="history-linha" className="h-9 w-full min-w-0 lg:w-[220px] text-sm">
                         <SelectValue placeholder="Todas as linhas" />
                       </SelectTrigger>
                       <SelectContent>
