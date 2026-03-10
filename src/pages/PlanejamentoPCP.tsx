@@ -11,6 +11,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
+import { getItemByCode } from "@/services/supabaseData";
 import { Plus, Trash2, Factory, Download, Calendar, FileText, Clock } from "lucide-react";
 import { toPng } from "html-to-image";
 
@@ -160,13 +161,16 @@ export default function PlanejamentoPCP() {
         return isNaN(parsed) ? 0 : parsed;
     };
 
-    // Atualizar item
+    // Atualizar item (trata campos numéricos e de texto separadamente)
     const updateItem = (id: number, field: keyof PlanejamentoItem, value: string | number) => {
-        setItems(
-            items.map((item) => {
-                if (item.id === id) {
-                    // Se for string formatada, converter para número antes de salvar
-                    // Se for string vazia, manter como 0 mas permitir exibição vazia
+        const numericFields: (keyof PlanejamentoItem)[] = ["capacidade", "latas", "corte", "programado", "realizado", "diferenca"];
+        setItems((prevItems) =>
+            prevItems.map((item) => {
+                if (item.id !== id) return item;
+
+                const updated: PlanejamentoItem = { ...item };
+
+                if (numericFields.includes(field)) {
                     let numValue: number;
                     if (typeof value === "string") {
                         if (value === "" || value.trim() === "") {
@@ -177,20 +181,48 @@ export default function PlanejamentoPCP() {
                     } else {
                         numValue = value;
                     }
-                    const updated = { ...item, [field]: numValue };
-                    // Calcular diferença automaticamente
+                    (updated as any)[field] = numValue;
+
                     // Diferença = Realizado - Programado
-                    // Positivo = feito a mais, Negativo = feito a menos
                     if (field === "programado" || field === "realizado") {
                         const programado = field === "programado" ? numValue : updated.programado;
                         const realizado = field === "realizado" ? numValue : updated.realizado;
                         updated.diferenca = realizado - programado;
                     }
-                    return updated;
+                } else {
+                    // Campos de texto: linhas, invoice, cod, item, linha
+                    (updated as any)[field] = typeof value === "string" ? value : String(value);
                 }
-                return item;
+
+                return updated;
             })
         );
+    };
+
+    // Quando digitar o código, buscar descrição do item na OCTI e preencher o campo Item
+    const handleCodBlur = async (id: number, rawValue: string) => {
+        const code = (rawValue || "").trim();
+
+        // Atualiza o código no estado
+        updateItem(id, "cod", rawValue);
+
+        if (!code) {
+            // Se limpar o código, também limpa a descrição do item
+            updateItem(id, "item", "");
+            return;
+        }
+
+        try {
+            const result = await getItemByCode(code);
+            if (result && result.nome_item) {
+                const nome = result.nome_item as string;
+                setItems((prev) =>
+                    prev.map((item) => (item.id === id ? { ...item, item: nome } : item))
+                );
+            }
+        } catch (e) {
+            console.error("Erro ao buscar item por código no planejamento PCP:", e);
+        }
     };
 
     // Calcular totais
@@ -498,6 +530,7 @@ export default function PlanejamentoPCP() {
                                                         <Input
                                                             value={item.cod}
                                                             onChange={(e) => updateItem(item.id, "cod", e.target.value)}
+                                                            onBlur={(e) => handleCodBlur(item.id, e.target.value)}
                                                             className="h-9 sm:h-10 text-xs sm:text-sm"
                                                             placeholder="Cod"
                                                         />

@@ -3439,8 +3439,9 @@ export default function Producao() {
                             setCurrentView("cadastro");
                             loadFromDatabase(dataDia, recordFilialNome || undefined);
                           };
-                          // Hora: hora_cabecalho ou, se vazia, hora de cadastro (created_at)
-                          const horaFormatada = record.hora_cabecalho || (record.created_at ? formatHoraFinal(record.created_at) : "-");
+                          // Hora: última modificação (updated_at); se não houver, usa hora_cabecalho; senão created_at
+                          const horaReferencia = record.updated_at || record.hora_cabecalho || record.created_at;
+                          const horaFormatada = horaReferencia ? formatHoraFinal(horaReferencia) : "-";
                           // Percentual de meta por linha: (qtd_realizada ÷ qtd_planejada) * 100
                           const qtdPlanejadaNum = parseFloat(String(record.qtd_planejada ?? "0").toString().replace(",", "."));
                           const qtdRealizadaNum = parseFloat(String(record.qtd_realizada ?? "0").toString().replace(",", "."));
