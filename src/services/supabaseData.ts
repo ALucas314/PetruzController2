@@ -501,16 +501,31 @@ export interface OCTPRow {
   hora: string | null; // ISO timestamp from DB
   inicio: string | null; // YYYY-MM-DD
   descricao_status: string | null;
+  data_dia?: string | null; // data do documento (YYYY-MM-DD)
+  filial_nome?: string | null; // filial do documento
   created_at?: string;
   updated_at?: string;
 }
 
-export async function getOCTPByInicio(inicio: string): Promise<OCTPRow[]> {
-  const { data, error } = await supabase
+/** Busca registros OCTP vinculados a um documento específico (data + filial) e à data de início. */
+export async function getOCTPByInicio(
+  inicio: string,
+  dataDia?: string,
+  filialNome?: string
+): Promise<OCTPRow[]> {
+  let query = supabase
     .from("OCTP")
-    .select("id, numero, problema, acao, responsavel, hora, inicio, descricao_status, created_at, updated_at")
-    .eq("inicio", inicio)
-    .order("numero", { ascending: true });
+    .select("id, numero, problema, acao, responsavel, hora, inicio, descricao_status, data_dia, filial_nome, created_at, updated_at")
+    .eq("inicio", inicio);
+
+  if (dataDia) {
+    query = query.eq("data_dia", dataDia);
+  }
+  if (filialNome) {
+    query = query.eq("filial_nome", filialNome);
+  }
+
+  const { data, error } = await query.order("numero", { ascending: true });
   if (error) throw error;
   return (data || []).map((r: Record<string, unknown>) => ({
     id: Number(r.id),
@@ -521,6 +536,8 @@ export async function getOCTPByInicio(inicio: string): Promise<OCTPRow[]> {
     hora: r.hora != null ? String(r.hora) : null,
     inicio: r.inicio != null ? String(r.inicio) : null,
     descricao_status: r.descricao_status != null ? String(r.descricao_status) : null,
+    data_dia: r.data_dia != null ? String(r.data_dia) : null,
+    filial_nome: r.filial_nome != null ? String(r.filial_nome) : null,
     created_at: r.created_at != null ? String(r.created_at) : undefined,
     updated_at: r.updated_at != null ? String(r.updated_at) : undefined,
   }));
@@ -533,6 +550,8 @@ export async function insertOCTP(payload: {
   responsavel?: string | null;
   inicio?: string | null;
   descricao_status?: string | null;
+  dataDia?: string | null;
+  filialNome?: string | null;
 }): Promise<OCTPRow> {
   const row = {
     numero: payload.numero,
@@ -540,6 +559,8 @@ export async function insertOCTP(payload: {
     acao: payload.acao ?? null,
     responsavel: payload.responsavel ?? null,
     inicio: payload.inicio ?? new Date().toISOString().slice(0, 10),
+    data_dia: payload.dataDia ?? null,
+    filial_nome: payload.filialNome ?? null,
     descricao_status: payload.descricao_status ?? null,
   };
   const { data, error } = await supabase.from("OCTP").insert(row).select().single();
@@ -561,7 +582,16 @@ export async function insertOCTP(payload: {
 
 export async function updateOCTP(
   id: number,
-  payload: { numero?: number; problema?: string | null; acao?: string | null; responsavel?: string | null; inicio?: string | null; descricao_status?: string | null }
+  payload: {
+    numero?: number;
+    problema?: string | null;
+    acao?: string | null;
+    responsavel?: string | null;
+    inicio?: string | null;
+    descricao_status?: string | null;
+    dataDia?: string | null;
+    filialNome?: string | null;
+  }
 ): Promise<void> {
   const body: Record<string, unknown> = {};
   if (payload.numero !== undefined) body.numero = payload.numero;
@@ -570,6 +600,9 @@ export async function updateOCTP(
   if (payload.responsavel !== undefined) body.responsavel = payload.responsavel;
   if (payload.inicio !== undefined) body.inicio = payload.inicio;
   if (payload.descricao_status !== undefined) body.descricao_status = payload.descricao_status;
+   // Manter vínculo com documento, se necessário atualizar
+  if (payload.dataDia !== undefined) body.data_dia = payload.dataDia;
+  if (payload.filialNome !== undefined) body.filial_nome = payload.filialNome;
   if (Object.keys(body).length === 0) return;
   const { error } = await supabase.from("OCTP").update(body).eq("id", id);
   if (error) throw error;

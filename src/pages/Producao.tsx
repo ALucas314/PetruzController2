@@ -688,11 +688,18 @@ export default function Producao() {
     setReprocessos(reprocessos.filter((r) => r.id !== id));
   };
 
-  // Carregar OCTP por data (início)
+  // Carregar OCTP por data (início) + documento (dataCabecalhoSelecionada + filial)
   const loadOCTP = useCallback(async () => {
+    const dataDocumento = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
+    const filialNome = filiais.find((f) => f.codigo === filialSelecionada)?.nome ?? null;
+
     setOctpLoading(true);
     try {
-      const rows = await getOCTPByInicio(octpInicio);
+      const rows = await getOCTPByInicio(
+        octpInicio,
+        dataDocumento,
+        filialNome || undefined
+      );
       setOctpItems(
         rows.map((r: OCTPRow) => ({
           id: r.id,
@@ -712,7 +719,8 @@ export default function Producao() {
     } finally {
       setOctpLoading(false);
     }
-  }, [octpInicio, toast]);
+  }, [octpInicio, dataCabecalhoSelecionada, filialSelecionada, filiais, toast]);
+
 
   useEffect(() => {
     if (currentView === "cadastro") loadOCTP();
@@ -729,6 +737,9 @@ export default function Producao() {
   };
 
   const addOCTPItem = async () => {
+    const dataDocumento = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
+    const filialNome = filiais.find((f) => f.codigo === filialSelecionada)?.nome ?? null;
+
     const newNumero = octpItems.length > 0 ? Math.max(...octpItems.map((o) => o.numero)) + 1 : 1;
     try {
       const inserted = await insertOCTP({
@@ -738,6 +749,8 @@ export default function Producao() {
         responsavel: "",
         inicio: octpInicio,
         descricao_status: "",
+        dataDia: dataDocumento,
+        filialNome: filialNome,
       });
       setOctpItems((prev) => [
         ...prev,
@@ -763,7 +776,10 @@ export default function Producao() {
     if (!item) return;
     const updated = { ...item, [field]: value };
     setOctpItems(octpItems.map((o) => (o.id === id ? updated : o)));
-    const payload: Record<string, unknown> = {};
+    const payload: Record<string, unknown> = {
+      dataDia: dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
+      filialNome: filiais.find((f) => f.codigo === filialSelecionada)?.nome ?? null,
+    };
     if (field === "numero") payload.numero = value as number;
     else if (field === "problema") payload.problema = value as string;
     else if (field === "acao") payload.acao = value as string;
