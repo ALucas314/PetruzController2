@@ -3139,15 +3139,15 @@ function Producao() {
                     </div>
                   </div>
 
-                  {/* Gráfico de pizza: porcentagem por status — visual moderno */}
+                  {/* Gráfico de pizza: porcentagem por status — no desktop, descrições ao lado */}
                   <div className="mt-6 pt-5 border-t border-border/50 flex flex-col items-center">
-                    <div className="w-full max-w-[360px] mx-auto rounded-2xl border border-border/50 bg-gradient-to-b from-muted/20 to-muted/5 p-5 sm:p-6 shadow-sm">
-                      <h4 className="text-sm font-semibold text-foreground/90 tracking-tight mb-5 w-full text-center">Status (porcentagens)</h4>
+                    <div className="w-full max-w-[360px] sm:max-w-none mx-auto rounded-2xl border border-border/50 bg-gradient-to-b from-muted/20 to-muted/5 p-5 sm:p-6 shadow-sm">
+                      <h4 className="text-sm font-semibold text-foreground/90 tracking-tight mb-5 w-full text-center sm:text-left">Status (porcentagens)</h4>
                       {octpStatusPieData.length === 0 ? (
                         <p className="text-sm text-muted-foreground py-8 text-center rounded-xl bg-muted/20 border border-dashed border-border/60">Selecione os status nos registros acima para ver o gráfico.</p>
                       ) : (
-                        <div className="flex flex-col items-center w-full gap-6">
-                          <div className="octp-pie-chart-wrapper w-full max-w-[300px] min-w-[240px] h-[260px] sm:h-[300px] shrink-0 flex items-center justify-center mx-auto [filter:drop-shadow(0_4px_12px_rgba(0,0,0,0.06))]">
+                        <div className="flex flex-col sm:flex-row items-center sm:items-stretch sm:justify-center w-full gap-6 sm:gap-8">
+                          <div className="octp-pie-chart-wrapper w-full max-w-[300px] sm:max-w-[280px] min-w-[240px] h-[260px] sm:h-[280px] shrink-0 flex items-center justify-center mx-auto sm:mx-0 [filter:drop-shadow(0_4px_12px_rgba(0,0,0,0.06))]">
                             <ResponsiveContainer width="100%" height="100%">
                               <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                                 <Pie
@@ -3181,15 +3181,15 @@ function Producao() {
                               </PieChart>
                             </ResponsiveContainer>
                           </div>
-                          <ul className="flex flex-wrap gap-2.5 justify-center">
+                          <ul className="flex flex-wrap gap-2.5 justify-center sm:justify-start sm:flex-col sm:gap-1.5 sm:shrink-0">
                             {octpStatusPieData.map((d) => (
                               <li
                                 key={d.name}
-                                className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm bg-muted/40 border border-border/50 shadow-sm hover:bg-muted/60 hover:border-border/70 transition-colors"
+                                className="inline-flex items-center gap-2 rounded-full sm:rounded-md px-3 py-1.5 sm:px-2.5 sm:py-1 text-sm bg-muted/40 border border-border/50 shadow-sm hover:bg-muted/60 hover:border-border/70 transition-colors"
                               >
                                 <span className="h-3 w-3 rounded-full shrink-0 ring-2 ring-background/80" style={{ backgroundColor: d.color }} />
                                 <span className="text-muted-foreground">{d.name}</span>
-                                <span className="font-semibold text-foreground tabular-nums">{d.value}%</span>
+                                <span className="font-semibold text-foreground tabular-nums shrink-0">{d.value}%</span>
                               </li>
                             ))}
                           </ul>
