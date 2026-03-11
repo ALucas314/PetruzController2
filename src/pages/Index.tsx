@@ -150,13 +150,25 @@ const Index = () => {
     );
   };
 
-  // Preparar dados para os gráficos
-  const chartData = revenueData.map((item) => ({
-    name: item.month,
-    planejado: item.receita,
-    realizado: item.despesas,
-    diferenca: item.receita - item.despesas,
-  }));
+  // Gráfico Planejado vs Realizado vs Diferença: uma única linha com totais do período filtrado (soma), não uma barra por data
+  const chartData = (() => {
+    const totalPlanejado = stats ? parseFloat(String(stats.totalPlanejado || "0").replace(",", ".")) : 0;
+    const totalRealizado = stats ? parseFloat(String(stats.totalRealizado || "0").replace(",", ".")) : 0;
+    const totalDiferenca = stats ? parseFloat(String(stats.diferenca || "0").replace(",", ".")) : 0;
+    const label = dataInicio && dataFim
+      ? (dataInicio === dataFim
+          ? new Date(dataInicio + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
+          : `${new Date(dataInicio + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} a ${new Date(dataFim + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`)
+      : "Total";
+    return [
+      {
+        name: label,
+        planejado: totalPlanejado,
+        realizado: totalRealizado,
+        diferenca: totalDiferenca,
+      },
+    ];
+  })();
 
   // Gráfico de pizza: mesmo critério da Análise de produção — percentual de meta (total realizado ÷ total planejado)
   const statusData = (() => {
@@ -243,7 +255,7 @@ const Index = () => {
                   </div>
                   <div>
                     <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Planejado vs Realizado vs Diferença</h3>
-                    <p className="text-xs sm:text-sm text-muted-foreground/80 mt-0.5">Comparação por período — use o intervalo de datas acima para filtrar</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground/80 mt-0.5">Soma do total planejado, realizado e diferença no período filtrado</p>
                   </div>
                 </div>
                 <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="dashboard-planejado-realizado-diferenca" expandScrollable={false} className="shrink-0" />

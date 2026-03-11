@@ -20,7 +20,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import Producao from "./pages/Producao";
-import PlanejamentoPCP from "./pages/PlanejamentoPCP";
+import PlanejamentoProducao from "./pages/PlanejamentoProducao";
 import Itens from "./pages/Itens";
 import ImportarExcel from "./pages/ImportarExcel";
 import CadastroLinhas from "./pages/CadastroLinhas";
@@ -56,7 +56,7 @@ const AppRoutes = () => {
         <Route path="/dashboard" element={<ProtectedRoute><Index /></ProtectedRoute>} />
         <Route path="/producao" element={<ProtectedRoute><Producao /></ProtectedRoute>} />
         <Route path="/analise-producao" element={<ProtectedRoute><Producao /></ProtectedRoute>} />
-        <Route path="/planejamento-pcp" element={<ProtectedRoute><PlanejamentoPCP /></ProtectedRoute>} />
+        <Route path="/planejamento-pcp" element={<ProtectedRoute><PlanejamentoProducao /></ProtectedRoute>} />
         <Route path="/cadastro-linhas" element={<ProtectedRoute><CadastroLinhas /></ProtectedRoute>} />
         <Route path="/itens" element={<ProtectedRoute><Itens /></ProtectedRoute>} />
         <Route path="/importar-excel" element={<ProtectedRoute><ImportarExcel /></ProtectedRoute>} />

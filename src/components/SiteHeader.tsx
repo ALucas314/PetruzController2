@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { BarChart3, ChevronLeft, ChevronRight, FilePlus, CircleUser, LogOut, Menu } from "lucide-react";
+import { BarChart3, ChevronLeft, ChevronRight, FilePlus, CircleUser, LogOut, Menu, Save, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -56,7 +56,7 @@ export function SiteHeader() {
         "fixed top-0 left-0 right-0 z-50 pt-[env(safe-area-inset-top)] lg:sticky lg:pt-0 lg:z-40 lg:top-0"
       )}
     >
-      <div className="flex h-14 lg:h-16 items-center gap-2 sm:gap-4 px-3 sm:px-6 lg:px-8 min-w-0 max-w-full">
+      <div className="flex flex-wrap min-h-[56px] lg:h-16 items-center gap-x-2 gap-y-1 sm:gap-x-4 px-3 sm:px-6 lg:px-8 min-w-0 max-w-full">
         {/* Botão menu (hambúrguer) - só no mobile, integrado ao header */}
         <Button
           variant="ghost"
@@ -67,29 +67,21 @@ export function SiteHeader() {
         >
           <Menu className="h-10 w-10" />
         </Button>
-        {/* Logo / marca */}
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        {/* Logo (apenas ícone, sem texto – nome já aparece na sidebar) */}
+        <div className="flex shrink-0 items-center">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary shadow-sm">
             <BarChart3 className="h-5 w-5 text-primary-foreground" />
           </div>
-          <div className="hidden sm:block">
-            <span className="text-sm font-bold tracking-tight text-foreground">
-              ERP Controller
-            </span>
-            <span className="ml-1.5 text-sm font-semibold text-primary">
-              Petruz
-            </span>
-          </div>
         </div>
 
-        {/* Título da página atual */}
+        {/* Título da página atual (somente em telas maiores, fora da experiência mobile) */}
         {pageTitle && (
-          <>
-            <div className="h-4 w-px shrink-0 bg-border hidden sm:block" aria-hidden />
-            <span className="truncate text-sm font-medium text-muted-foreground max-w-[140px] sm:max-w-[220px] lg:max-w-[280px] min-w-0">
+          <div className="hidden lg:flex items-center gap-2 min-w-0">
+            <div className="h-4 w-px shrink-0 bg-border" aria-hidden />
+            <span className="truncate text-sm font-medium text-muted-foreground max-w-[280px] min-w-0">
               {pageTitle}
             </span>
-          </>
+          </div>
         )}
 
         {/* Navegação entre documentos (setas) - quando a tela de cadastro fornece */}
@@ -137,24 +129,49 @@ export function SiteHeader() {
 
         <div className="flex-1" />
 
-        {/* Botão Novo documento */}
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 h-9 min-h-[44px] sm:h-8 sm:min-h-0 px-3"
-                onClick={handleNewDocument}
-                aria-label="Novo documento"
-              >
-                <FilePlus className="h-4 w-4" />
-                <span className="hidden sm:inline">Novo documento</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Criar novo documento / cadastro</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        {/* Botões de ação do documento */}
+        <div className="flex items-center gap-2">
+          {documentNav?.onSave && (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-success z-20 relative backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed h-9 sm:h-8"
+                    onClick={documentNav.onSave}
+                    disabled={documentNav.saving}
+                    aria-label="Salvar documento"
+                  >
+                    {documentNav.saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Salvar no banco de dados</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 min-h-[44px] w-9 min-w-[44px] sm:h-8 sm:w-8 sm:min-h-0 sm:min-w-0"
+                  onClick={handleNewDocument}
+                  aria-label="Novo documento"
+                >
+                  <FilePlus className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Criar novo documento / cadastro</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
 
         {/* Perfil: código = ID do usuário */}
         {user ? (

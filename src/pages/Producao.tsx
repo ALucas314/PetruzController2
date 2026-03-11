@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, MouseEvent, useCallback, useRef, RefObject } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList } from "lucide-react";
+import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck } from "lucide-react";
 import { ExportToPng } from "@/components/ExportToPng";
 import {
   Dialog,
@@ -116,6 +116,45 @@ const OCTP_STATUS_OPTIONS = [
   { id: "A iniciar", label: "A iniciar", color: "#3b82f6" },           // Azul
 ] as const;
 
+// Quebra texto em até 3 linhas para labels do eixo (gráfico Planejado vs Realizado)
+function wrapTextInThreeLines(text: string, maxCharsPerLine = 22): string[] {
+  const t = (text ?? "").trim();
+  if (!t) return ["", "", ""];
+  const words = t.split(/\s+/);
+  if (words.length <= 3) return [words.join(" "), "", ""].slice(0, 3);
+  const lines: string[] = [];
+  let current = "";
+  const targetLen = Math.max(8, Math.ceil(t.length / 3));
+  for (const w of words) {
+    const next = current ? `${current} ${w}` : w;
+    if (next.length <= targetLen || !current) {
+      current = next;
+    } else {
+      lines.push(current);
+      current = w;
+    }
+  }
+  if (current) lines.push(current);
+  while (lines.length < 3) lines.push("");
+  return lines.slice(0, 3);
+}
+
+// Tick do eixo X com nome do item em até 3 linhas, alinhado à coluna
+const XAxisTickThreeLines = (props: { x?: number; y?: number; payload?: { value?: string; name?: string } }) => {
+  const { x = 0, y = 0, payload } = props;
+  const label = payload?.value ?? (payload as { name?: string })?.name ?? "";
+  const lines = wrapTextInThreeLines(label);
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text textAnchor="middle" fontSize={10} fill="hsl(var(--muted-foreground))">
+        {lines.map((line, i) => (
+          <tspan key={i} x={0} dy={i === 0 ? 0 : "1.1em"}>{line}</tspan>
+        ))}
+      </text>
+    </g>
+  );
+};
+
 // Componente customizado para renderizar labels nos gráficos de barra
 const CustomBarLabel = (props: any) => {
   const { x, y, width, value, dataKey } = props;
@@ -161,6 +200,7 @@ const DRAFT_DEBOUNCE_MS = 1000;
 
 function Producao() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
   const { setDocumentNav } = useDocumentNav();
@@ -188,7 +228,7 @@ function Producao() {
   const isNewDocumentRef = useRef(false); // true após "Novo documento" para não recarregar do DB e manter setas habilitadas
   const justLoadedByIndexRef = useRef(false); // true após carregar doc pela seta, para o useEffect não sobrescrever com load sem filial
   const skipNextDataLoadRef = useRef(false); // true após restaurar rascunho, para não sobrescrever com loadFromDatabase
-  const latestDraftRef = useRef<{ user_id: number; payload: Record<string, unknown> } | null>(null); // para salvar ao sair/aba
+  const latestDraftRef = useRef<{ user_id: string; payload: Record<string, unknown> } | null>(null); // para salvar ao sair/aba
   const [currentTime, setCurrentTime] = useState(new Date());
   const [horasTrabalhadas, setHorasTrabalhadas] = useState("");
   const [calculo1HorasEditMode, setCalculo1HorasEditMode] = useState(false);
@@ -1297,32 +1337,25 @@ function Producao() {
 
         // Adicionar a data ao conjunto de datas disponíveis
         setAvailableDates(prev => new Set([...prev, dataToLoad]));
-        setSaveStatus({
-          success: true,
-          message: `${result.count} item(ns) carregado(s) do banco!`,
+        toast({
+          title: "Dados carregados",
+          description: `${result.count} item(ns) carregado(s) do banco!`,
+          variant: "default",
         });
-
-        setTimeout(() => {
-          setSaveStatus(null);
-        }, 5000);
       } else {
-        setSaveStatus({
-          success: false,
-          message: `Nenhum dado encontrado para ${formatDateShort(dataToLoad)}`,
+        toast({
+          title: "Nenhum dado encontrado",
+          description: `Nenhum dado para ${formatDateShort(dataToLoad)}`,
+          variant: "destructive",
         });
-        setTimeout(() => {
-          setSaveStatus(null);
-        }, 3000);
       }
     } catch (error: any) {
       console.error("Erro ao carregar produção:", error);
-      setSaveStatus({
-        success: false,
-        message: error.message || "Erro ao carregar dados do banco",
+      toast({
+        title: "Erro ao carregar",
+        description: error.message || "Erro ao carregar dados do banco",
+        variant: "destructive",
       });
-      setTimeout(() => {
-        setSaveStatus(null);
-      }, 5000);
     } finally {
       setLoading(false);
     }
@@ -1811,6 +1844,15 @@ function Producao() {
         createNewCadastro();
       },
       navLabel: isCadastroView && total > 0 ? (curIdx >= 0 ? `${curIdx + 1} de ${total}` : `Novo · ${total} doc.`) : undefined,
+      saving,
+      onSave: () => {
+        // Usa o mesmo fluxo do botão principal Salvar
+        if (!saving) {
+          void (async () => {
+            await saveToDatabase();
+          })();
+        }
+      },
     });
     return () => setDocumentNav(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1946,12 +1988,9 @@ function Producao() {
               </div>
             </div>
 
-            {/* Card: Histórico */}
+            {/* Card: Planejamento de produção */}
             <div
-              onClick={() => {
-                setCurrentView("historico");
-                loadHistory();
-              }}
+              onClick={() => navigate("/planejamento-pcp")}
               className="group/card relative rounded-2xl border border-border/50 bg-gradient-to-br from-card/95 via-card/90 to-card/85 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.1)] hover:shadow-[0_8px_30px_rgba(59,130,246,0.2)] transition-all duration-500 overflow-hidden cursor-pointer transform hover:-translate-y-1 hover:scale-[1.01]"
             >
               {/* Efeitos de fundo animados */}
@@ -1968,7 +2007,7 @@ function Producao() {
                     <div className="absolute inset-0 bg-primary/15 blur-xl rounded-full scale-125 opacity-0 group-hover/card:opacity-100 group-hover/card:scale-100 transition-all duration-500" />
                     <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 group-hover/card:scale-105 group-hover/card:rotate-2 transition-all duration-500 border border-primary/30 backdrop-blur-sm">
                       <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/15 via-white/5 to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-500" />
-                      <Database className="relative h-8 w-8 text-primary group-hover/card:scale-110 transition-transform duration-500" />
+                      <CalendarCheck className="relative h-8 w-8 text-primary group-hover/card:scale-110 transition-transform duration-500" />
                       <Sparkles className="absolute -top-0.5 -right-0.5 h-4 w-4 text-primary/50 opacity-0 group-hover/card:opacity-100 group-hover/card:animate-spin transition-opacity duration-300" />
                     </div>
                   </div>
@@ -1976,18 +2015,18 @@ function Producao() {
                   {/* Conteúdo */}
                   <div className="space-y-2">
                     <h2 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-foreground via-foreground/95 to-foreground/90 bg-clip-text text-transparent group-hover/card:from-primary group-hover/card:via-primary/90 group-hover/card:to-primary/80 transition-all duration-500">
-                      Histórico de Análise de Produção
+                      Planejamento de produção
                     </h2>
                     <p className="text-xs sm:text-sm text-muted-foreground/70 leading-relaxed">
-                      Visualize registros anteriores de produção
+                      Planeje e controle a produção (PCP)
                     </p>
                   </div>
 
                   {/* Badge e seta */}
                   <div className="flex items-center gap-2 pt-1">
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/25 text-primary text-[10px] sm:text-xs font-medium group-hover/card:bg-primary/15 group-hover/card:border-primary/35 transition-colors duration-300">
-                      <Database className="h-2.5 w-2.5" />
-                      Consultar
+                      <CalendarCheck className="h-2.5 w-2.5" />
+                      PCP
                     </span>
                     <ArrowRight className="h-4 w-4 text-muted-foreground/50 group-hover/card:text-primary group-hover/card:translate-x-1 transition-all duration-300" />
                   </div>
@@ -2008,11 +2047,30 @@ function Producao() {
             variant="ghost"
             size="icon"
             onClick={() => setCurrentView("menu")}
-            className="mt-6 mb-4 size-11 min-h-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md transition-all"
+            className="mt-6 mb-2 size-11 min-h-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md transition-all"
             aria-label="Voltar ao menu"
           >
             <ArrowLeft className="size-5 text-foreground" strokeWidth={2.5} />
           </Button>
+
+          {/* Abas internas: Acompanhamento diário / Histórico */}
+          <div className="flex gap-2 items-center mb-4">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium"
+            >
+              Acompanhamento diário
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium"
+              onClick={() => setCurrentView("historico")}
+            >
+              Histórico de análise
+            </Button>
+          </div>
 
           {/* Card: Acompanhamento diário da produção */}
           <div ref={producaoCardRef} data-export-target className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] transition-all duration-500 overflow-hidden group/card">
@@ -2158,7 +2216,7 @@ function Producao() {
                     ) : (
                       <Database className="h-4 w-4 shrink-0" />
                     )}
-                    <span className="hidden sm:inline">{loading ? "Carregando..." : "Carregar"}</span>
+                    <span className="hidden min-[791px]:inline">Carregar</span>
                   </button>
 
                   <button
@@ -2181,7 +2239,7 @@ function Producao() {
               className="border-t border-border/40 bg-gradient-to-b from-transparent via-muted/10 to-muted/20 p-4 sm:p-5 lg:p-7 space-y-5 sm:space-y-6"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Status de salvamento/carregamento */}
+              {/* Status de salvamento/carregamento (apenas para Salvar; Carregar usa toast para não deslocar os cards) */}
               {saveStatus && (
                 <div
                   className={`flex items-center gap-3 p-4 rounded-lg border ${saveStatus.success
@@ -2385,13 +2443,11 @@ function Producao() {
                               <div
                                 className={`flex h-8 sm:h-9 items-center rounded-md border border-input bg-muted/50 px-2 sm:px-3 text-xs sm:text-sm font-medium ${item.diferenca > 0
                                   ? "text-destructive"
-                                  : item.diferenca < 0
-                                    ? "text-warning"
-                                    : "text-success"
+                                  : "text-success"
                                   }`}
                               >
                                 <Calculator className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
-                                <span className="truncate">{item.diferenca.toFixed(2)}</span>
+                                <span className="truncate">{Math.abs(item.diferenca).toFixed(2)}</span>
                               </div>
                             </TableCell>
                             <TableCell className="p-2 sm:p-4">
@@ -2438,12 +2494,10 @@ function Producao() {
                                 <div
                                   className={`flex h-8 sm:h-9 items-center justify-center rounded-md border px-2 text-xs sm:text-sm font-bold ${totais.diferencaTotal > 0
                                     ? "border-destructive/30 bg-destructive/10 text-destructive"
-                                    : totais.diferencaTotal < 0
-                                      ? "border-warning/30 bg-warning/10 text-warning"
-                                      : "border-success/30 bg-success/10 text-success"
+                                    : "border-success/30 bg-success/10 text-success"
                                     }`}
                                 >
-                                  {formatTotal(totais.diferencaTotal)}
+                                  {formatTotal(Math.abs(totais.diferencaTotal))}
                                 </div>
                               </TableCell>
                               <TableCell className="p-2 sm:p-4">
@@ -3213,51 +3267,50 @@ function Producao() {
                           <p className="text-xs sm:text-sm text-muted-foreground/80 mt-0.5">Comparação por item de produção</p>
                         </div>
                       </div>
-                      <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="grafico-planejado-realizado" expandScrollable={false} className="shrink-0" />
+                      <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="grafico-planejado-realizado" expandScrollable className="shrink-0" />
                     </div>
-                    <div className="h-[280px] sm:h-[320px] lg:h-[400px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={items.map((item) => ({
-                            name: item.codigoItem || item.descricaoItem || item.op || `Item ${item.numero}`,
-                            planejado: parseFormattedNumber(item.quantidadePlanejada),
-                            realizado: parseFormattedNumber(item.quantidadeRealizada),
-                            diferenca: item.diferenca,
-                          }))}
-                          margin={chartBarMargin}
-                          barCategoryGap="12%"
-                          barGap={8}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
-                          <XAxis
-                            dataKey="name"
-                            stroke="hsl(var(--muted-foreground))"
-                            fontSize={12}
-                            tickLine={false}
-                            axisLine={false}
-                            tick={{ fontSize: 11 }}
-                          />
-                          <YAxis tick={false} tickLine={false} axisLine={false} />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: "hsl(var(--card))",
-                              border: "1px solid hsl(var(--border))",
-                              borderRadius: "12px",
-                              padding: "12px 16px",
-                              boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                              fontSize: "13px",
-                            }}
-                            labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                          />
-                          <Legend wrapperStyle={{ paddingTop: 8 }} align="center" layout="horizontal" />
-                          <Bar dataKey="planejado" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} name="Planejado" maxBarSize={80}>
-                            <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="planejado" />} position="top" style={{ fontSize: 11 }} />
-                          </Bar>
-                          <Bar dataKey="realizado" fill="hsl(var(--success))" radius={[6, 6, 0, 0]} name="Realizado" maxBarSize={80}>
-                            <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="realizado" />} position="top" style={{ fontSize: 11 }} />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+                    <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
+                      <div
+                        className="w-full"
+                        style={{ height: Math.max(280, items.length * 44) }}
+                      >
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            layout="vertical"
+                            data={items.map((item) => ({
+                              name: item.descricaoItem || item.codigoItem || item.op || `Item ${item.numero}`,
+                              planejado: parseFormattedNumber(item.quantidadePlanejada),
+                              realizado: parseFormattedNumber(item.quantidadeRealizada),
+                              diferenca: item.diferenca,
+                            }))}
+                            margin={{ top: 8, right: 72, left: 4, bottom: 8 }}
+                            barCategoryGap="20%"
+                            barGap={8}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} horizontal={false} />
+                            <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+                            <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: "hsl(var(--card))",
+                                border: "1px solid hsl(var(--border))",
+                                borderRadius: "12px",
+                                padding: "12px 16px",
+                                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                                fontSize: "13px",
+                              }}
+                              labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
+                            />
+                            <Legend wrapperStyle={{ paddingTop: 8 }} align="center" layout="horizontal" />
+                            <Bar dataKey="planejado" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} name="Planejado" maxBarSize={28}>
+                              <LabelList dataKey="planejado" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 11 }} />
+                            </Bar>
+                            <Bar dataKey="realizado" fill="hsl(var(--success))" radius={[0, 6, 6, 0]} name="Realizado" maxBarSize={28}>
+                              <LabelList dataKey="realizado" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 11 }} />
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                   </div>
 
@@ -3283,14 +3336,15 @@ function Producao() {
                           const diferencaPorItemData = [...items]
                             .map((item) => ({
                               name: item.descricaoItem || item.codigoItem || item.op || `Item ${item.numero}`,
-                              diferenca: item.diferenca,
+                              diferenca: Math.abs(item.diferenca),
+                              isFaltando: item.diferenca > 0,
                             }))
                             .sort((a, b) => b.diferenca - a.diferenca);
                           return (
                             <BarChart
                               layout="vertical"
                               data={diferencaPorItemData}
-                              margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                              margin={{ top: 8, right: 72, left: 8, bottom: 8 }}
                             >
                               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} horizontal={false} />
                               <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tick={false} />
@@ -3305,9 +3359,9 @@ function Producao() {
                                 formatter={(value: number) => [formatNumber(value), "Diferença"]}
                               />
                               <Bar dataKey="diferenca" name="Diferença" radius={[0, 4, 4, 0]} maxBarSize={28}>
-                                <LabelList dataKey="diferenca" position="right" formatter={(v: number) => formatNumber(v)} className="fill-foreground" fontSize={11} />
+                                <LabelList dataKey="diferenca" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 11 }} className="fill-foreground" />
                                 {diferencaPorItemData.map((entry, i) => (
-                                  <Cell key={i} fill={entry.diferenca > 0 ? "hsl(var(--destructive))" : entry.diferenca < 0 ? "hsl(var(--warning))" : "hsl(var(--success))"} />
+                                  <Cell key={i} fill={entry.isFaltando ? "hsl(var(--destructive))" : "hsl(var(--success))"} />
                                 ))}
                               </Bar>
                             </BarChart>
@@ -3383,15 +3437,15 @@ function Producao() {
                           </div>
                           <div className="rounded-xl bg-muted/20 lg:bg-muted/30 p-4 lg:p-5 border border-border/40">
                             <ResponsiveContainer width="100%" height={chartH}>
-                              <BarChart layout="vertical" data={productionDataLinha} margin={{ top: 8, right: 56, left: 4, bottom: 8 }}>
+                              <BarChart layout="vertical" data={productionDataLinha} margin={{ top: 8, right: 56, left: 4, bottom: 8 }} barCategoryGap="40%">
                                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" opacity={0.4} horizontal={false} />
-                                <XAxis type="number" tickLine={false} axisLine={false} tick={false} label={false} />
+                                <XAxis type="number" tickLine={false} axisLine={false} tick={false} />
                                 <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "hsl(var(--foreground))" }} />
                                 <Tooltip content={<TooltipProducaoLinha />} />
-                                <Bar dataKey="valor" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} name="Realizado" maxBarSize={24} barCategoryGap="40%">
+                                <Bar dataKey="valor" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} name="Realizado" maxBarSize={24}>
                                   <LabelList dataKey="valor" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                                 </Bar>
-                                <Bar dataKey="meta" fill="hsl(var(--muted-foreground))" fillOpacity={0.5} radius={[0, 6, 6, 0]} name="Meta" maxBarSize={24} barCategoryGap="40%">
+                                <Bar dataKey="meta" fill="hsl(var(--muted-foreground))" fillOpacity={0.5} radius={[0, 6, 6, 0]} name="Meta" maxBarSize={24}>
                                   <LabelList dataKey="meta" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
                                 </Bar>
                               </BarChart>
@@ -3486,11 +3540,30 @@ function Producao() {
             variant="ghost"
             size="icon"
             onClick={() => setCurrentView("menu")}
-            className="mt-6 mb-4 size-11 min-h-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md transition-all"
+            className="mt-6 mb-2 size-11 min-h-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md transition-all"
             aria-label="Voltar ao menu"
           >
             <ArrowLeft className="size-5 text-foreground" strokeWidth={2.5} />
           </Button>
+
+          {/* Abas internas: Acompanhamento diário / Histórico */}
+          <div className="flex gap-2 items-center mb-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium"
+              onClick={() => setCurrentView("cadastro")}
+            >
+              Acompanhamento diário
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium"
+            >
+              Histórico de análise
+            </Button>
+          </div>
 
           {/* Título e descrição — acima do card (layout reorganizado para mobile) */}
           <div className="relative mb-4 sm:mb-5 rounded-2xl p-4 sm:py-5 sm:px-0 transition-all duration-500 group/button">
@@ -3699,11 +3772,8 @@ function Producao() {
                               <TableCell className="text-xs sm:text-sm font-semibold">{linhaNome}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_planejada) || 0)}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_realizada) || 0)}</TableCell>
-                              <TableCell className={`text-xs sm:text-sm text-right ${parseFloat(record.diferenca) < 0 ? "text-destructive" :
-                                parseFloat(record.diferenca) > 0 ? "text-warning" :
-                                  "text-success"
-                                }`}>
-                                {formatTotal(parseFloat(record.diferenca) || 0)}
+                              <TableCell className={`text-xs sm:text-sm text-right ${parseFloat(record.diferenca) > 0 ? "text-destructive" : "text-success"}`}>
+                                {formatTotal(Math.abs(parseFloat(record.diferenca) || 0))}
                               </TableCell>
                               <TableCell className="text-xs sm:text-sm text-right font-mono">{kgPorHora}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{restante}</TableCell>
