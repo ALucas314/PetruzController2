@@ -48,6 +48,7 @@ import {
   insertOCTP,
   updateOCTP,
   deleteOCTP,
+  computeDuracaoMinutos,
   type OCTPRow,
 } from "@/services/supabaseData";
 import { useToast } from "@/hooks/use-toast";
@@ -84,12 +85,13 @@ interface ReprocessoItem {
   id: number;
   numero: number;
   tipo: "Cortado" | "Usado";
+  linha: string;
   codigo: string;
   descricao: string;
   quantidade: string;
 }
 
-/** Item do card OCTP (Problema, Ação, Responsável, Hora, Início, Descrição do Status) */
+/** Item do card OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Descrição do Status) */
 interface OCTPItem {
   id: number;
   numero: number;
@@ -98,7 +100,10 @@ interface OCTPItem {
   responsavel: string;
   hora: string | null; // ISO ou vazio (exibição formatada)
   inicio: string; // YYYY-MM-DD
-  descricao_status: string; // chave do status (ex: "Cancelada", "Concluída")
+  horaInicio: string; // HH:MM (editável) → coluna hora_inicio
+  horaFinal: string;   // HH:MM (editável) → coluna hora_fim
+  duracaoMinutos?: number | null; // intervalo em minutos (coluna duracao_minutos)
+  descricao_status: string;
 }
 
 /** Opções de status do OCTP com cor da bolinha */
@@ -154,7 +159,7 @@ const CustomAreaLabel = (props: any) => {
 const DRAFT_SCREEN = "producao";
 const DRAFT_DEBOUNCE_MS = 1000;
 
-export default function Producao() {
+function Producao() {
   const location = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
@@ -169,6 +174,15 @@ export default function Producao() {
   const chartDiferencaItemRef = useRef<HTMLDivElement>(null);
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
   const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
+  const [chartBarMargin, setChartBarMargin] = useState({ top: 28, right: 24, left: 24, bottom: 8 });
+  useEffect(() => {
+    const update = () => setChartBarMargin(
+      window.innerWidth < 640 ? { top: 28, right: 16, left: 4, bottom: 8 } : { top: 28, right: 24, left: 24, bottom: 8 }
+    );
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
   const openedFromStateRef = useRef(false);
   const dataInputRef = useRef<HTMLInputElement>(null);
   const isNewDocumentRef = useRef(false); // true após "Novo documento" para não recarregar do DB e manter setas habilitadas
@@ -185,6 +199,7 @@ export default function Producao() {
   const [calculatorShouldReset, setCalculatorShouldReset] = useState(false);
   const [calculatorExpression, setCalculatorExpression] = useState("");
   const [calculatorTargetItemId, setCalculatorTargetItemId] = useState<number | null>(null);
+  const [calculatorTargetType, setCalculatorTargetType] = useState<"item" | "reprocesso" | null>(null);
   const [horaFinal, setHoraFinal] = useState("");
   const [restanteHoras, setRestanteHoras] = useState("");
   const [observacao, setObservacao] = useState("");
@@ -207,6 +222,8 @@ export default function Producao() {
   const [allRecords, setAllRecords] = useState<any[]>([]); // Todos os registros ordenados
   const [currentRecordIndex, setCurrentRecordIndex] = useState<number>(-1); // Índice do registro atual
   const [currentRecordId, setCurrentRecordId] = useState<number | null>(null); // ID do registro atual
+  /** doc_id do documento atual (null = legado ou novo ainda não salvo). Novo documento gera UUID. */
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null);
 
   // Catálogo de itens vindo da OCTI (mapeado por código)
   const [itemCatalog, setItemCatalog] = useState<Record<string, { nome_item: string }>>({});
@@ -214,7 +231,7 @@ export default function Producao() {
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   // Reprocessos
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
-  // OCTP (Problema, Ação, Responsável, Hora, Início, Descrição do Status)
+  // OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status)
   const [octpInicio, setOctpInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
   const [octpLoading, setOctpLoading] = useState(false);
@@ -557,18 +574,22 @@ export default function Producao() {
 
   const handleCalculatorUseResult = () => {
     const result = calculatorDisplay;
-    // Atualiza o campo \"Calculo 1 Horas\" do item que abriu a calculadora
     if (calculatorTargetItemId != null) {
-      updateItem(calculatorTargetItemId, "horasTrabalhadas", result);
+      if (calculatorTargetType === "reprocesso") {
+        updateReprocesso(calculatorTargetItemId, "quantidade", result);
+      } else {
+        updateItem(calculatorTargetItemId, "horasTrabalhadas", result);
+        setHorasTrabalhadas(result.replace(",", "."));
+        setCalculo1HorasEditMode(false);
+      }
     }
-    // Mantém também no estado geral (caso algum fluxo legado ainda use)
-    setHorasTrabalhadas(result.replace(",", "."));
     setCalculatorOpen(false);
     setCalculatorDisplay("0");
     setCalculatorPreviousValue(null);
     setCalculatorOperation(null);
     setCalculatorShouldReset(false);
-    setCalculo1HorasEditMode(false);
+    setCalculatorTargetType(null);
+    setCalculatorTargetItemId(null);
   };
 
   // Resetar calculadora quando abrir
@@ -581,8 +602,8 @@ export default function Producao() {
       setCalculatorShouldReset(false);
       setCalculatorExpression("");
     } else {
-      // Ao fechar, limpa o alvo para evitar aplicar em item errado depois
       setCalculatorTargetItemId(null);
+      setCalculatorTargetType(null);
     }
   };
 
@@ -616,6 +637,7 @@ export default function Producao() {
       id: Date.now(),
       numero: newNumero,
       tipo: "Cortado",
+      linha: "",
       codigo: "",
       descricao: "",
       quantidade: "",
@@ -710,6 +732,9 @@ export default function Producao() {
           responsavel: r.responsavel ?? "",
           hora: r.hora ?? null,
           inicio: r.inicio ?? octpInicio,
+          horaInicio: r.hora_inicio != null ? String(r.hora_inicio).slice(0, 5) : "",
+          horaFinal: r.hora_final != null ? String(r.hora_final).slice(0, 5) : "",
+          duracaoMinutos: r.duracao_minutos ?? null,
           descricao_status: r.descricao_status ?? "",
         }))
       );
@@ -727,14 +752,33 @@ export default function Producao() {
     if (currentView === "cadastro") loadOCTP();
   }, [currentView, loadOCTP]);
 
-  const formatOCTPHora = (hora: string | null) => {
-    if (!hora) return "—";
-    try {
-      const d = new Date(hora);
-      return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    } catch {
-      return hora;
-    }
+  /** Calcula o intervalo entre hora inicial e hora final (HH:MM ou HH:MM:SS) e retorna "Xh Ym" ou "—" */
+  const formatOCTPIntervalo = (horaInicio: string, horaFinal: string) => {
+    const parse = (s: string) => {
+      if (!s || !s.trim()) return null;
+      const parts = s.trim().split(/[:\s]/).map(Number);
+      if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+        return parts[0] * 60 + parts[1] + (parts[2] != null && !Number.isNaN(parts[2]) ? parts[2] / 60 : 0);
+      }
+      return null;
+    };
+    const minIni = parse(horaInicio);
+    const minFim = parse(horaFinal);
+    if (minIni == null || minFim == null) return "—";
+    let diff = minFim - minIni;
+    if (diff < 0) diff += 24 * 60; // passa da meia-noite
+    const h = Math.floor(diff / 60);
+    const m = Math.round(diff % 60);
+    if (h === 0) return m ? `${m}m` : "0m";
+    return m ? `${h}h ${m}m` : `${h}h`;
+  };
+
+  const formatDuracaoMinutos = (min: number | null | undefined) => {
+    if (min == null || min < 0) return "—";
+    const h = Math.floor(min / 60);
+    const m = Math.round(min % 60);
+    if (h === 0) return m ? `${m}m` : "0m";
+    return m ? `${h}h ${m}m` : `${h}h`;
   };
 
   const addOCTPItem = async () => {
@@ -763,6 +807,9 @@ export default function Producao() {
           responsavel: inserted.responsavel ?? "",
           hora: inserted.hora ?? null,
           inicio: inserted.inicio ?? octpInicio,
+          horaInicio: inserted.hora_inicio != null ? String(inserted.hora_inicio).slice(0, 5) : "",
+          horaFinal: inserted.hora_final != null ? String(inserted.hora_final).slice(0, 5) : "",
+          duracaoMinutos: inserted.duracao_minutos ?? null,
           descricao_status: inserted.descricao_status ?? "",
         },
       ]);
@@ -786,7 +833,13 @@ export default function Producao() {
     else if (field === "acao") payload.acao = value as string;
     else if (field === "responsavel") payload.responsavel = value as string;
     else if (field === "inicio") payload.inicio = value as string;
+    else if (field === "horaInicio") payload.hora_inicio = value as string;
+    else if (field === "horaFinal") payload.hora_final = value as string;
     else if (field === "descricao_status") payload.descricao_status = value as string;
+    if (field === "horaInicio" || field === "horaFinal") {
+      const mins = computeDuracaoMinutos(updated.horaInicio, updated.horaFinal);
+      if (mins !== null) payload.duracao_minutos = mins;
+    }
     if (Object.keys(payload).length > 0) {
       updateOCTP(id, payload as Parameters<typeof updateOCTP>[1]).catch((e) => {
         console.error("Erro ao atualizar OCTP:", e);
@@ -1015,6 +1068,7 @@ export default function Producao() {
       const result = await saveProducao({
         dataDia: dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
         filialNome: filialNomeCompleto,
+        docId: currentDocId,
         items: items.map((i) => ({
           ...i,
           quantidadePlanejada: parseFormattedNumber(i.quantidadePlanejada),
@@ -1061,43 +1115,36 @@ export default function Producao() {
         });
       }
 
-      await loadAllRecords();
+      const listAfterSave = await loadAllRecords();
 
       // Evitar que o useEffect recarregue do banco e sobrescreva os itens (ex.: observação por linha)
       if (wasUpdate) skipNextDataLoadRef.current = true;
 
-      // Se era edição (registro já existia), mantém os dados na tela; senão reseta para novo cadastro
-      if (!wasUpdate) {
+      // Se era novo documento salvo, abrir esse documento na lista (setas) e não resetar
+      if (!wasUpdate && currentDocId && Array.isArray(listAfterSave)) {
+        const idx = listAfterSave.findIndex((r: any) => (r.doc_id ?? null) === currentDocId);
+        if (idx >= 0) {
+          loadRecordByIndex(idx);
+        } else {
+          // documento novo salvo mas não encontrado na lista (ex.: filtro filial) — reseta
+          const hoje = new Date().toISOString().split("T")[0];
+          setDataCabecalhoSelecionada(hoje);
+          setCurrentDocId(null);
+          setItems([{ id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" }]);
+          setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]);
+        }
+      } else if (!wasUpdate) {
+        // Insert sem doc_id (legado): reseta para novo cadastro
         const hoje = new Date().toISOString().split("T")[0];
         setDataCabecalhoSelecionada(hoje);
+        setCurrentDocId(null);
         setItems([
-          {
-            id: 1,
-            numero: 1,
-            dataDia: hoje,
-            op: "",
-            codigoItem: "",
-            descricaoItem: "",
-            linha: "",
-            quantidadePlanejada: 0,
-            quantidadeRealizada: 0,
-            diferenca: 0,
-            horasTrabalhadas: "",
-            restanteHoras: "",
-            horaFinal: "",
-            calculo1HorasEditMode: false,
-            observacao: "",
-          },
+          { id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" },
         ]);
-        setLatasPrevista("");
-        setLatasRealizadas("");
-        setLatasBatidas("");
-        setTotalCortado("");
-        setPercentualMeta("");
-        setTotalReprocesso("");
-        setObservacao("");
-        setReprocessos([]);
-      } else {
+        setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]);
+      }
+
+      if (wasUpdate) {
         // Atualizar ocpdId nos itens que foram inseridos agora (backend retorna data com os novos ids)
         if (result.data && Array.isArray(result.data) && result.data.length > 0) {
           const newIds = result.data.map((r: { id: number }) => r.id);
@@ -1143,15 +1190,15 @@ export default function Producao() {
     }
   };
 
-  // Função para carregar dados do Supabase
-  const loadFromDatabase = async (data?: string, filialNomeOverride?: string) => {
+  // Função para carregar dados do Supabase (docId: null = documento legado, string = documento com doc_id)
+  const loadFromDatabase = async (data?: string, filialNomeOverride?: string, docId?: string | null) => {
     setLoading(true);
     setSaveStatus(null);
 
     try {
       const dataToLoad = data || dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
       const filialNomeToUse = filialNomeOverride ?? (filialSelecionada ? filiais.find(f => f.codigo === filialSelecionada)?.nome : undefined);
-      const result = await loadProducao({ data: dataToLoad, filialNome: filialNomeToUse });
+      const result = await loadProducao({ data: dataToLoad, filialNome: filialNomeToUse, docId });
 
       if (result.data && result.data.length > 0) {
         // Converter dados do banco (tabela OCPD) para o formato da interface
@@ -1206,6 +1253,7 @@ export default function Producao() {
         }
 
         setItems(loadedItems);
+        setCurrentDocId(result.data[0]?.doc_id ?? null);
 
         // Controle de Latas: preencher do primeiro registro OCPD
         if (result.data.length > 0) {
@@ -1225,6 +1273,7 @@ export default function Producao() {
               id: Date.now() + idx,
               numero: r.numero ?? idx + 1,
               tipo: (r.tipo === "Usado" ? "Usado" : "Cortado") as "Cortado" | "Usado",
+              linha: r.linha || "",
               codigo: r.codigo || "",
               descricao: r.descricao || "",
               quantidade: r.quantidade != null ? String(r.quantidade).replace(".", ",") : "",
@@ -1237,6 +1286,7 @@ export default function Producao() {
               id: Date.now(),
               numero: firstRecord.reprocesso_numero || 1,
               tipo: (firstRecord.reprocesso_tipo as "Cortado" | "Usado") || "Cortado",
+              linha: (firstRecord as any).reprocesso_linha || "",
               codigo: firstRecord.reprocesso_codigo || "",
               descricao: firstRecord.reprocesso_descricao || "",
               quantidade: firstRecord.reprocesso_quantidade ? firstRecord.reprocesso_quantidade.toString().replace(".", ",") : "",
@@ -1287,6 +1337,7 @@ export default function Producao() {
       const d = result.data as Record<string, unknown>;
       if (d.dataCabecalhoSelecionada) setDataCabecalhoSelecionada(String(d.dataCabecalhoSelecionada));
       if (d.filialSelecionada != null) setFilialSelecionada(String(d.filialSelecionada));
+      if (d.currentDocId != null) setCurrentDocId(String(d.currentDocId));
       if (Array.isArray(d.items) && d.items.length > 0) {
         setItems(d.items as ProductionItem[]);
       }
@@ -1313,6 +1364,7 @@ export default function Producao() {
       const payload = {
         dataCabecalhoSelecionada,
         filialSelecionada,
+        currentDocId,
         items,
         reprocessos,
         latasPrevista,
@@ -1357,13 +1409,9 @@ export default function Producao() {
       if (linha && linha.trim() !== "") params.set("linha", linha.trim());
       // Data única (legado, quando não usa intervalo)
       if (!dataInicio && !dataFim && opts?.data) params.set("data", opts.data);
-      // Filial: se filtro estiver em "todas", não filtra; caso contrário, usa a filial escolhida
-      const filialCodigoEfetivo =
-        filialCodigo && filialCodigo !== "todas"
-          ? filialCodigo
-          : filialSelecionada || "";
-      if (filialCodigoEfetivo) {
-        const filialNome = filiais.find(f => f.codigo === filialCodigoEfetivo)?.nome;
+      // Filial: só envia filtro quando o usuário escolheu uma filial específica no histórico; "todas" = não filtra
+      if (filialCodigo && filialCodigo !== "todas") {
+        const filialNome = filiais.find(f => f.codigo === filialCodigo)?.nome;
         if (filialNome) params.set("filialNome", filialNome);
       }
       const result = await getProducaoHistory({
@@ -1383,8 +1431,8 @@ export default function Producao() {
     }
   };
 
-  // Função para carregar todos os registros ordenados (por data e ordem de criação)
-  const loadAllRecords = async () => {
+  // Função para carregar todos os registros ordenados (um registro = um documento: data_dia + filial + doc_id)
+  const loadAllRecords = async (): Promise<any[]> => {
     try {
       const filialNomeForQuery = filialSelecionada ? filiais.find((f) => f.codigo === filialSelecionada)?.nome : undefined;
       const result = await getProducaoHistory({ limit: 1000, filialNome: filialNomeForQuery });
@@ -1403,11 +1451,13 @@ export default function Producao() {
             dates.add(dateStr);
 
             const filialNome = (item.filial_nome || '').trim();
-            const recordKey = `${dateStr}_${filialNome}`;
+            const docId = item.doc_id ?? null;
+            const recordKey = `${dateStr}_${filialNome}_${docId ?? 'legacy'}`;
 
             if (!recordsMap.has(recordKey)) {
               recordsMap.set(recordKey, {
                 ...item,
+                doc_id: docId,
                 recordDate: dateStr,
                 recordKey,
               });
@@ -1428,9 +1478,12 @@ export default function Producao() {
 
         setAllRecords(allRecordsSorted);
         setAvailableDates(dates);
+        return allRecordsSorted;
       }
+      return [];
     } catch (error: any) {
       console.error("Erro ao carregar registros:", error);
+      return [];
     }
   };
 
@@ -1472,13 +1525,14 @@ export default function Producao() {
         ? recordDate.split('T')[0]
         : new Date(recordDate).toISOString().split('T')[0];
       const recordFilial = (r.filial_nome || '').trim();
-      return dateStr === currentDate && recordFilial === (currentFilialNome || '').trim();
+      const sameDoc = (r.doc_id ?? null) === (currentDocId ?? null);
+      return dateStr === currentDate && recordFilial === (currentFilialNome || '').trim() && sameDoc;
     });
 
     return index >= 0 ? index : -1;
   };
 
-  // Função para carregar um registro específico pelo índice (um documento = data + filial)
+  // Função para carregar um registro específico pelo índice (um documento = data + filial + doc_id)
   const loadRecordByIndex = async (index: number) => {
     if (index < 0 || index >= allRecords.length) return;
 
@@ -1493,13 +1547,14 @@ export default function Producao() {
     setDataCabecalhoSelecionada(dateStr);
     setCurrentRecordIndex(index);
     setCurrentRecordId(record.id);
+    setCurrentDocId(record.doc_id ?? null);
     const recordFilialNome = (record.filial_nome || '').trim();
     if (recordFilialNome) {
       const codigo = filiais.find(f => (f.nome || '').trim() === recordFilialNome)?.codigo;
       if (codigo) setFilialSelecionada(codigo);
     }
 
-    await loadFromDatabase(dateStr, recordFilialNome || undefined);
+    await loadFromDatabase(dateStr, recordFilialNome || undefined, record.doc_id ?? undefined);
   };
 
   // Função para navegar para registro anterior
@@ -1534,11 +1589,12 @@ export default function Producao() {
     navigateToNextRecord();
   };
 
-  // Função para criar novo cadastro (limpar tudo)
+  // Função para criar novo cadastro (limpar tudo); gera novo doc_id para não misturar com outros no mesmo dia
   const createNewCadastro = () => {
     isNewDocumentRef.current = true;
     setCurrentRecordIndex(-1);
     setCurrentRecordId(null);
+    setCurrentDocId(crypto.randomUUID());
     const hoje = new Date().toISOString().split("T")[0];
     setDataCabecalhoSelecionada(hoje);
     setItems([
@@ -1596,6 +1652,16 @@ export default function Producao() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Sincronizar data e filial com o Painel de Controle (dashboard) para acompanhar o diário
+  useEffect(() => {
+    try {
+      const data = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
+      localStorage.setItem("dashboard_producao_data_dia", data);
+      const filialNome = filialSelecionada ? filiais.find((f) => f.codigo === filialSelecionada)?.nome : "";
+      if (filialNome) localStorage.setItem("dashboard_producao_filial_nome", filialNome);
+    } catch {}
+  }, [dataCabecalhoSelecionada, filialSelecionada, filiais]);
+
   // Abrir documento vindo de Relatórios (navigate com state: loadData, loadFilialNome)
   useEffect(() => {
     const state = location.state as { loadData?: string; loadFilialNome?: string } | null;
@@ -1623,7 +1689,7 @@ export default function Producao() {
         justLoadedByIndexRef.current = false;
         return; // Acabou de carregar pela seta (data+filial corretos); não sobrescrever com load que poderia usar filial desatualizada.
       }
-      loadFromDatabase(dataCabecalhoSelecionada);
+      loadFromDatabase(dataCabecalhoSelecionada, undefined, currentDocId ?? undefined);
       const index = findCurrentRecordIndex();
       if (index >= 0) {
         setCurrentRecordIndex(index);
@@ -1633,7 +1699,7 @@ export default function Producao() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataCabecalhoSelecionada, currentView, allRecords]);
+  }, [dataCabecalhoSelecionada, currentView, allRecords, currentDocId]);
 
   // Manter ref atualizado para salvar ao sair da página ou ao trocar de aba do navegador
   useEffect(() => {
@@ -1646,6 +1712,7 @@ export default function Producao() {
       payload: {
         dataCabecalhoSelecionada,
         filialSelecionada,
+        currentDocId,
         items,
         reprocessos,
         latasPrevista,
@@ -1661,6 +1728,7 @@ export default function Producao() {
     user?.id,
     dataCabecalhoSelecionada,
     filialSelecionada,
+    currentDocId,
     items,
     reprocessos,
     latasPrevista,
@@ -1705,6 +1773,7 @@ export default function Producao() {
     user?.id,
     dataCabecalhoSelecionada,
     filialSelecionada,
+    currentDocId,
     items,
     reprocessos,
     latasPrevista,
@@ -2102,7 +2171,7 @@ export default function Producao() {
                     title="Exportar como PNG"
                   >
                     <Download className="h-4 w-4 shrink-0" />
-                    <span className="hidden sm:inline">Exportar PNG</span>
+                    <span className="hidden min-[791px]:inline">Exportar PNG</span>
                   </button>
                 </div>
               </div>
@@ -2314,9 +2383,9 @@ export default function Producao() {
                             </TableCell>
                             <TableCell className="p-2 sm:p-4">
                               <div
-                                className={`flex h-8 sm:h-9 items-center rounded-md border border-input bg-muted/50 px-2 sm:px-3 text-xs sm:text-sm font-medium ${item.diferenca < 0
+                                className={`flex h-8 sm:h-9 items-center rounded-md border border-input bg-muted/50 px-2 sm:px-3 text-xs sm:text-sm font-medium ${item.diferenca > 0
                                   ? "text-destructive"
-                                  : item.diferenca > 0
+                                  : item.diferenca < 0
                                     ? "text-warning"
                                     : "text-success"
                                   }`}
@@ -2367,9 +2436,9 @@ export default function Producao() {
                               </TableCell>
                               <TableCell className="p-2 sm:p-4">
                                 <div
-                                  className={`flex h-8 sm:h-9 items-center justify-center rounded-md border px-2 text-xs sm:text-sm font-bold ${totais.diferencaTotal < 0
+                                  className={`flex h-8 sm:h-9 items-center justify-center rounded-md border px-2 text-xs sm:text-sm font-bold ${totais.diferencaTotal > 0
                                     ? "border-destructive/30 bg-destructive/10 text-destructive"
-                                    : totais.diferencaTotal > 0
+                                    : totais.diferencaTotal < 0
                                       ? "border-warning/30 bg-warning/10 text-warning"
                                       : "border-success/30 bg-success/10 text-success"
                                     }`}
@@ -2434,7 +2503,9 @@ export default function Producao() {
                             size="icon"
                             className="h-5 w-5 sm:h-6 sm:w-6 shrink-0"
                             onClick={() => {
+                              setCalculatorTargetType("item");
                               setCalculatorTargetItemId(item.id);
+                              setCalculatorDisplay("0");
                               setCalculatorOpen(true);
                             }}
                             title="Abrir calculadora"
@@ -2640,7 +2711,7 @@ export default function Producao() {
                           const card = reprocessoCardRef.current;
                           if (!card) return;
                           reprocessoExportRestoreRef.current = [];
-                          const cells = card.querySelectorAll("table tbody tr td:nth-child(4)");
+                          const cells = card.querySelectorAll("table tbody tr td:nth-child(5)");
                           cells.forEach((cell) => {
                             const input = cell.querySelector("input");
                             if (!input) return;
@@ -2673,6 +2744,7 @@ export default function Producao() {
                           <TableRow>
                             <TableHead className="w-12 sm:w-16 text-center text-xs sm:text-sm">N°</TableHead>
                             <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Tipo do Reprocesso</TableHead>
+                            <TableHead className="min-w-[120px] sm:min-w-[160px] text-xs sm:text-sm">Linha</TableHead>
                             <TableHead className="min-w-[120px] sm:min-w-[140px] text-xs sm:text-sm">Código do reprocesso</TableHead>
                             <TableHead className="min-w-[150px] sm:min-w-[200px] text-xs sm:text-sm">Descrição do reprocesso</TableHead>
                             <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Quantidade</TableHead>
@@ -2682,7 +2754,7 @@ export default function Producao() {
                         <TableBody>
                           {reprocessos.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
+                              <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
                                 Nenhum reprocesso cadastrado. Clique em "Adicionar Reprocesso" para começar.
                               </TableCell>
                             </TableRow>
@@ -2705,6 +2777,33 @@ export default function Producao() {
                                   </Select>
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
+                                  {productionLines.length > 0 ? (
+                                    <Select
+                                      value={reprocesso.linha ? String(reprocesso.linha) : "__vazio__"}
+                                      onValueChange={(value) => updateReprocesso(reprocesso.id, "linha", value === "__vazio__" ? "" : value)}
+                                    >
+                                      <SelectTrigger className="h-8 sm:h-9 text-xs sm:text-sm min-w-[100px]">
+                                        <SelectValue placeholder="Linha" />
+                                      </SelectTrigger>
+                                      <SelectContent className="max-h-72 text-xs sm:text-sm">
+                                        <SelectItem value="__vazio__">—</SelectItem>
+                                        {productionLines.map((line) => (
+                                          <SelectItem key={line.id} value={line.code ? String(line.code) : `line-${line.id}`}>
+                                            {line.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  ) : (
+                                    <Input
+                                      value={reprocesso.linha}
+                                      onChange={(e) => updateReprocesso(reprocesso.id, "linha", e.target.value)}
+                                      className="h-8 sm:h-9 text-xs sm:text-sm min-w-[100px]"
+                                      placeholder="Linha"
+                                    />
+                                  )}
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
                                   <Input
                                     value={reprocesso.codigo}
                                     onChange={(e) => updateReprocesso(reprocesso.id, "codigo", e.target.value)}
@@ -2721,18 +2820,35 @@ export default function Producao() {
                                   />
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
-                                  <Input
-                                    type="text"
-                                    value={reprocesso.quantidade}
-                                    onChange={(e) => {
-                                      const value = e.target.value;
-                                      if (value === "" || /^[\d.,]*$/.test(value)) {
-                                        updateReprocesso(reprocesso.id, "quantidade", value);
-                                      }
-                                    }}
-                                    className="h-8 sm:h-9 text-xs sm:text-sm text-center"
-                                    placeholder="0,00"
-                                  />
+                                  <div className="flex items-center gap-1.5">
+                                    <Input
+                                      type="text"
+                                      value={reprocesso.quantidade}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === "" || /^[\d.,]*$/.test(value)) {
+                                          updateReprocesso(reprocesso.id, "quantidade", value);
+                                        }
+                                      }}
+                                      className="h-8 sm:h-9 text-xs sm:text-sm text-center flex-1 min-w-0"
+                                      placeholder="0,00"
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-5 w-5 sm:h-6 sm:w-6 shrink-0"
+                                      onClick={() => {
+                                        setCalculatorTargetType("reprocesso");
+                                        setCalculatorTargetItemId(reprocesso.id);
+                                        setCalculatorDisplay(reprocesso.quantidade?.trim() && /^[\d.,]+$/.test(reprocesso.quantidade) ? reprocesso.quantidade : "0");
+                                        setCalculatorOpen(true);
+                                      }}
+                                      title="Abrir calculadora"
+                                    >
+                                      <Calculator className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                    </Button>
+                                  </div>
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
                                   <Button
@@ -2787,7 +2903,7 @@ export default function Producao() {
                   </div>
                 </div>
 
-                {/* Seção: OCTP (Problema, Ação, Responsável, Hora, Início, Descrição do Status) */}
+                {/* Seção: OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status) */}
                 <div
                   ref={octpCardRef}
                   className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.1)]"
@@ -2800,7 +2916,7 @@ export default function Producao() {
                       <div className="min-w-0">
                         <h3 className="text-base sm:text-lg font-bold text-card-foreground">Problemas e Ações</h3>
                         <p className="text-xs text-muted-foreground/70 mt-0.5">
-                          Registro de problema, ação, responsável e status
+                          Registro de problema, ação, responsável, hora inicial/final, intervalo e status
                         </p>
                       </div>
                     </div>
@@ -2856,8 +2972,8 @@ export default function Producao() {
                               cell.appendChild(wrapper);
                               octpExportRestoreRef.current.push({ el, wrapper });
                             });
-                            // Coluna 7: Status (Select) — exibir label com bolinha colorida
-                            const cell7 = row.querySelector("td:nth-child(7)");
+                            // Coluna 9: Status (Select) — exibir label com bolinha colorida
+                            const cell7 = row.querySelector("td:nth-child(9)");
                             if (!cell7 || rowIndex >= octpItems.length) return;
                             const item = octpItems[rowIndex];
                             const statusKey = item.descricao_status?.trim() || "";
@@ -2901,8 +3017,10 @@ export default function Producao() {
                             <TableHead className="min-w-[120px] sm:min-w-[160px] text-xs sm:text-sm">Problema</TableHead>
                             <TableHead className="min-w-[120px] sm:min-w-[160px] text-xs sm:text-sm">Ação</TableHead>
                             <TableHead className="min-w-[100px] sm:min-w-[140px] text-xs sm:text-sm">Responsável</TableHead>
-                            <TableHead className="min-w-[80px] sm:min-w-[90px] text-xs sm:text-sm">Hora</TableHead>
                             <TableHead className="min-w-[100px] sm:min-w-[120px] text-xs sm:text-sm">Início</TableHead>
+                            <TableHead className="min-w-[90px] sm:min-w-[100px] text-xs sm:text-sm">Hora inicial</TableHead>
+                            <TableHead className="min-w-[90px] sm:min-w-[100px] text-xs sm:text-sm">Hora final</TableHead>
+                            <TableHead className="min-w-[80px] sm:min-w-[90px] text-xs sm:text-sm">Intervalo</TableHead>
                             <TableHead className="min-w-[150px] sm:min-w-[200px] text-xs sm:text-sm">Descrição do Status</TableHead>
                             <TableHead className="w-12 sm:w-16"></TableHead>
                           </TableRow>
@@ -2910,13 +3028,13 @@ export default function Producao() {
                         <TableBody>
                           {octpLoading && octpItems.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
+                              <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                                 Carregando...
                               </TableCell>
                             </TableRow>
                           ) : octpItems.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
+                              <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                                 Nenhum registro. Selecione a data de início e clique em &quot;Adicionar registro&quot;.
                               </TableCell>
                             </TableRow>
@@ -2948,9 +3066,6 @@ export default function Producao() {
                                     placeholder="Responsável"
                                   />
                                 </TableCell>
-                                <TableCell className="p-2 sm:p-4 text-xs sm:text-sm text-muted-foreground">
-                                  {formatOCTPHora(item.hora)}
-                                </TableCell>
                                 <TableCell className="p-2 sm:p-4">
                                   <Input
                                     type="date"
@@ -2958,6 +3073,27 @@ export default function Producao() {
                                     onChange={(e) => updateOCTPItem(item.id, "inicio", e.target.value)}
                                     className="h-8 sm:h-9 text-xs sm:text-sm"
                                   />
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Input
+                                    type="time"
+                                    value={item.horaInicio}
+                                    onChange={(e) => updateOCTPItem(item.id, "horaInicio", e.target.value)}
+                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                  />
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Input
+                                    type="time"
+                                    value={item.horaFinal}
+                                    onChange={(e) => updateOCTPItem(item.id, "horaFinal", e.target.value)}
+                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                  />
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4 text-xs sm:text-sm text-muted-foreground">
+                                  {item.horaInicio || item.horaFinal
+                                    ? formatOCTPIntervalo(item.horaInicio, item.horaFinal)
+                                    : formatDuracaoMinutos(item.duracaoMinutos)}
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
                                   <Select
@@ -3003,293 +3139,336 @@ export default function Producao() {
                     </div>
                   </div>
 
-                  {/* Gráfico de pizza: porcentagem por status */}
-                  <div className="mt-6 pt-5 border-t border-border/50">
-                    <h4 className="text-sm font-semibold text-card-foreground mb-4">Status (porcentagens)</h4>
-                    {octpStatusPieData.length === 0 ? (
-                      <p className="text-sm text-muted-foreground py-6 text-center">Selecione os status nos registros acima para ver o gráfico.</p>
-                    ) : (
-                      <div className="flex flex-col sm:flex-row gap-4 items-center">
-                        <div className="w-full sm:w-[220px] h-[220px] shrink-0">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie
-                                data={octpStatusPieData}
-                                dataKey="value"
-                                nameKey="name"
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={50}
-                                outerRadius={90}
-                                paddingAngle={2}
-                                label={({ name, value }) => `${name} ${value}%`}
+                  {/* Gráfico de pizza: porcentagem por status — visual moderno */}
+                  <div className="mt-6 pt-5 border-t border-border/50 flex flex-col items-center">
+                    <div className="w-full max-w-[360px] mx-auto rounded-2xl border border-border/50 bg-gradient-to-b from-muted/20 to-muted/5 p-5 sm:p-6 shadow-sm">
+                      <h4 className="text-sm font-semibold text-foreground/90 tracking-tight mb-5 w-full text-center">Status (porcentagens)</h4>
+                      {octpStatusPieData.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-8 text-center rounded-xl bg-muted/20 border border-dashed border-border/60">Selecione os status nos registros acima para ver o gráfico.</p>
+                      ) : (
+                        <div className="flex flex-col items-center w-full gap-6">
+                          <div className="octp-pie-chart-wrapper w-full max-w-[300px] min-w-[240px] h-[260px] sm:h-[300px] shrink-0 flex items-center justify-center mx-auto [filter:drop-shadow(0_4px_12px_rgba(0,0,0,0.06))]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                <Pie
+                                  data={octpStatusPieData}
+                                  dataKey="value"
+                                  nameKey="name"
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={50}
+                                  outerRadius={92}
+                                  paddingAngle={4}
+                                  label={({ value }) => `${value}%`}
+                                  labelLine={{ strokeWidth: 1.5, stroke: "hsl(var(--foreground) / 0.35)" }}
+                                >
+                                  {octpStatusPieData.map((entry) => (
+                                    <Cell key={entry.name} fill={entry.color} stroke="rgba(255,255,255,0.9)" strokeWidth={2.5} />
+                                  ))}
+                                </Pie>
+                                <Tooltip
+                                  formatter={(value: number, name: string, props: { payload?: { count?: number } }) => [`${value}% (${props?.payload?.count ?? 0} registro(s))`, name]}
+                                  contentStyle={{
+                                    borderRadius: "12px",
+                                    backgroundColor: "hsl(var(--card))",
+                                    border: "1px solid hsl(var(--border))",
+                                    fontSize: "13px",
+                                    boxShadow: "0 8px 24px rgba(0,0,0,0.1)",
+                                    padding: "10px 14px",
+                                  }}
+                                  itemStyle={{ paddingTop: "4px" }}
+                                />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <ul className="flex flex-wrap gap-2.5 justify-center">
+                            {octpStatusPieData.map((d) => (
+                              <li
+                                key={d.name}
+                                className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm bg-muted/40 border border-border/50 shadow-sm hover:bg-muted/60 hover:border-border/70 transition-colors"
                               >
-                                {octpStatusPieData.map((entry, index) => (
-                                  <Cell key={entry.name} fill={entry.color} />
-                                ))}
-                              </Pie>
-                              <Tooltip
-                                formatter={(value: number, name: string, props: { payload?: { count?: number } }) => [`${value}% (${props?.payload?.count ?? 0} registro(s))`, name]}
-                                contentStyle={{ borderRadius: "8px", backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
-                              />
-                            </PieChart>
-                          </ResponsiveContainer>
+                                <span className="h-3 w-3 rounded-full shrink-0 ring-2 ring-background/80" style={{ backgroundColor: d.color }} />
+                                <span className="text-muted-foreground">{d.name}</span>
+                                <span className="font-semibold text-foreground tabular-nums">{d.value}%</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
-                        <ul className="flex flex-wrap gap-x-4 gap-y-2 text-xs sm:text-sm">
-                          {octpStatusPieData.map((d) => (
-                            <li key={d.name} className="flex items-center gap-2">
-                              <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
-                              <span className="text-muted-foreground">{d.name}:</span>
-                              <span className="font-medium">{d.value}%</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Seção: Análise Gráfica */}
-                <div className="space-y-6">
+                {/* Seção: Análise Gráfica — otimizada para desktop */}
+                <div className="space-y-6 lg:space-y-8">
                   {/* Gráfico 1: Planejado vs Realizado */}
-                  <div ref={chartPlanejadoRealizadoRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div ref={chartPlanejadoRealizadoRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                    <div className="mb-5 lg:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
-                          <Target className="h-5 w-5 text-primary" />
+                        <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+                          <Target className="h-5 w-5 lg:h-6 lg:w-6 text-primary" />
                         </div>
                         <div className="min-w-0">
-                          <h3 className="text-base sm:text-lg font-bold text-card-foreground">Planejado vs Realizado</h3>
-                          <p className="text-xs sm:text-sm text-muted-foreground/70">Comparação por item de produção</p>
+                          <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Planejado vs Realizado</h3>
+                          <p className="text-xs sm:text-sm text-muted-foreground/80 mt-0.5">Comparação por item de produção</p>
                         </div>
                       </div>
                       <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="grafico-planejado-realizado" expandScrollable={false} className="shrink-0" />
                     </div>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart
-                        data={items.map((item) => ({
-                          name: item.codigoItem || item.descricaoItem || item.op || `Item ${item.numero}`,
-                          planejado: parseFormattedNumber(item.quantidadePlanejada),
-                          realizado: parseFormattedNumber(item.quantidadeRealizada),
-                          diferenca: item.diferenca,
-                        }))}
-                        margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                        <XAxis
-                          dataKey="name"
-                          stroke="hsl(var(--muted-foreground))"
-                          fontSize={12}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <YAxis
-                          stroke="hsl(var(--muted-foreground))"
-                          fontSize={12}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: "hsl(var(--card))",
-                            border: "1px solid hsl(var(--border))",
-                            borderRadius: "8px",
-                            padding: "8px",
-                          }}
-                          labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                        />
-                        <Legend />
-                        <Bar dataKey="planejado" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Planejado">
-                          <LabelList
-                            content={(props: any) => <CustomBarLabel {...props} dataKey="planejado" />}
-                            position="top"
-                          />
-                        </Bar>
-                        <Bar dataKey="realizado" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} name="Realizado">
-                          <LabelList
-                            content={(props: any) => <CustomBarLabel {...props} dataKey="realizado" />}
-                            position="top"
-                          />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  {/* Gráficos em Grid */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Gráfico 2: Diferença por Item - barras horizontais: nome à esquerda, valor à direita */}
-                    <div ref={chartDiferencaItemRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning/10 border border-warning/20">
-                            <TrendingUp className="h-5 w-5 text-warning" />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="text-base sm:text-lg font-bold text-card-foreground">Diferença por Item</h3>
-                            <p className="text-xs sm:text-sm text-muted-foreground">Variação entre planejado e realizado</p>
-                          </div>
-                        </div>
-                        <ExportToPng targetRef={chartDiferencaItemRef} filenamePrefix="grafico-diferenca-item" expandScrollable={false} className="shrink-0" />
-                      </div>
-                      <ResponsiveContainer width="100%" height={Math.max(220, items.length * 40)}>
+                    <div className="h-[280px] sm:h-[320px] lg:h-[400px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
                         <BarChart
-                          layout="vertical"
                           data={items.map((item) => ({
-                            name: item.descricaoItem || item.codigoItem || item.op || `Item ${item.numero}`,
+                            name: item.codigoItem || item.descricaoItem || item.op || `Item ${item.numero}`,
+                            planejado: parseFormattedNumber(item.quantidadePlanejada),
+                            realizado: parseFormattedNumber(item.quantidadeRealizada),
                             diferenca: item.diferenca,
                           }))}
-                          margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                          margin={chartBarMargin}
+                          barCategoryGap="12%"
+                          barGap={8}
                         >
-                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} horizontal={false} />
-                          <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
-                          <YAxis type="category" dataKey="name" width={200} stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
+                          <XAxis
+                            dataKey="name"
+                            stroke="hsl(var(--muted-foreground))"
+                            fontSize={12}
+                            tickLine={false}
+                            axisLine={false}
+                            tick={{ fontSize: 11 }}
+                          />
+                          <YAxis tick={false} tickLine={false} axisLine={false} />
                           <Tooltip
                             contentStyle={{
                               backgroundColor: "hsl(var(--card))",
                               border: "1px solid hsl(var(--border))",
-                              borderRadius: "8px",
-                              padding: "8px",
+                              borderRadius: "12px",
+                              padding: "12px 16px",
+                              boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                              fontSize: "13px",
                             }}
-                            formatter={(value: number) => [formatNumber(value), "Diferença"]}
+                            labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
                           />
-                          <Bar dataKey="diferenca" name="Diferença" radius={[0, 4, 4, 0]} maxBarSize={28}>
-                            <LabelList dataKey="diferenca" position="right" formatter={(v: number) => formatNumber(v)} className="fill-foreground" fontSize={11} />
-                            {items.map((_, i) => (
-                              <Cell key={i} fill={items[i].diferenca >= 0 ? "hsl(var(--success))" : "hsl(var(--destructive))"} />
-                            ))}
+                          <Legend wrapperStyle={{ paddingTop: 8 }} align="center" layout="horizontal" />
+                          <Bar dataKey="planejado" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} name="Planejado" maxBarSize={80}>
+                            <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="planejado" />} position="top" style={{ fontSize: 11 }} />
+                          </Bar>
+                          <Bar dataKey="realizado" fill="hsl(var(--success))" radius={[6, 6, 0, 0]} name="Realizado" maxBarSize={80}>
+                            <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="realizado" />} position="top" style={{ fontSize: 11 }} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-
-                    {/* Gráfico 3: Status de Produção - reflete o % do quadro Percentual Meta */}
-                    <div ref={chartStatusProducaoRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                      <div className="mb-4 sm:mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 border border-success/20">
-                            <Factory className="h-5 w-5 text-success" />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="text-base sm:text-lg font-bold text-card-foreground">Status de Produção</h3>
-                            <p className="text-xs sm:text-sm text-muted-foreground">Mesmo percentual do quadro “Percentual Meta” (total realizado ÷ total planejado)</p>
-                          </div>
-                        </div>
-                        <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="grafico-status-producao" expandScrollable={false} className="shrink-0" />
-                      </div>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <PieChart>
-                          {(() => {
-                            const { totalPlanejada, totalRealizada } = calcularTotaisProducao();
-                            const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
-                            const statusData =
-                              totalPlanejada === 0
-                                ? [{ name: "Sem meta definida", value: 100, color: "#6b7280" }]
-                                : perc >= 100
-                                  ? [{ name: "Meta atingida (≥100%)", value: 100, color: "#10b981" }]
-                                  : [
-                                      { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "#10b981" },
-                                      { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "#ef4444" },
-                                    ];
-                            return (
-                              <>
-                                <Pie
-                                  data={statusData}
-                                  cx="50%"
-                                  cy="50%"
-                                  labelLine={false}
-                                  outerRadius={80}
-                                  fill="#8884d8"
-                                  dataKey="value"
-                                >
-                                  {statusData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={entry.color} />
-                                  ))}
-                                </Pie>
-                                <Tooltip
-                                  contentStyle={{
-                                    backgroundColor: "hsl(var(--card))",
-                                    border: "1px solid hsl(var(--border))",
-                                    borderRadius: "8px",
-                                    padding: "8px",
-                                  }}
-                                  formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
-                                />
-                                <Legend />
-                              </>
-                            );
-                          })()}
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
                   </div>
 
-                  {/* Gráfico 4: Produção por Linha — valor realizado vs meta por linha (mesmo do dashboard) */}
-                  {(() => {
-                    const porLinha = items.reduce<Record<string, { valor: number; meta: number }>>((acc, item) => {
-                      const linha = (item.linha || "").trim() || "Sem linha";
-                      if (!acc[linha]) acc[linha] = { valor: 0, meta: 0 };
-                      acc[linha].valor += parseFormattedNumber(item.quantidadeRealizada);
-                      acc[linha].meta += parseFormattedNumber(item.quantidadePlanejada);
-                      return acc;
-                    }, {});
-                    const productionDataLinha = Object.entries(porLinha).map(([key, v]) => ({
-                      name: key === "Sem linha" ? key : (productionLines.find(l => l.code === key || (l.name || "").trim() === key)?.name || key),
-                      valor: v.valor,
-                      meta: v.meta,
-                    })).filter(d => d.valor > 0 || d.meta > 0);
-                    if (productionDataLinha.length === 0) return null;
-                    return (
-                      <div ref={chartProducaoLinhaRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
-                              <Factory className="h-5 w-5 text-primary" />
-                            </div>
-                            <div className="min-w-0">
-                              <h3 className="text-base sm:text-lg font-bold text-card-foreground">Produção por Linha</h3>
-                              <p className="text-xs sm:text-sm text-muted-foreground">Valor realizado vs meta por linha</p>
-                            </div>
+                  {/* Gráficos em Grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+                    {/* Gráfico 2: Diferença por Item - barras horizontais: nome à esquerda, valor à direita */}
+                    <div ref={chartDiferencaItemRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                      <div className="mb-5 lg:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-warning/10 border border-warning/20 shadow-sm">
+                            <TrendingUp className="h-5 w-5 lg:h-6 lg:w-6 text-warning" />
                           </div>
-                          <ExportToPng targetRef={chartProducaoLinhaRef} filenamePrefix="grafico-producao-linha" expandScrollable={false} className="shrink-0" />
+                          <div className="min-w-0">
+                            <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Diferença por Item</h3>
+                            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Variação entre planejado e realizado</p>
+                          </div>
                         </div>
-                        <div className="overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:h-2" style={{ minHeight: 320 }}>
-                          <div className="min-w-[280px]" style={{ minWidth: Math.max(280, productionDataLinha.length * 72) }}>
-                            <ResponsiveContainer width="100%" height={300}>
-                              <BarChart
-                                data={productionDataLinha}
-                                margin={{ top: 20, right: 20, left: 0, bottom: 56 }}
-                              >
-                                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                                <XAxis
-                                  dataKey="name"
-                                  stroke="hsl(var(--muted-foreground))"
-                                  fontSize={11}
-                                  tickLine={false}
-                                  axisLine={false}
-                                  angle={-35}
-                                  textAnchor="end"
-                                  height={48}
-                                  interval={0}
-                                />
-                            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
-                            <Tooltip
-                              contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", padding: "8px" }}
-                              labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                            />
-                            <Legend verticalAlign="top" height={36} />
-                            <Bar dataKey="valor" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Realizado">
-                              <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="valor" />} position="top" />
-                            </Bar>
-                            <Bar dataKey="meta" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} name="Meta" opacity={0.5}>
-                              <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="meta" />} position="top" />
-                            </Bar>
+                        <ExportToPng targetRef={chartDiferencaItemRef} filenamePrefix="grafico-diferenca-item" expandScrollable={false} className="shrink-0" />
+                      </div>
+                      <div className="w-full" style={{ height: Math.max(260, items.length * 44) }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        {(() => {
+                          const diferencaPorItemData = [...items]
+                            .map((item) => ({
+                              name: item.descricaoItem || item.codigoItem || item.op || `Item ${item.numero}`,
+                              diferenca: item.diferenca,
+                            }))
+                            .sort((a, b) => b.diferenca - a.diferenca);
+                          return (
+                            <BarChart
+                              layout="vertical"
+                              data={diferencaPorItemData}
+                              margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} horizontal={false} />
+                              <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tick={false} />
+                              <YAxis type="category" dataKey="name" width={200} stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+                              <Tooltip
+                                contentStyle={{
+                                  backgroundColor: "hsl(var(--card))",
+                                  border: "1px solid hsl(var(--border))",
+                                  borderRadius: "8px",
+                                  padding: "8px",
+                                }}
+                                formatter={(value: number) => [formatNumber(value), "Diferença"]}
+                              />
+                              <Bar dataKey="diferenca" name="Diferença" radius={[0, 4, 4, 0]} maxBarSize={28}>
+                                <LabelList dataKey="diferenca" position="right" formatter={(v: number) => formatNumber(v)} className="fill-foreground" fontSize={11} />
+                                {diferencaPorItemData.map((entry, i) => (
+                                  <Cell key={i} fill={entry.diferenca > 0 ? "hsl(var(--destructive))" : entry.diferenca < 0 ? "hsl(var(--warning))" : "hsl(var(--success))"} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          );
+                        })()}
+                      </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Produção por Linha (lado de Diferença por Item) */}
+                    {(() => {
+                      const porLinha = items.reduce<Record<string, { valor: number; meta: number }>>((acc, item) => {
+                        const linha = (item.linha || "").trim() || "Sem linha";
+                        if (!acc[linha]) acc[linha] = { valor: 0, meta: 0 };
+                        acc[linha].valor += parseFormattedNumber(item.quantidadeRealizada);
+                        acc[linha].meta += parseFormattedNumber(item.quantidadePlanejada);
+                        return acc;
+                      }, {});
+                      const productionDataLinha = Object.entries(porLinha)
+                        .map(([key, v]) => ({
+                          name: key === "Sem linha" ? key : (productionLines.find(l => l.code === key || (l.name || "").trim() === key)?.name || key),
+                          valor: v.valor,
+                          meta: v.meta,
+                        }))
+                        .filter(d => d.valor > 0 || d.meta > 0)
+                        .sort((a, b) => b.valor - a.valor);
+                      if (productionDataLinha.length === 0) {
+                        return (
+                          <div className="rounded-xl border border-border/60 bg-card/50 p-5 sm:p-7 flex items-center justify-center min-h-[200px] text-muted-foreground text-sm">
+                            Nenhum dado por linha para exibir.
+                          </div>
+                        );
+                      }
+                      const chartH = Math.min(320, Math.max(200, productionDataLinha.length * 28));
+                      const TooltipProducaoLinha = ({ active, payload, label }: any) => {
+                        if (!active || !payload?.length || !label) return null;
+                        const row = payload[0]?.payload;
+                        const realizado = row?.valor ?? 0;
+                        const meta = row?.meta ?? 0;
+                        const pct = meta > 0 ? ((realizado / meta) * 100).toFixed(1).replace(".", ",") : "—";
+                        return (
+                          <div className="rounded-lg border border-border bg-card px-3 py-2.5 shadow-md text-xs">
+                            <p className="font-semibold text-foreground mb-1.5 border-b border-border pb-1">{label}</p>
+                            <p><span className="text-primary font-medium">Realizado:</span> {formatNumber(realizado)}</p>
+                            <p><span className="text-muted-foreground font-medium">Meta:</span> {formatNumber(meta)}</p>
+                            <p className="mt-1 text-muted-foreground">% da meta: <span className="font-semibold text-foreground">{pct}%</span></p>
+                          </div>
+                        );
+                      };
+                      return (
+                        <div ref={chartProducaoLinhaRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                          <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 text-primary shadow-sm">
+                                <Factory className="h-5 w-5 lg:h-6 lg:w-6" />
+                              </div>
+                              <div className="min-w-0">
+                                <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Produção por Linha</h3>
+                                <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Compare realizado (azul) com meta (cinza). Ordenado do maior ao menor realizado.</p>
+                              </div>
+                            </div>
+                            <ExportToPng targetRef={chartProducaoLinhaRef} filenamePrefix="grafico-producao-linha" expandScrollable={false} className="shrink-0 w-full sm:w-auto min-h-[44px] sm:min-h-0" />
+                          </div>
+                          <div className="flex flex-wrap gap-3 mb-3">
+                            <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
+                              <span className="w-3 h-3 rounded-sm bg-primary shadow-sm" aria-hidden />
+                              <span className="text-muted-foreground">Realizado (produzido)</span>
+                            </span>
+                            <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
+                              <span className="w-3 h-3 rounded-sm bg-muted-foreground/50" aria-hidden />
+                              <span className="text-muted-foreground">Meta (planejado)</span>
+                            </span>
+                          </div>
+                          <div className="rounded-xl bg-muted/20 lg:bg-muted/30 p-4 lg:p-5 border border-border/40">
+                            <ResponsiveContainer width="100%" height={chartH}>
+                              <BarChart layout="vertical" data={productionDataLinha} margin={{ top: 8, right: 56, left: 4, bottom: 8 }}>
+                                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" opacity={0.4} horizontal={false} />
+                                <XAxis type="number" tickLine={false} axisLine={false} tick={false} label={false} />
+                                <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "hsl(var(--foreground))" }} />
+                                <Tooltip content={<TooltipProducaoLinha />} />
+                                <Bar dataKey="valor" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} name="Realizado" maxBarSize={24} barCategoryGap="40%">
+                                  <LabelList dataKey="valor" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                                </Bar>
+                                <Bar dataKey="meta" fill="hsl(var(--muted-foreground))" fillOpacity={0.5} radius={[0, 6, 6, 0]} name="Meta" maxBarSize={24} barCategoryGap="40%">
+                                  <LabelList dataKey="meta" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                </Bar>
                               </BarChart>
                             </ResponsiveContainer>
                           </div>
                         </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Status de Produção — abaixo do grid (largura total) */}
+                  <div ref={chartStatusProducaoRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                    <div className="mb-4 lg:mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-success/10 border border-success/20 shadow-sm">
+                          <Factory className="h-5 w-5 lg:h-6 lg:w-6 text-success" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Status de Produção</h3>
+                          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Mesmo percentual do quadro "Percentual Meta" (total realizado ÷ total planejado)</p>
+                        </div>
                       </div>
-                    );
-                  })()}
+                      <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="grafico-status-producao" expandScrollable={false} className="shrink-0" />
+                    </div>
+                    <div className="h-[240px] sm:h-[260px] lg:h-[300px] w-full flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        {(() => {
+                          const { totalPlanejada, totalRealizada } = calcularTotaisProducao();
+                          const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
+                          const statusData =
+                            totalPlanejada === 0
+                              ? [{ name: "Sem meta definida", value: 100, color: "#6b7280" }]
+                              : perc >= 100
+                                ? [{ name: "Meta atingida (≥100%)", value: 100, color: "#10b981" }]
+                                : [
+                                    { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "#10b981" },
+                                    { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "#ef4444" },
+                                  ];
+                          return (
+                            <>
+                              <Pie
+                                data={statusData}
+                                cx="50%"
+                                cy="50%"
+                                labelLine={false}
+                                outerRadius={72}
+                                fill="#8884d8"
+                                dataKey="value"
+                                stroke="hsl(var(--card))"
+                                strokeWidth={2}
+                                className="[&_.recharts-pie-sector]:outline-none"
+                              >
+                                {statusData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip
+                                contentStyle={{
+                                  backgroundColor: "hsl(var(--card))",
+                                  border: "1px solid hsl(var(--border))",
+                                  borderRadius: "12px",
+                                  padding: "12px 16px",
+                                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                                  fontSize: "13px",
+                                }}
+                                formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
+                              />
+                              <Legend wrapperStyle={{ paddingTop: 8 }} />
+                            </>
+                          );
+                        })()}
+                      </PieChart>
+                    </ResponsiveContainer>
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </div>
@@ -3679,3 +3858,5 @@ export default function Producao() {
     </AppLayout >
   );
 }
+
+export default Producao;

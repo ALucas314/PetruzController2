@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { DollarSign, ShoppingCart, Factory, Target, Minus, Loader2 } from "lucide-react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
@@ -19,11 +19,32 @@ interface DashboardStats {
   registros: number;
 }
 
+const DASHBOARD_SYNC_KEY_DATE = "dashboard_producao_data_dia";
+const DASHBOARD_SYNC_KEY_FILIAL = "dashboard_producao_filial_nome";
+
 const Index = () => {
-  // Filtros de data do dashboard: começam com a data de hoje, mas o usuário pode alterar
-  const [dataInicio, setDataInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
-  const [dataFim, setDataFim] = useState<string>(() => new Date().toISOString().split("T")[0]);
-  const [filial, setFilial] = useState<string>(""); // Nome completo da filial
+  // Filtros: iniciam com a mesma data/filial do módulo Produção (localStorage) para acompanhar o diário
+  const [dataInicio, setDataInicio] = useState<string>(() => {
+    try {
+      const d = localStorage.getItem(DASHBOARD_SYNC_KEY_DATE);
+      if (d) return d;
+    } catch {}
+    return new Date().toISOString().split("T")[0];
+  });
+  const [dataFim, setDataFim] = useState<string>(() => {
+    try {
+      const d = localStorage.getItem(DASHBOARD_SYNC_KEY_DATE);
+      if (d) return d;
+    } catch {}
+    return new Date().toISOString().split("T")[0];
+  });
+  const [filial, setFilial] = useState<string>(() => {
+    try {
+      const f = localStorage.getItem(DASHBOARD_SYNC_KEY_FILIAL);
+      if (f) return f;
+    } catch {}
+    return "";
+  });
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -32,6 +53,16 @@ const Index = () => {
   const chartPlanejadoRealizadoRef = useRef<HTMLDivElement>(null);
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
   const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
+
+  const [chartBarMargin, setChartBarMargin] = useState({ top: 28, right: 24, left: 24, bottom: 8 });
+  useEffect(() => {
+    const update = () => setChartBarMargin(
+      window.innerWidth < 640 ? { top: 28, right: 16, left: 4, bottom: 8 } : { top: 28, right: 24, left: 24, bottom: 8 }
+    );
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   // Função para calcular datas: usa intervalo (dataInicio/dataFim) se ambos preenchidos; senão últimos 30 dias
   const getDateRange = () => {
@@ -58,29 +89,39 @@ const Index = () => {
       .catch((err) => console.error("Erro ao carregar filiais:", err));
   }, []);
 
-  // Carregar dados do dashboard (Supabase direto)
-  useEffect(() => {
-    const run = async () => {
-      setLoading(true);
-      try {
-        const { dataInicio: di, dataFim: df } = getDateRange();
-        const filialNome = filial || undefined;
-        const [statsResult, chartResult, linesResult] = await Promise.all([
-          getDashboardStats({ dataInicio: di, dataFim: df, filialNome }),
-          getProductionChart({ dataInicio: di, dataFim: df, filialNome }),
-          getProductionLines({ dataInicio: di, dataFim: df, filialNome }),
-        ]);
-        setStats(statsResult);
-        setRevenueData(chartResult);
-        setProductionData(linesResult);
-      } catch (error) {
-        console.error("Erro ao carregar dados do dashboard:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    run();
+  // Função para carregar dados do dashboard (mesma fonte OCPD da produção diária)
+  const loadDashboardData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { dataInicio: di, dataFim: df } = getDateRange();
+      const filialNome = filial || undefined;
+      const [statsResult, chartResult, linesResult] = await Promise.all([
+        getDashboardStats({ dataInicio: di, dataFim: df, filialNome }),
+        getProductionChart({ dataInicio: di, dataFim: df, filialNome }),
+        getProductionLines({ dataInicio: di, dataFim: df, filialNome }),
+      ]);
+      setStats(statsResult);
+      setRevenueData(chartResult);
+      setProductionData(linesResult);
+    } catch (error) {
+      console.error("Erro ao carregar dados do dashboard:", error);
+    } finally {
+      setLoading(false);
+    }
   }, [filial, dataInicio, dataFim]);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  // Atualizar ao voltar para a aba (ex.: após salvar na Produção) para acompanhar o diário
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") loadDashboardData();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [loadDashboardData]);
 
   // Formatar valores para exibição
   const formatValue = (value: string | number, prefix: string = "") => {
@@ -191,81 +232,94 @@ const Index = () => {
             />
           </div>
 
-          {/* Seção: Análise Gráfica */}
-          <div className="space-y-6">
+          {/* Seção: Análise Gráfica — otimizada para desktop */}
+          <div className="space-y-6 lg:space-y-8">
             {/* Gráfico único: Planejado vs Realizado vs Diferença por período */}
-            <div ref={chartPlanejadoRealizadoRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-              <div className="mb-4 sm:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div ref={chartPlanejadoRealizadoRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+              <div className="mb-5 lg:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
-                    <Target className="h-5 w-5 text-primary" />
+                  <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+                    <Target className="h-5 w-5 lg:h-6 lg:w-6 text-primary" />
                   </div>
                   <div>
-                    <h3 className="text-base sm:text-lg font-bold text-card-foreground">Planejado vs Realizado vs Diferença</h3>
-                    <p className="text-xs sm:text-sm text-muted-foreground/70">Comparação por período — use o intervalo de datas acima para filtrar</p>
+                    <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Planejado vs Realizado vs Diferença</h3>
+                    <p className="text-xs sm:text-sm text-muted-foreground/80 mt-0.5">Comparação por período — use o intervalo de datas acima para filtrar</p>
                   </div>
                 </div>
                 <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="dashboard-planejado-realizado-diferenca" expandScrollable={false} className="shrink-0" />
               </div>
-              <ResponsiveContainer width="100%" height={320}>
-                <BarChart
-                  data={chartData}
-                  margin={{ top: 24, right: 20, left: 0, bottom: 5 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                  <XAxis
-                    dataKey="name"
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                    allowDataOverflow
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                      padding: "8px",
-                    }}
-                    labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                    formatter={(value: number) => [value.toLocaleString("pt-BR"), ""]}
-                  />
-                  <Legend />
-                  <Bar dataKey="planejado" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Planejado">
-                    <LabelList
-                      content={(props: any) => <CustomBarLabel {...props} dataKey="planejado" />}
-                      position="top"
+              <div className="h-[300px] sm:h-[340px] lg:h-[420px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={chartData}
+                    margin={chartBarMargin}
+                    barCategoryGap="12%"
+                    barGap={8}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
+                    <XAxis
+                      dataKey="name"
+                      stroke="hsl(var(--muted-foreground))"
+                      fontSize={12}
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 11 }}
                     />
-                  </Bar>
-                  <Bar dataKey="realizado" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} name="Realizado">
-                    <LabelList
-                      content={(props: any) => <CustomBarLabel {...props} dataKey="realizado" />}
-                      position="top"
+                    <YAxis
+                      stroke="hsl(var(--muted-foreground))"
+                      fontSize={12}
+                      tickLine={false}
+                      axisLine={false}
+                      allowDataOverflow
+                      tick={false}
                     />
-                  </Bar>
-                  <Bar dataKey="diferenca" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} name="Diferença (Planejado − Realizado)">
-                    <LabelList
-                      content={(props: any) => <CustomBarLabel {...props} dataKey="diferenca" />}
-                      position="top"
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "12px",
+                        padding: "12px 16px",
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                        fontSize: "13px",
+                      }}
+                      labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
+                      formatter={(value: number) => [value.toLocaleString("pt-BR"), ""]}
                     />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+                    <Legend wrapperStyle={{ paddingTop: 8 }} align="center" layout="horizontal" />
+                    <Bar dataKey="planejado" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} name="Planejado" maxBarSize={80}>
+                      <LabelList
+                        content={(props: any) => <CustomBarLabel {...props} dataKey="planejado" />}
+                        position="top"
+                        style={{ fontSize: 11 }}
+                      />
+                    </Bar>
+                    <Bar dataKey="realizado" fill="hsl(var(--success))" radius={[6, 6, 0, 0]} name="Realizado" maxBarSize={80}>
+                      <LabelList
+                        content={(props: any) => <CustomBarLabel {...props} dataKey="realizado" />}
+                        position="top"
+                        style={{ fontSize: 11 }}
+                      />
+                    </Bar>
+                    <Bar dataKey="diferenca" fill="hsl(var(--warning))" radius={[6, 6, 0, 0]} name="Diferença (Planejado − Realizado)" maxBarSize={80}>
+                      <LabelList
+                        content={(props: any) => <CustomBarLabel {...props} dataKey="diferenca" />}
+                        position="top"
+                        style={{ fontSize: 11 }}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
 
+            {/* Status de Produção e Produção por Linha — lado a lado no PC */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
             {/* Gráfico: Status de Produção — mesmo percentual do quadro Percentual Meta */}
-            <div ref={chartStatusProducaoRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                <div className="mb-4 sm:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div ref={chartStatusProducaoRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10 border border-success/20">
-                      <Factory className="h-5 w-5 text-success" />
+                    <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-success/10 border border-success/20 shadow-sm">
+                      <Factory className="h-5 w-5 lg:h-6 lg:w-6 text-success" />
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-base sm:text-lg font-bold text-card-foreground">Status de Produção</h3>
@@ -274,115 +328,106 @@ const Index = () => {
                   </div>
                   <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="dashboard-status-producao" expandScrollable={false} className="shrink-0" />
                 </div>
-                <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
-                    <Pie
-                      data={statusData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {statusData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                        padding: "8px",
-                      }}
-                      formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
-                    />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="h-[240px] sm:h-[260px] lg:h-[300px] w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={statusData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        outerRadius={72}
+                        fill="#8884d8"
+                        dataKey="value"
+                        stroke="hsl(var(--card))"
+                        strokeWidth={2}
+                        className="[&_.recharts-pie-sector]:outline-none"
+                      >
+                        {statusData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "12px",
+                          padding: "12px 16px",
+                          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                          fontSize: "13px",
+                        }}
+                        formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
+                      />
+                      <Legend wrapperStyle={{ paddingTop: 8 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
             </div>
 
-            {/* Gráfico: Produção por Linha */}
-            {productionData.length > 0 && (
-              <div ref={chartProducaoLinhaRef} className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
-                <div className="mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
-                      <Factory className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="text-base sm:text-lg font-bold text-card-foreground">Produção por Linha</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground">Valor realizado vs meta por linha</p>
-                    </div>
+            {/* Gráfico: Produção por Linha — intuitivo: realizado vs meta com % da meta no tooltip */}
+            {productionData.length > 0 ? (() => {
+              const sorted = [...productionData].sort((a: any, b: any) => (b.valor ?? 0) - (a.valor ?? 0));
+              const formatChartNumber = (v: number) => Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+              const TooltipProducaoLinha = ({ active, payload, label }: any) => {
+                if (!active || !payload?.length || !label) return null;
+                const row = payload[0]?.payload;
+                const realizado = row?.valor ?? 0;
+                const meta = row?.meta ?? 0;
+                const pct = meta > 0 ? ((realizado / meta) * 100).toFixed(1).replace(".", ",") : "—";
+                return (
+                  <div className="rounded-lg border border-border bg-card px-3 py-2.5 shadow-md text-xs">
+                    <p className="font-semibold text-foreground mb-1.5 border-b border-border pb-1">{label}</p>
+                    <p><span className="text-primary font-medium">Realizado:</span> {formatChartNumber(realizado)}</p>
+                    <p><span className="text-muted-foreground font-medium">Meta:</span> {formatChartNumber(meta)}</p>
+                    <p className="mt-1 text-muted-foreground">% da meta: <span className="font-semibold text-foreground">{pct}%</span></p>
                   </div>
-                  <ExportToPng targetRef={chartProducaoLinhaRef} filenamePrefix="dashboard-producao-linha" expandScrollable={false} className="shrink-0" />
-                </div>
-                {/* No mobile: scroll horizontal para os nomes das linhas não ficarem comprimidos */}
-                <div className="overflow-x-auto -mx-1 px-1 sm:overflow-visible sm:mx-0 sm:px-0" style={{ minHeight: 320 }}>
-                  <div className="min-w-[280px]" style={{ minWidth: Math.max(280, productionData.length * 72) }}>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart
-                        data={productionData}
-                        margin={{ top: 20, right: 20, left: 0, bottom: 56 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} vertical={false} />
-                        <XAxis
-                          dataKey="name"
-                          stroke="hsl(var(--muted-foreground))"
-                          fontSize={11}
-                          tickLine={false}
-                          axisLine={false}
-                          angle={-35}
-                          textAnchor="end"
-                          height={48}
-                          interval={0}
-                        />
-                    <YAxis
-                      stroke="hsl(var(--muted-foreground))"
-                      fontSize={12}
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                        padding: "8px",
-                      }}
-                      labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                    />
-                    <Legend verticalAlign="top" height={36} />
-                    <Bar
-                      dataKey="valor"
-                      fill="hsl(var(--primary))"
-                      radius={[4, 4, 0, 0]}
-                      name="Realizado"
-                    >
-                      <LabelList
-                        content={(props: any) => <CustomBarLabel {...props} dataKey="valor" />}
-                        position="top"
-                      />
-                    </Bar>
-                    <Bar
-                      dataKey="meta"
-                      fill="hsl(var(--muted-foreground))"
-                      radius={[4, 4, 0, 0]}
-                      name="Meta"
-                      opacity={0.5}
-                    >
-                      <LabelList
-                        content={(props: any) => <CustomBarLabel {...props} dataKey="meta" />}
-                        position="top"
-                      />
-                    </Bar>
+                );
+              };
+              const chartHeight = Math.min(320, Math.max(200, sorted.length * 28));
+              return (
+                <div ref={chartProducaoLinhaRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                  <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 text-primary shadow-sm">
+                        <Factory className="h-5 w-5 lg:h-6 lg:w-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-base sm:text-lg lg:text-xl font-bold text-foreground">Produção por Linha</h3>
+                        <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Compare realizado (azul) com meta (cinza). Ordenado do maior ao menor realizado.</p>
+                      </div>
+                    </div>
+                    <ExportToPng targetRef={chartProducaoLinhaRef} filenamePrefix="dashboard-producao-linha" expandScrollable={false} className="shrink-0 w-full sm:w-auto min-h-[44px] sm:min-h-0" />
+                  </div>
+                  <div className="flex flex-wrap gap-3 mb-3">
+                    <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
+                      <span className="w-3 h-3 rounded-sm bg-primary shadow-sm" aria-hidden />
+                      <span className="text-muted-foreground">Realizado (produzido)</span>
+                    </span>
+                    <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
+                      <span className="w-3 h-3 rounded-sm bg-muted-foreground/50" aria-hidden />
+                      <span className="text-muted-foreground">Meta (planejado)</span>
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-muted/20 lg:bg-muted/30 p-4 lg:p-5 border border-border/40">
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <BarChart layout="vertical" data={sorted} margin={{ top: 8, right: 56, left: 4, bottom: 8 }}>
+                        <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" opacity={0.4} horizontal={false} />
+                        <XAxis type="number" tickLine={false} axisLine={false} tick={false} label={false} />
+                        <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "hsl(var(--foreground))" }} />
+                        <Tooltip content={<TooltipProducaoLinha />} />
+                        <Bar dataKey="valor" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} name="Realizado" maxBarSize={24} barCategoryGap="40%">
+                          <LabelList dataKey="valor" position="right" formatter={(v: number) => formatChartNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                        </Bar>
+                        <Bar dataKey="meta" fill="hsl(var(--muted-foreground))" fillOpacity={0.5} radius={[0, 6, 6, 0]} name="Meta" maxBarSize={24} barCategoryGap="40%">
+                          <LabelList dataKey="meta" position="right" formatter={(v: number) => formatChartNumber(v)} style={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                        </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })() : null}
+            </div>
           </div>
         </>
       )}

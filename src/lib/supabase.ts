@@ -59,9 +59,10 @@ if (!hasSupabaseConfig) {
   );
 }
 
+// Usa placeholders quando não configurado para evitar "supabaseKey is required"; auth/API falharão até o .env ser preenchido
 export const supabase = createClient(
-  url || "https://invalid.supabase.co",
-  anonKey || "",
+  url || "https://placeholder.supabase.co",
+  anonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder",
   {
     auth: {
       persistSession: true,

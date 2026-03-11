@@ -363,7 +363,7 @@ export default function PlanejamentoPCP() {
                                     title="Exportar como PNG"
                                 >
                                     <Download className="h-4 w-4" />
-                                    <span className="hidden sm:inline">Exportar PNG</span>
+                                    <span className="hidden min-[791px]:inline">Exportar PNG</span>
                                 </button>
                             </div>
                         </div>

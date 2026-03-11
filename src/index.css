@@ -227,4 +227,42 @@
       font-size: 16px !important; /* Evita zoom automático no iOS */
     }
   }
+
+  /* Gráfico de pizza Problemas e Ações — aparência moderna */
+  .octp-pie-chart-wrapper .recharts-wrapper,
+  .octp-pie-chart-wrapper .recharts-surface {
+    overflow: visible !important;
+  }
+  .octp-pie-chart-wrapper .recharts-pie-label-text,
+  .octp-pie-chart-wrapper .recharts-label-text,
+  .octp-pie-chart-wrapper .recharts-pie .recharts-layer text {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em !important;
+    fill: hsl(var(--foreground)) !important;
+    paint-order: stroke fill;
+    stroke: rgba(255, 255, 255, 0.95);
+    stroke-width: 2.5px;
+  }
+  .dark .octp-pie-chart-wrapper .recharts-pie-label-text,
+  .dark .octp-pie-chart-wrapper .recharts-label-text,
+  .dark .octp-pie-chart-wrapper .recharts-pie .recharts-layer text {
+    stroke: hsl(var(--card));
+    stroke-width: 2px;
+  }
+  .octp-pie-chart-wrapper .recharts-pie-label-line line,
+  .octp-pie-chart-wrapper .recharts-label-line {
+    stroke: hsl(var(--foreground) / 0.35) !important;
+    stroke-width: 1.5px !important;
+  }
+
+  /* Cards de gráficos — melhor leitura no desktop */
+  .chart-card {
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  @media (min-width: 1024px) {
+    .chart-card:hover {
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+    }
+  }
 }

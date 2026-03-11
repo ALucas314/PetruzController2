@@ -193,22 +193,29 @@ export async function getProductionLines(params: { dataInicio: string; dataFim: 
 }
 
 // --- Produção (OCPD) load ---
-export async function loadProducao(params: { data?: string; filialNome?: string }) {
+/** docId: quando informado, carrega só as linhas desse documento. Quando null/undefined, carrega documento "legado" (doc_id IS NULL) para a data+filial. */
+export async function loadProducao(params: { data?: string; filialNome?: string; docId?: string | null }) {
   const hoje = new Date().toISOString().split("T")[0];
   const dataDia = params.data || hoje;
   let query = supabase.from("OCPD").select("*").order("id", { ascending: true }).eq("data_dia", dataDia);
   if (params.filialNome) query = query.eq("filial_nome", params.filialNome);
+  if (params.docId != null && params.docId !== "") {
+    query = query.eq("doc_id", params.docId);
+  } else {
+    query = query.is("doc_id", null);
+  }
   const { data: producaoData, error } = await query;
   if (error) throw error;
   const rows = producaoData || [];
-  const reprocessos: Array<{ numero: number; tipo: string; codigo: string | null; descricao: string | null; quantidade: number }> = [];
+  const reprocessos: Array<{ numero: number; tipo: string; linha: string; codigo: string | null; descricao: string | null; quantidade: number }> = [];
   const first = rows[0] as Record<string, unknown> | undefined;
-  // Preferir array completo na coluna JSONB "reprocessos"; senão usar campos únicos do primeiro registro
+  // Preferir array completo na coluna JSONB "reprocessos"; senão usar campos do primeiro registro (colunas reprocesso_*)
   if (first?.reprocessos && Array.isArray(first.reprocessos) && first.reprocessos.length > 0) {
     for (const r of first.reprocessos as Array<Record<string, unknown>>) {
       reprocessos.push({
         numero: Number(r.numero ?? 1),
         tipo: String(r.tipo ?? "Cortado"),
+        linha: (r.linha != null && String(r.linha).trim() !== "" ? String(r.linha).trim() : "") as string,
         codigo: (r.codigo != null ? String(r.codigo) : null),
         descricao: (r.descricao != null ? String(r.descricao) : null),
         quantidade: parseFloat(String(r.quantidade ?? 0)),
@@ -218,6 +225,7 @@ export async function loadProducao(params: { data?: string; filialNome?: string 
     reprocessos.push({
       numero: Number(first.reprocesso_numero ?? 1),
       tipo: String(first.reprocesso_tipo ?? "Cortado"),
+      linha: (first.reprocesso_linha != null ? String(first.reprocesso_linha).trim() : "") as string,
       codigo: (first.reprocesso_codigo as string) ?? null,
       descricao: (first.reprocesso_descricao as string) ?? null,
       quantidade: parseFloat(String(first.reprocesso_quantidade ?? 0)),
@@ -230,6 +238,7 @@ export async function loadProducao(params: { data?: string; filialNome?: string 
 export async function saveProducao(payload: {
   dataDia: string;
   filialNome?: string | null;
+  docId?: string | null;
   items: Array<Record<string, unknown>>;
   existingIds: (number | string | null)[];
   reprocessos?: Array<Record<string, unknown>>;
@@ -240,7 +249,7 @@ export async function saveProducao(payload: {
   percentualMeta?: number | string;
   totalReprocesso?: number | string;
 }) {
-  const { dataDia, filialNome, items, existingIds, reprocessos, latasPrevista = 0, latasRealizadas = 0, latasBatidas = 0, totalCortado = 0, percentualMeta: pctMeta = 0, totalReprocesso: totalRep = 0 } = payload;
+  const { dataDia, filialNome, docId, items, existingIds, reprocessos, latasPrevista = 0, latasRealizadas = 0, latasBatidas = 0, totalCortado = 0, percentualMeta: pctMeta = 0, totalReprocesso: totalRep = 0 } = payload;
   const totalReprocesso = (reprocessos || []).reduce((s, r) => s + parseFloat(String(r.quantidade ?? 0)), 0);
   const pct = items.length ? (items.reduce((s, i) => s + parseFloat(String(i.quantidadeRealizada ?? i.qtd_realizada ?? 0)), 0) / (items.reduce((s, i) => s + parseFloat(String(i.quantidadePlanejada ?? i.qtd_planejada ?? 0)), 0) || 1)) * 100 : parseFloat(String(pctMeta));
   const firstRep = reprocessos && reprocessos.length > 0 ? reprocessos[0] : null;
@@ -284,6 +293,7 @@ export async function saveProducao(payload: {
       ? (reprocessos || []).map((r: Record<string, unknown>) => ({
           numero: Number(r.numero ?? 0),
           tipo: String(r.tipo ?? "Cortado"),
+          linha: r.linha != null && String(r.linha).trim() !== "" ? String(r.linha).trim() : null,
           codigo: r.codigo != null ? String(r.codigo) : null,
           descricao: r.descricao != null ? String(r.descricao) : null,
           quantidade: parseFloat(String(r.quantidade ?? 0).replace(",", ".")) || 0,
@@ -299,6 +309,7 @@ export async function saveProducao(payload: {
     const row: Record<string, unknown> = {
     data_dia: dataDiaItem,
     filial_nome: filialNome || null,
+    doc_id: docId && docId.trim() !== "" ? docId.trim() : null,
     line_id: lineId,
     op: item.op ?? null,
     codigo_item: item.codigoItem ?? item.codigo ?? null,
@@ -327,6 +338,7 @@ export async function saveProducao(payload: {
     total_ja_cortado: parseFloat(String(totalCortado ?? 0)),
     reprocesso_numero: index === 0 && firstRep ? Number(firstRep.numero) : null,
     reprocesso_tipo: index === 0 && firstRep ? String(firstRep.tipo ?? "") : null,
+    reprocesso_linha: index === 0 && firstRep && firstRep.linha != null && String(firstRep.linha).trim() !== "" ? String(firstRep.linha).trim() : null,
     reprocesso_codigo: index === 0 && firstRep ? (firstRep.codigo != null ? String(firstRep.codigo) : null) : null,
     reprocesso_descricao: index === 0 && firstRep ? (firstRep.descricao != null ? String(firstRep.descricao) : null) : null,
     reprocesso_quantidade: index === 0 && firstRep ? parseFloat(String(firstRep.quantidade ?? 0).replace(",", ".")) : 0,
@@ -500,11 +512,34 @@ export interface OCTPRow {
   responsavel: string | null;
   hora: string | null; // ISO timestamp from DB
   inicio: string | null; // YYYY-MM-DD
+  hora_inicio: string | null; // HH:MM (editável; coluna hora_inicio na OCTP)
+  hora_final: string | null;  // HH:MM (editável; coluna hora_fim na OCTP)
+  duracao_minutos: number | null; // intervalo em minutos (coluna duracao_minutos na OCTP)
   descricao_status: string | null;
-  data_dia?: string | null; // data do documento (YYYY-MM-DD)
-  filial_nome?: string | null; // filial do documento
+  data_dia?: string | null;
+  filial_nome?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+/** Converte HH:MM ou HH:MM:SS em minutos desde 00:00. Retorna null se inválido. */
+function timeToMinutes(s: string | null | undefined): number | null {
+  if (!s || !String(s).trim()) return null;
+  const parts = String(s).trim().split(/[:\s]/).map(Number);
+  if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+    return parts[0] * 60 + parts[1] + (parts[2] != null && !Number.isNaN(parts[2]) ? Math.round(parts[2] / 60) : 0);
+  }
+  return null;
+}
+
+/** Calcula duração em minutos entre hora inicial e hora final (HH:MM). Retorna null se algum inválido. */
+export function computeDuracaoMinutos(horaInicio: string | null | undefined, horaFinal: string | null | undefined): number | null {
+  const minIni = timeToMinutes(horaInicio);
+  const minFim = timeToMinutes(horaFinal);
+  if (minIni == null || minFim == null) return null;
+  let diff = minFim - minIni;
+  if (diff < 0) diff += 24 * 60;
+  return diff;
 }
 
 /** Busca registros OCTP vinculados a um documento específico (data + filial) e à data de início. */
@@ -513,9 +548,10 @@ export async function getOCTPByInicio(
   dataDia?: string,
   filialNome?: string
 ): Promise<OCTPRow[]> {
+  // select("*") para funcionar mesmo se as colunas hora_inicio/hora_final ainda não existirem (antes da migration)
   let query = supabase
     .from("OCTP")
-    .select("id, numero, problema, acao, responsavel, hora, inicio, descricao_status, data_dia, filial_nome, created_at, updated_at")
+    .select("*")
     .eq("inicio", inicio);
 
   if (dataDia) {
@@ -535,6 +571,9 @@ export async function getOCTPByInicio(
     responsavel: r.responsavel != null ? String(r.responsavel) : null,
     hora: r.hora != null ? String(r.hora) : null,
     inicio: r.inicio != null ? String(r.inicio) : null,
+    hora_inicio: (r.hora_inicio != null ? String(r.hora_inicio).slice(0, 8) : null) as string | null,
+    hora_final: (r.hora_fim != null ? String(r.hora_fim).slice(0, 8) : r.hora_final != null ? String(r.hora_final).slice(0, 8) : null) as string | null,
+    duracao_minutos: r.duracao_minutos != null ? Number(r.duracao_minutos) : null,
     descricao_status: r.descricao_status != null ? String(r.descricao_status) : null,
     data_dia: r.data_dia != null ? String(r.data_dia) : null,
     filial_nome: r.filial_nome != null ? String(r.filial_nome) : null,
@@ -549,11 +588,14 @@ export async function insertOCTP(payload: {
   acao?: string | null;
   responsavel?: string | null;
   inicio?: string | null;
+  hora_inicio?: string | null;
+  hora_final?: string | null;
   descricao_status?: string | null;
   dataDia?: string | null;
   filialNome?: string | null;
 }): Promise<OCTPRow> {
-  const row = {
+  const toTime = (v: string | null | undefined) => (v != null && String(v).trim() !== "" ? String(v).trim() : null);
+  const row: Record<string, unknown> = {
     numero: payload.numero,
     problema: payload.problema ?? null,
     acao: payload.acao ?? null,
@@ -563,7 +605,11 @@ export async function insertOCTP(payload: {
     filial_nome: payload.filialNome ?? null,
     descricao_status: payload.descricao_status ?? null,
   };
-  const { data, error } = await supabase.from("OCTP").insert(row).select().single();
+  if (payload.hora_inicio !== undefined) row.hora_inicio = toTime(payload.hora_inicio);
+  if (payload.hora_final !== undefined) row.hora_fim = toTime(payload.hora_final);
+  const duracao = computeDuracaoMinutos(payload.hora_inicio, payload.hora_final);
+  if (duracao !== null) row.duracao_minutos = duracao;
+  const { data, error } = await supabase.from("OCTP").insert(row).select("*").single();
   if (error) throw error;
   const r = data as Record<string, unknown>;
   return {
@@ -574,6 +620,9 @@ export async function insertOCTP(payload: {
     responsavel: r.responsavel != null ? String(r.responsavel) : null,
     hora: r.hora != null ? String(r.hora) : null,
     inicio: r.inicio != null ? String(r.inicio) : null,
+    hora_inicio: (r.hora_inicio != null ? String(r.hora_inicio).slice(0, 8) : null) as string | null,
+    hora_final: (r.hora_fim != null ? String(r.hora_fim).slice(0, 8) : null) as string | null,
+    duracao_minutos: r.duracao_minutos != null ? Number(r.duracao_minutos) : null,
     descricao_status: r.descricao_status != null ? String(r.descricao_status) : null,
     created_at: r.created_at != null ? String(r.created_at) : undefined,
     updated_at: r.updated_at != null ? String(r.updated_at) : undefined,
@@ -588,6 +637,9 @@ export async function updateOCTP(
     acao?: string | null;
     responsavel?: string | null;
     inicio?: string | null;
+    hora_inicio?: string | null;
+    hora_final?: string | null;
+    duracao_minutos?: number | null;
     descricao_status?: string | null;
     dataDia?: string | null;
     filialNome?: string | null;
@@ -599,8 +651,14 @@ export async function updateOCTP(
   if (payload.acao !== undefined) body.acao = payload.acao;
   if (payload.responsavel !== undefined) body.responsavel = payload.responsavel;
   if (payload.inicio !== undefined) body.inicio = payload.inicio;
+  if (payload.hora_inicio !== undefined) body.hora_inicio = payload.hora_inicio != null && String(payload.hora_inicio).trim() !== "" ? payload.hora_inicio : null;
+  if (payload.hora_final !== undefined) body.hora_fim = payload.hora_final != null && String(payload.hora_final).trim() !== "" ? payload.hora_final : null;
+  if (payload.duracao_minutos !== undefined) body.duracao_minutos = payload.duracao_minutos;
+  else {
+    const duracao = computeDuracaoMinutos(payload.hora_inicio, payload.hora_final);
+    if (duracao !== null) body.duracao_minutos = duracao;
+  }
   if (payload.descricao_status !== undefined) body.descricao_status = payload.descricao_status;
-   // Manter vínculo com documento, se necessário atualizar
   if (payload.dataDia !== undefined) body.data_dia = payload.dataDia;
   if (payload.filialNome !== undefined) body.filial_nome = payload.filialNome;
   if (Object.keys(body).length === 0) return;
