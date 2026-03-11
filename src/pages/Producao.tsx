@@ -271,6 +271,25 @@ function Producao() {
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   // Reprocessos
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
+  // Filtros do card de reprocesso (tipo e linha)
+  const [reprocessoFiltroTipo, setReprocessoFiltroTipo] = useState<"" | "Cortado" | "Usado">("");
+  const [reprocessoFiltroLinha, setReprocessoFiltroLinha] = useState<string>("");
+  // Lista de reprocessos filtrada por tipo e linha (para exibição no card)
+  const reprocessosFiltrados = useMemo(() => {
+    return reprocessos.filter((r) => {
+      if (reprocessoFiltroTipo && r.tipo !== reprocessoFiltroTipo) return false;
+      if (!reprocessoFiltroLinha) return true;
+      const linhaVal = (r.linha ?? "").toString().trim();
+      const filtroVal = reprocessoFiltroLinha.trim();
+      if (linhaVal === filtroVal) return true;
+      const selectedLine = productionLines.find((l) => (l.code ? String(l.code) : `line-${l.id}`) === filtroVal);
+      if (selectedLine) {
+        const codeOrId = selectedLine.code ? String(selectedLine.code) : `line-${selectedLine.id}`;
+        return linhaVal === codeOrId || linhaVal === (selectedLine.name ?? "");
+      }
+      return false;
+    });
+  }, [reprocessos, reprocessoFiltroTipo, reprocessoFiltroLinha, productionLines]);
   // OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status)
   const [octpInicio, setOctpInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
@@ -2729,19 +2748,20 @@ function Producao() {
                   ref={reprocessoCardRef}
                   className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-5 sm:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.1)]"
                 >
-                  <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
-                        <Factory className="h-5 w-5 text-primary" />
+                  <div className="mb-5 space-y-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
+                          <Factory className="h-5 w-5 text-primary" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-base sm:text-lg font-bold text-card-foreground">Reprocesso</h3>
+                          <p className="text-xs text-muted-foreground/70 mt-0.5">
+                            Gerencie os reprocessos
+                          </p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <h3 className="text-base sm:text-lg font-bold text-card-foreground">Reprocesso</h3>
-                        <p className="text-xs text-muted-foreground/70 mt-0.5">
-                          Gerencie os reprocessos
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
+                      <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
                       <Button
                         onClick={(e) => {
                           e.preventDefault();
@@ -2789,6 +2809,45 @@ function Producao() {
                         }}
                       />
                     </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-1 border-t border-border/40">
+                      <span className="text-xs text-muted-foreground font-medium">Filtros:</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">Tipo</span>
+                        <Select
+                          value={reprocessoFiltroTipo || "todos"}
+                          onValueChange={(v) => setReprocessoFiltroTipo(v === "todos" ? "" : (v as "Cortado" | "Usado"))}
+                        >
+                          <SelectTrigger className="h-8 w-[120px] sm:w-[130px] text-xs">
+                            <SelectValue placeholder="Todos" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="todos">Todos</SelectItem>
+                            <SelectItem value="Cortado">Cortado</SelectItem>
+                            <SelectItem value="Usado">Usado</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">Linha</span>
+                        <Select
+                          value={reprocessoFiltroLinha || "todas"}
+                          onValueChange={(v) => setReprocessoFiltroLinha(v === "todas" ? "" : v)}
+                        >
+                          <SelectTrigger className="h-8 min-w-[120px] sm:min-w-[140px] text-xs">
+                            <SelectValue placeholder="Todas" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="todas">Todas as linhas</SelectItem>
+                            {productionLines.map((line) => (
+                              <SelectItem key={line.id} value={line.code ? String(line.code) : `line-${line.id}`}>
+                                {line.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -2806,14 +2865,16 @@ function Producao() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {reprocessos.length === 0 ? (
+                          {reprocessosFiltrados.length === 0 ? (
                             <TableRow>
                               <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
-                                Nenhum reprocesso cadastrado. Clique em "Adicionar Reprocesso" para começar.
+                                {reprocessos.length === 0
+                                  ? "Nenhum reprocesso cadastrado. Clique em \"Adicionar Reprocesso\" para começar."
+                                  : "Nenhum reprocesso corresponde aos filtros selecionados."}
                               </TableCell>
                             </TableRow>
                           ) : (
-                            reprocessos.map((reprocesso) => (
+                            reprocessosFiltrados.map((reprocesso) => (
                               <TableRow key={reprocesso.id}>
                                 <TableCell className="text-center font-medium text-xs sm:text-sm">{reprocesso.numero}</TableCell>
                                 <TableCell className="p-2 sm:p-4">
@@ -2928,7 +2989,7 @@ function Producao() {
                       <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50">
                         <span className="text-sm font-medium text-muted-foreground">Total Reprocesso Cortado:</span>
                         <span className="text-base font-bold text-foreground">
-                          {reprocessos
+                          {reprocessosFiltrados
                             .filter((r) => r.tipo === "Cortado")
                             .reduce((sum, r) => {
                               const qtd = parseFloat(r.quantidade.replace(",", ".")) || 0;
@@ -2942,7 +3003,7 @@ function Producao() {
                       <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50">
                         <span className="text-sm font-medium text-muted-foreground">Total Reprocesso Usado:</span>
                         <span className="text-base font-bold text-foreground">
-                          {reprocessos
+                          {reprocessosFiltrados
                             .filter((r) => r.tipo === "Usado")
                             .reduce((sum, r) => {
                               const qtd = parseFloat(r.quantidade.replace(",", ".")) || 0;
@@ -2975,16 +3036,6 @@ function Producao() {
                       </div>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
-                      <div className="flex items-center gap-2">
-                        <Label htmlFor="octp-inicio" className="text-xs text-muted-foreground whitespace-nowrap">Início</Label>
-                        <Input
-                          id="octp-inicio"
-                          type="date"
-                          value={octpInicio}
-                          onChange={(e) => setOctpInicio(e.target.value)}
-                          className="h-9 w-[140px] text-sm"
-                        />
-                      </div>
                       <Button
                         onClick={(e) => {
                           e.preventDefault();
