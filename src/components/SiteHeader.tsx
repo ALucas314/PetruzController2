@@ -153,9 +153,10 @@ export function SiteHeader() {
                     variant="outline"
                     size="sm"
                     className="flex items-center justify-center min-h-[40px] min-w-[40px] sm:min-w-0 sm:h-8 sm:px-3 sm:py-2 h-9 w-9 sm:w-auto rounded-lg bg-gradient-to-r from-success/10 to-success/5 border border-success/30 shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 text-sm font-semibold text-success z-20 relative disabled:opacity-50 disabled:cursor-not-allowed p-0 sm:p-2"
-                    onClick={documentNav.onSave}
-                    disabled={documentNav.saving}
+                    onClick={() => documentNav.onSave?.()}
+                    disabled={documentNav.saving || documentNav.canSave === false}
                     aria-label="Salvar documento"
+                    title="Salvar no banco de dados"
                   >
                     {documentNav.saving ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

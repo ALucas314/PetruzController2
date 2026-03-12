@@ -2062,18 +2062,15 @@ function Producao() {
       },
       navLabel: isCadastroView && total > 0 ? (curIdx >= 0 ? `${curIdx + 1} de ${total}` : `Novo · ${total} doc.`) : undefined,
       saving,
+      canSave: items.length > 0,
       onSave: () => {
-        // Usa o mesmo fluxo do botão principal Salvar
-        if (!saving) {
-          void (async () => {
-            await saveToDatabase();
-          })();
-        }
+        if (saving || items.length === 0) return;
+        void saveToDatabase();
       },
     });
     return () => setDocumentNav(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentView, currentRecordIndex, currentRecordId, allRecords.length, dataCabecalhoSelecionada]);
+  }, [currentView, currentRecordIndex, currentRecordId, allRecords.length, dataCabecalhoSelecionada, saving, items.length]);
 
   // Exporta os 4 blocos (Status de Produção, Planejado vs Realizado, Reprocesso, Histórico) como PNGs separados,
   // com dados filtrados pela filial e data do documento aberto. No mobile oferece compartilhar (ex.: WhatsApp).
