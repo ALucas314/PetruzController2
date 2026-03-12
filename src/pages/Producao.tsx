@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck, FilePlus } from "lucide-react";
+import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck, FilePlus, Filter } from "lucide-react";
 import { ExportToPng, captureElementToPngBlob } from "@/components/ExportToPng";
 import {
   Dialog,
@@ -176,12 +176,13 @@ function makeYAxisTickMultiLine(maxCharsPerLine: number, maxLines: number) {
     const { x = 0, y = 0, payload } = props;
     const label = payload?.value ?? "";
     const lines = wrapTextToLines(label, maxCharsPerLine, maxLines);
-    const fontSize = maxCharsPerLine <= 12 ? 11 : 13;
+    const fontSize = maxCharsPerLine <= 10 ? 10 : maxCharsPerLine <= 14 ? 11 : 13;
+    const lineHeight = maxCharsPerLine <= 10 ? "1em" : "1.05em";
     return (
       <g transform={`translate(${x},${y})`}>
         <text textAnchor="end" fontSize={fontSize} fontWeight={600} fill="hsl(var(--foreground))">
           {lines.map((line, i) => (
-            <tspan key={i} x={0} dy={i === 0 ? 0 : "1.05em"}>{line}</tspan>
+            <tspan key={i} x={0} dy={i === 0 ? 0 : lineHeight}>{line}</tspan>
           ))}
         </text>
       </g>
@@ -272,6 +273,10 @@ function Producao() {
   const [chartTickMaxChars, setChartTickMaxChars] = useState(22);
   const [chartTickMaxLines, setChartTickMaxLines] = useState(3);
   const [chartMarginRight, setChartMarginRight] = useState(72);
+  /** No celular: mais espaço por linha no gráfico Planejado vs Realizado para evitar nome em cima de nome */
+  const [chartRowHeightExtra, setChartRowHeightExtra] = useState(52);
+  const [chartBarCategoryGap, setChartBarCategoryGap] = useState(40);
+  const [chartBarGap, setChartBarGap] = useState(22);
   useEffect(() => {
     const update = () => {
       const w = window.innerWidth;
@@ -279,20 +284,29 @@ function Producao() {
       setLinhaBarSize(w >= 1024 ? 26 : w >= 640 ? 22 : 20);
       setPieOuterRadius(w >= 1024 ? 88 : 72);
       if (w < 400) {
-        setChartYAxisWidth(100);
+        setChartYAxisWidth(110);
         setChartTickMaxChars(10);
         setChartTickMaxLines(5);
-        setChartMarginRight(48);
+        setChartMarginRight(52);
+        setChartRowHeightExtra(100);
+        setChartBarCategoryGap(36);
+        setChartBarGap(28);
       } else if (w < 640) {
-        setChartYAxisWidth(150);
+        setChartYAxisWidth(160);
         setChartTickMaxChars(14);
         setChartTickMaxLines(4);
-        setChartMarginRight(56);
+        setChartMarginRight(60);
+        setChartRowHeightExtra(92);
+        setChartBarCategoryGap(40);
+        setChartBarGap(26);
       } else {
         setChartYAxisWidth(200);
         setChartTickMaxChars(22);
         setChartTickMaxLines(3);
         setChartMarginRight(72);
+        setChartRowHeightExtra(52);
+        setChartBarCategoryGap(40);
+        setChartBarGap(22);
       }
     };
     update();
@@ -340,6 +354,11 @@ function Producao() {
   const [currentRecordId, setCurrentRecordId] = useState<number | null>(null); // ID do registro atual
   /** doc_id do documento atual (null = legado ou novo ainda não salvo). Novo documento gera UUID. */
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
+  /** Na sub-aba Acompanhamento diário: true = exibe grid de documentos da data; false = exibe o formulário do documento aberto */
+  const [showDocumentGridForDate, setShowDocumentGridForDate] = useState(false);
+  /** Filtro do grid por número de documento: valor digitado e valor aplicado ao clicar em Filtrar */
+  const [gridFilterNumeroDoc, setGridFilterNumeroDoc] = useState("");
+  const [gridFilterNumeroDocApplied, setGridFilterNumeroDocApplied] = useState("");
 
   // Catálogo de itens vindo da OCTI (mapeado por código)
   const [itemCatalog, setItemCatalog] = useState<Record<string, { nome_item: string }>>({});
@@ -369,6 +388,31 @@ function Producao() {
       return false;
     });
   }, [reprocessos, reprocessoAppliedTipo, reprocessoAppliedLinha, productionLines]);
+  // Documentos da data selecionada (para grid na sub-aba Acompanhamento diário)
+  const documentsForSelectedDate = useMemo(() => {
+    if (!dataCabecalhoSelecionada || !allRecords.length) return [];
+    return allRecords.filter((r) => {
+      const dateVal = r.data_dia || r.data_cabecalho || r.data;
+      const dateStr = dateVal
+        ? (typeof dateVal === "string" ? dateVal.split("T")[0] : new Date(dateVal).toISOString().split("T")[0])
+        : "";
+      return dateStr === dataCabecalhoSelecionada;
+    });
+  }, [allRecords, dataCabecalhoSelecionada]);
+
+  // Grid: documentos da data filtrados por número de documento (quando filtro aplicado)
+  const gridFilteredDocuments = useMemo(() => {
+    if (!gridFilterNumeroDocApplied.trim()) return documentsForSelectedDate;
+    const num = parseInt(gridFilterNumeroDocApplied.trim(), 10);
+    if (Number.isNaN(num) || num < 1) return documentsForSelectedDate;
+    return documentsForSelectedDate.filter((record) => {
+      const globalIndex = allRecords.findIndex(
+        (r) => (r.recordKey && record.recordKey && r.recordKey === record.recordKey) || (r.id === record.id && (r.doc_id ?? null) === (record.doc_id ?? null))
+      );
+      const numeroRegistro = globalIndex >= 0 ? globalIndex + 1 : 0;
+      return numeroRegistro === num;
+    });
+  }, [documentsForSelectedDate, gridFilterNumeroDocApplied, allRecords]);
   // OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status)
   const [octpInicio, setOctpInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
@@ -1442,11 +1486,14 @@ function Producao() {
           variant: "default",
         });
       } else {
-        toast({
-          title: "Nenhum dado encontrado",
-          description: `Nenhum dado para ${formatDateShort(dataToLoad)}`,
-          variant: "destructive",
-        });
+        // Não exibir toast quando o usuário só selecionou a data para ver o grid (lista de documentos da data)
+        if (!showDocumentGridForDate) {
+          toast({
+            title: "Nenhum dado encontrado",
+            description: `Nenhum dado para ${formatDateShort(dataToLoad)}`,
+            variant: "destructive",
+          });
+        }
       }
     } catch (error: any) {
       console.error("Erro ao carregar produção:", error);
@@ -1564,10 +1611,10 @@ function Producao() {
   };
 
   // Função para carregar todos os registros ordenados (um registro = um documento: data_dia + filial + doc_id)
+  // Sem filtro de filial para o grid mostrar todos os documentos da data (BELA, Petruz, etc.)
   const loadAllRecords = async (): Promise<any[]> => {
     try {
-      const filialNomeForQuery = filialSelecionada ? filiais.find((f) => f.codigo === filialSelecionada)?.nome : undefined;
-      const result = await getProducaoHistory({ limit: 1000, filialNome: filialNomeForQuery });
+      const result = await getProducaoHistory({ limit: 1000 });
 
       if (Array.isArray(result) && result.length > 0) {
         const recordsMap = new Map<string, any>();
@@ -1669,6 +1716,7 @@ function Producao() {
     if (index < 0 || index >= allRecords.length) return;
 
     isNewDocumentRef.current = false;
+    setShowDocumentGridForDate(false);
     justLoadedByIndexRef.current = true; // evita que o useEffect sobrescreva os dados ao mudar dataCabecalhoSelecionada
     const record = allRecords[index];
     const recordDate = record.data_dia || record.data_cabecalho || record.data;
@@ -1724,6 +1772,7 @@ function Producao() {
   // Função para criar novo cadastro (limpar tudo); gera novo doc_id para não misturar com outros no mesmo dia
   const createNewCadastro = () => {
     isNewDocumentRef.current = true;
+    setShowDocumentGridForDate(false);
     setCurrentRecordIndex(-1);
     setCurrentRecordId(null);
     setCurrentDocId(crypto.randomUUID());
@@ -2284,9 +2333,8 @@ function Producao() {
           </div>
 
           {/* Card: Acompanhamento diário da produção */}
-          <div ref={producaoCardRef} data-export-target className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden group/card">
-            {/* Efeito de brilho sutil */}
-            <div className="absolute inset-0 bg-gradient-to-br from-primary/2 via-primary/0.5 to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-500 pointer-events-none z-0 rounded-2xl" />
+          <div ref={producaoCardRef} data-export-target className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
+            {/* Efeito de brilho removido no hover para não deixar área branca */}
             {/* Borda superior com gradiente */}
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />
 
@@ -2340,9 +2388,12 @@ function Producao() {
                               type="date"
                               className="hidden"
                               value={dataCabecalhoSelecionada}
-                              onChange={(e) => setDataCabecalhoSelecionada(e.target.value)}
+                              onChange={(e) => {
+                                setDataCabecalhoSelecionada(e.target.value);
+                                setShowDocumentGridForDate(true);
+                              }}
                             />
-                            <div className="flex items-center gap-2 px-2 py-1 rounded-md border border-transparent group-hover:border-primary/30 group-hover:bg-primary/5 transition-all">
+                            <div className="flex items-center gap-2 px-2 py-1 rounded-md border border-transparent group-hover:border-primary/30 group-hover:bg-muted/60 transition-all">
                               <span className="text-sm sm:text-base text-muted-foreground/90 font-medium capitalize select-none pointer-events-none">
                                 {formatDate(dataCabecalhoSelecionada ? parseDateString(dataCabecalhoSelecionada) : currentTime)}
                               </span>
@@ -2482,6 +2533,118 @@ function Producao() {
                 </div>
               )}
 
+              {showDocumentGridForDate ? (
+                <div className="space-y-4">
+                  <p className="text-sm font-medium text-muted-foreground">
+                    Documentos cadastrados em {formatDate(dataCabecalhoSelecionada ? parseDateString(dataCabecalhoSelecionada) : new Date())}
+                  </p>
+                  <div className="flex flex-wrap items-end gap-2 sm:gap-3">
+                    <div className="flex flex-col gap-1.5 min-w-[120px]">
+                      <Label htmlFor="grid-filter-numero" className="text-xs font-medium text-muted-foreground">
+                        N° documento
+                      </Label>
+                      <Input
+                        id="grid-filter-numero"
+                        type="number"
+                        min={1}
+                        max={allRecords.length || 999}
+                        placeholder="Todos"
+                        value={gridFilterNumeroDoc}
+                        onChange={(e) => setGridFilterNumeroDoc(e.target.value)}
+                        className="h-9 w-full sm:w-[100px] text-sm tabular-nums"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-9 gap-2 shrink-0"
+                      onClick={() => setGridFilterNumeroDocApplied(gridFilterNumeroDoc.trim())}
+                    >
+                      <Filter className="h-4 w-4" />
+                      Filtrar
+                    </Button>
+                    {gridFilterNumeroDocApplied && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-9 text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setGridFilterNumeroDoc("");
+                          setGridFilterNumeroDocApplied("");
+                        }}
+                      >
+                        Limpar
+                      </Button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {gridFilteredDocuments.map((record, index) => {
+                      const globalIndex = allRecords.findIndex(
+                        (r) => (r.recordKey && record.recordKey && r.recordKey === record.recordKey) || (r.id === record.id && (r.doc_id ?? null) === (record.doc_id ?? null))
+                      );
+                      const recordDate = record.data_dia || record.data_cabecalho || record.data;
+                      const dateStr = recordDate ? (typeof recordDate === "string" ? recordDate.split("T")[0] : new Date(recordDate).toISOString().split("T")[0]) : "";
+                      return (
+                        <div
+                          key={record.recordKey ?? `${record.id}-${record.doc_id ?? "legacy"}`}
+                          onClick={() => {
+                            if (globalIndex >= 0) {
+                              loadRecordByIndex(globalIndex);
+                              setShowDocumentGridForDate(false);
+                            }
+                          }}
+                          className="group relative rounded-xl border border-border/50 bg-card/95 hover:border-primary/40 hover:bg-muted/60 hover:shadow-md transition-all duration-300 p-4 sm:p-5 cursor-pointer"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex min-w-[3.5rem] sm:min-w-[4rem] shrink-0 flex-col items-center justify-center rounded-lg bg-primary/10 border border-primary/20 text-primary py-1.5">
+                              <span className="text-[10px] font-bold leading-tight">N°</span>
+                              <span className="text-sm font-bold tabular-nums">{globalIndex >= 0 ? globalIndex + 1 : index + 1}</span>
+                              <span className="text-[10px] text-muted-foreground mt-0.5">de {allRecords.length}</span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-foreground truncate">
+                                {(record.filial_nome || "").trim() || "Sem filial"}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {dateStr ? formatDate(parseDateString(dateStr)) : ""}
+                              </p>
+                              {record.doc_id && (
+                                <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono truncate">
+                                  Doc. {String(record.doc_id).slice(0, 8)}…
+                                </p>
+                              )}
+                            </div>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0 mt-1" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div
+                      onClick={() => {
+                        documentNav?.onNewDocument?.();
+                        setShowDocumentGridForDate(false);
+                      }}
+                      className="group relative rounded-xl border border-dashed border-primary/40 bg-primary/5 hover:bg-muted/60 hover:border-primary/60 transition-all duration-300 p-4 sm:p-5 cursor-pointer flex flex-col items-center justify-center min-h-[100px]"
+                    >
+                      <FilePlus className="h-8 w-8 text-primary mb-2" />
+                      <span className="text-sm font-semibold text-primary">Novo documento</span>
+                    </div>
+                  </div>
+                  {documentsForSelectedDate.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Nenhum documento nesta data. Clique em &quot;Novo documento&quot; para criar.
+                    </p>
+                  )}
+                  {documentsForSelectedDate.length > 0 && gridFilterNumeroDocApplied && gridFilteredDocuments.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Nenhum documento com o número {gridFilterNumeroDocApplied}. Use &quot;Limpar&quot; para ver todos.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
               {/* Campo de seleção de filial */}
               <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 shadow-[0_4px_20px_rgba(0,0,0,0.1)]">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
@@ -3555,7 +3718,7 @@ function Producao() {
                     <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
                       <div
                         className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5 w-full min-w-0"
-                        style={{ height: Math.min(720, Math.max(200, items.length * (linhaBarSize * 2 + 52))) }}
+                        style={{ height: Math.min(720, Math.max(200, items.length * (linhaBarSize * 2 + chartRowHeightExtra))) }}
                       >
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
@@ -3568,9 +3731,9 @@ function Producao() {
                                 realizado: parseFormattedNumber(item.quantidadeRealizada),
                                 diferenca: item.diferenca,
                               }))}
-                            margin={{ top: 8, right: chartMarginRight, left: 4, bottom: 8 }}
-                            barCategoryGap={40}
-                            barGap={22}
+                            margin={{ top: 8, right: chartMarginRight, left: 8, bottom: 8 }}
+                            barCategoryGap={chartBarCategoryGap}
+                            barGap={chartBarGap}
                           >
                             <defs>
                               <linearGradient id="producao-linha-primary" x1="0" y1="0" x2="1" y2="0">
@@ -3871,7 +4034,7 @@ function Producao() {
                                   </linearGradient>
                                 </defs>
                                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
-                                <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} label={false} />
+                                <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
                                 <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                                 <Tooltip content={<TooltipProducaoLinha />} cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }} />
                                 <Bar dataKey="valor" fill="url(#producao-linha-valor)" radius={[0, 8, 8, 0]} name="Realizado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
@@ -3890,6 +4053,8 @@ function Producao() {
 
                 </div>
               </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -4053,7 +4218,7 @@ function Producao() {
                         </linearGradient>
                       </defs>
                       <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
-                      <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} label={false} />
+                      <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
                       <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                       <Tooltip content={<TooltipProducaoLinhaHist />} cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }} />
                       <Bar dataKey="valor" fill="url(#historico-linha-valor)" radius={[0, 8, 8, 0]} name="Realizado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
