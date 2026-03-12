@@ -70,21 +70,21 @@ export function SiteHeader() {
         "min-h-14 sm:min-h-[5.25rem] lg:h-16 lg:min-h-0"
       )}
     >
-      <div className="flex flex-wrap max-[410px]:flex-nowrap min-h-14 sm:min-h-[5.25rem] lg:min-h-0 lg:h-16 items-center gap-x-1.5 gap-y-0.5 max-[410px]:gap-x-1.5 sm:gap-x-3 px-2 sm:px-4 max-[410px]:px-2 lg:px-8 min-w-0 max-w-full max-[410px]:overflow-x-auto py-1 lg:py-0">
-        {/* Botão menu (hambúrguer) — compacto no mobile */}
+      <div className="flex flex-nowrap min-h-14 sm:min-h-[5.25rem] lg:min-h-0 lg:h-16 items-center gap-x-1.5 sm:gap-x-3 px-2 sm:px-4 lg:px-8 min-w-0 max-w-full py-1.5 sm:py-1 lg:py-0">
+        {/* Botão menu (hambúrguer) — uma linha no mobile */}
         <Button
           variant="ghost"
           size="icon"
-          className="h-11 w-11 min-h-[44px] min-w-[44px] max-[410px]:h-9 max-[410px]:w-9 max-[410px]:min-h-[36px] max-[410px]:min-w-[36px] shrink-0 rounded-lg lg:hidden"
+          className="h-10 w-10 min-h-[40px] min-w-[40px] sm:h-9 sm:w-9 shrink-0 rounded-lg lg:hidden"
           onClick={() => setMobileOpen(true)}
           aria-label="Abrir menu de navegação"
         >
-          <Menu className="h-6 w-6 max-[410px]:h-5 max-[410px]:w-5" />
+          <Menu className="h-5 w-5 sm:h-4 sm:w-4" />
         </Button>
         {/* Logo */}
         <div className="flex shrink-0 items-center">
-          <div className="flex h-8 w-8 max-[410px]:h-7 max-[410px]:w-7 shrink-0 items-center justify-center rounded-lg bg-primary shadow-sm">
-            <BarChart3 className="h-4 w-4 max-[410px]:h-3.5 max-[410px]:w-3.5 text-primary-foreground" />
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary shadow-sm">
+            <BarChart3 className="h-4 w-4 text-primary-foreground" />
           </div>
         </div>
 
@@ -100,25 +100,25 @@ export function SiteHeader() {
 
         {/* Navegação entre documentos (setas) - quando a tela de cadastro fornece; abaixo de 410px sem label para caber */}
         {documentNav?.showNav && (
-          <div className="flex items-center gap-1 max-[410px]:gap-0.5 shrink-0">
+          <div className="flex items-center gap-0.5 sm:gap-1.5 shrink-0">
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 min-h-[40px] min-w-[40px] max-[410px]:h-7 max-[410px]:w-7 max-[410px]:min-h-[32px] max-[410px]:min-w-[32px] sm:h-8 sm:w-8 sm:min-h-0 sm:min-w-0"
+                    className="h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 rounded-lg"
                     disabled={!documentNav.canGoPrev}
                     onClick={documentNav.onPrev}
                     aria-label="Documento anterior"
                   >
-                    <ChevronLeft className="h-5 w-5 max-[410px]:h-4 max-[410px]:w-4" />
+                    <ChevronLeft className="h-4 w-4 sm:h-4 sm:w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Documento anterior</TooltipContent>
               </Tooltip>
               {documentNav.navLabel && (
-                <span className="min-w-[4rem] text-center text-xs text-muted-foreground shrink-0">
+                <span className="min-w-[3.5rem] sm:min-w-[4rem] text-center text-xs text-muted-foreground shrink-0">
                   {documentNav.navLabel}
                 </span>
               )}
@@ -127,12 +127,12 @@ export function SiteHeader() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 min-h-[40px] min-w-[40px] max-[410px]:h-7 max-[410px]:w-7 max-[410px]:min-h-[32px] max-[410px]:min-w-[32px] sm:h-8 sm:w-8 sm:min-h-0 sm:min-w-0"
+                    className="h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 rounded-lg"
                     disabled={!documentNav.canGoNext}
                     onClick={documentNav.onNext}
                     aria-label="Próximo documento"
                   >
-                    <ChevronRight className="h-5 w-5 max-[410px]:h-4 max-[410px]:w-4" />
+                    <ChevronRight className="h-4 w-4 sm:h-4 sm:w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Próximo documento</TooltipContent>
@@ -141,10 +141,10 @@ export function SiteHeader() {
           </div>
         )}
 
-        <div className="flex-1 min-w-0 max-[410px]:min-w-2" />
+        <div className="flex-1 min-w-0" />
 
-        {/* Botões de ação do documento */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Botões de ação do documento — cabe em uma linha */}
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {documentNav?.onSave && (
             <TooltipProvider delayDuration={300}>
               <Tooltip>
@@ -152,7 +152,7 @@ export function SiteHeader() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="flex items-center justify-center gap-2 min-h-[40px] max-[410px]:min-h-[32px] max-[410px]:h-7 max-[410px]:w-7 max-[410px]:p-0 px-3 py-2 max-[410px]:px-0 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 text-sm font-semibold text-success z-20 relative disabled:opacity-50 disabled:cursor-not-allowed h-8 sm:h-8"
+                    className="flex items-center justify-center min-h-[40px] min-w-[40px] sm:min-w-0 sm:h-8 sm:px-3 sm:py-2 h-9 w-9 sm:w-auto rounded-lg bg-gradient-to-r from-success/10 to-success/5 border border-success/30 shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 text-sm font-semibold text-success z-20 relative disabled:opacity-50 disabled:cursor-not-allowed p-0 sm:p-2"
                     onClick={documentNav.onSave}
                     disabled={documentNav.saving}
                     aria-label="Salvar documento"
@@ -170,17 +170,17 @@ export function SiteHeader() {
           )}
         </div>
 
-        {/* Perfil — sempre na primeira linha; abaixo de 410px um pouco menor */}
+        {/* Perfil — uma linha no mobile */}
         {user ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 min-h-[40px] min-w-[40px] max-[410px]:h-8 max-[410px]:w-8 max-[410px]:min-h-[32px] max-[410px]:min-w-[32px] sm:h-9 sm:w-9 sm:min-h-0 sm:min-w-0 rounded-full border border-border/60 hover:bg-primary/10 hover:border-primary/30 shrink-0"
+                className="h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 rounded-full border border-border/60 hover:bg-primary/10 hover:border-primary/30 shrink-0"
                 aria-label="Abrir perfil"
               >
-                <CircleUser className="h-4 w-4 max-[410px]:h-3.5 max-[410px]:w-3.5 text-primary" />
+                <CircleUser className="h-4 w-4 text-primary" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
@@ -209,7 +209,7 @@ export function SiteHeader() {
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <Button variant="ghost" size="sm" className="h-8" onClick={() => navigate("/login")}>
+          <Button variant="ghost" size="sm" className="min-h-[40px] sm:min-h-0 h-9 sm:h-8 px-3 rounded-lg shrink-0" onClick={() => navigate("/login")}>
             Entrar
           </Button>
         )}

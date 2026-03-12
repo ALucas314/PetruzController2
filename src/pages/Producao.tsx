@@ -148,6 +148,47 @@ function wrapTextInThreeLines(text: string, maxCharsPerLine = 22): string[] {
   return lines.slice(0, 3);
 }
 
+/** Quebra texto em várias linhas com no máximo maxCharsPerLine por linha (para celulares < 400px). */
+function wrapTextToLines(text: string, maxCharsPerLine: number, maxLines: number): string[] {
+  const t = (text ?? "").trim();
+  if (!t || maxLines < 1) return [""];
+  const words = t.split(/\s+/);
+  if (words.length === 0) return [""];
+  const lines: string[] = [];
+  let current = "";
+  for (const w of words) {
+    const next = current ? `${current} ${w}` : w;
+    if (next.length <= maxCharsPerLine || !current) {
+      current = next;
+    } else {
+      lines.push(current);
+      current = w;
+    }
+    if (lines.length >= maxLines) break;
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines.length ? lines : [""];
+}
+
+/** Retorna componente de tick do eixo Y com nome quebrado em mais linhas (celulares estreitos). */
+function makeYAxisTickMultiLine(maxCharsPerLine: number, maxLines: number) {
+  return (props: { x?: number; y?: number; payload?: { value?: string } }) => {
+    const { x = 0, y = 0, payload } = props;
+    const label = payload?.value ?? "";
+    const lines = wrapTextToLines(label, maxCharsPerLine, maxLines);
+    const fontSize = maxCharsPerLine <= 12 ? 11 : 13;
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text textAnchor="end" fontSize={fontSize} fontWeight={600} fill="hsl(var(--foreground))">
+          {lines.map((line, i) => (
+            <tspan key={i} x={0} dy={i === 0 ? 0 : "1.05em"}>{line}</tspan>
+          ))}
+        </text>
+      </g>
+    );
+  };
+}
+
 // Tick do eixo X com nome do item em até 3 linhas, alinhado à coluna
 const XAxisTickThreeLines = (props: { x?: number; y?: number; payload?: { value?: string; name?: string } }) => {
   const { x = 0, y = 0, payload } = props;
@@ -226,12 +267,32 @@ function Producao() {
   const [chartBarMargin, setChartBarMargin] = useState({ top: 28, right: 24, left: 24, bottom: 8 });
   const [linhaBarSize, setLinhaBarSize] = useState(20);
   const [pieOuterRadius, setPieOuterRadius] = useState(72);
+  const [chartYAxisWidth, setChartYAxisWidth] = useState(200);
+  const [chartTickMaxChars, setChartTickMaxChars] = useState(22);
+  const [chartTickMaxLines, setChartTickMaxLines] = useState(3);
+  const [chartMarginRight, setChartMarginRight] = useState(72);
   useEffect(() => {
     const update = () => {
       const w = window.innerWidth;
       setChartBarMargin(w < 640 ? { top: 28, right: 16, left: 4, bottom: 8 } : { top: 28, right: 24, left: 24, bottom: 8 });
       setLinhaBarSize(w >= 1024 ? 26 : w >= 640 ? 22 : 20);
       setPieOuterRadius(w >= 1024 ? 88 : 72);
+      if (w < 400) {
+        setChartYAxisWidth(100);
+        setChartTickMaxChars(10);
+        setChartTickMaxLines(5);
+        setChartMarginRight(48);
+      } else if (w < 640) {
+        setChartYAxisWidth(150);
+        setChartTickMaxChars(14);
+        setChartTickMaxLines(4);
+        setChartMarginRight(56);
+      } else {
+        setChartYAxisWidth(200);
+        setChartTickMaxChars(22);
+        setChartTickMaxLines(3);
+        setChartMarginRight(72);
+      }
     };
     update();
     window.addEventListener("resize", update);
@@ -1909,7 +1970,7 @@ function Producao() {
       });
       await new Promise((r) => setTimeout(r, 400));
 
-      const targets: Array<{
+      const targetsCadastro: Array<{
         ref: React.RefObject<HTMLElement | null>;
         filenamePrefix: string;
         expandScrollable: boolean;
@@ -1956,63 +2017,88 @@ function Producao() {
             reprocessoExportRestoreRef.current = [];
           },
         },
-        { ref: historicoCardRef, filenamePrefix: "historico-producao", expandScrollable: true },
       ];
+
+      const targetHistorico = { ref: historicoCardRef, filenamePrefix: "historico-producao", expandScrollable: true };
 
       const filesToShare: File[] = [];
 
-      // Se estamos no cadastro, o card Histórico não está no DOM; mudamos brevemente para a view histórico para capturá-lo
-      if (currentView === "cadastro" && !historicoCardRef.current) {
-        setCurrentView("historico");
-        switchedToHistoricoForExport = true;
-        await new Promise((r) => setTimeout(r, 700));
-      }
-
-      for (const t of targets) {
+      const captureOne = async (t: typeof targetsCadastro[0]) => {
         const el = t.ref.current;
-        if (!el) continue;
+        if (!el) return;
         await new Promise((r) => setTimeout(r, 200));
+        const { blob, fileName } = await captureElementToPngBlob(el, {
+          expandScrollable: t.expandScrollable,
+          onBeforeCapture: t.onBeforeCapture,
+          onAfterCapture: t.onAfterCapture,
+          filenamePrefix: t.filenamePrefix,
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.download = fileName;
+        link.href = url;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 300);
+        filesToShare.push(new File([blob], fileName, { type: "image/png" }));
+      };
+
+      // 1) Capturar os 3 blocos do cadastro enquanto ainda estamos na view cadastro (refs no DOM)
+      for (const t of targetsCadastro) {
         try {
-          const { blob, fileName } = await captureElementToPngBlob(el, {
-            expandScrollable: t.expandScrollable,
-            onBeforeCapture: t.onBeforeCapture,
-            onAfterCapture: t.onAfterCapture,
-            filenamePrefix: t.filenamePrefix,
-          });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.download = fileName;
-          link.href = url;
-          link.click();
-          setTimeout(() => URL.revokeObjectURL(url), 300);
-          filesToShare.push(new File([blob], fileName, { type: "image/png" }));
+          await captureOne(t);
         } catch (err) {
           console.error(`Export PNG failed for ${t.filenamePrefix}:`, err);
         }
       }
 
-      if (switchedToHistoricoForExport) {
+      // 2) Se precisar do histórico, trocar para a view histórico, capturar, e voltar
+      if (currentView === "cadastro" && !historicoCardRef.current) {
+        setCurrentView("historico");
+        switchedToHistoricoForExport = true;
+        await new Promise((r) => setTimeout(r, 700));
+        try {
+          await captureOne(targetHistorico);
+        } catch (err) {
+          console.error(`Export PNG failed for ${targetHistorico.filenamePrefix}:`, err);
+        }
         setCurrentView("cadastro");
+      } else if (historicoCardRef.current) {
+        try {
+          await captureOne(targetHistorico);
+        } catch (err) {
+          console.error(`Export PNG failed for ${targetHistorico.filenamePrefix}:`, err);
+        }
       }
 
-      if (filesToShare.length > 0 && typeof navigator !== "undefined" && navigator.share) {
-        const canShare =
-          navigator.canShare != null
-            ? navigator.canShare({ files: filesToShare, title: "Produção" })
-            : true;
-        if (canShare) {
-          try {
-            await navigator.share({
-              files: filesToShare,
-              title: "Produção",
-              text: `Produção - ${dataDoc}${filialDoc ? ` - ${filiais.find((f) => f.codigo === filialDoc)?.nome ?? ""}` : ""}`,
-            });
-          } catch (shareErr: unknown) {
-            if ((shareErr as Error)?.name !== "AbortError") {
-              console.error("Share failed:", shareErr);
-            }
+      // Compartilhamento (WhatsApp etc.): funciona no celular (Android/iPhone). No computador só baixa as imagens.
+      const hasShare = typeof navigator !== "undefined" && navigator.share;
+      const canShareFiles = hasShare && (navigator.canShare == null || navigator.canShare({ files: filesToShare, title: "Produção" }));
+
+      if (filesToShare.length > 0 && canShareFiles) {
+        try {
+          await navigator.share({
+            files: filesToShare,
+            title: "Produção",
+            text: `Produção - ${dataDoc}${filialDoc ? ` - ${filiais.find((f) => f.codigo === filialDoc)?.nome ?? ""}` : ""}`,
+          });
+          toast({ title: "Compartilhado!", description: "As 4 imagens foram enviadas." });
+        } catch (shareErr: unknown) {
+          if ((shareErr as Error)?.name !== "AbortError") {
+            console.error("Share failed:", shareErr);
           }
+          toast({
+            title: "4 imagens baixadas",
+            description: "Toque em 'Exportar PNG' de novo para abrir o compartilhamento (WhatsApp, etc.).",
+          });
         }
+      } else if (filesToShare.length > 0) {
+        const isMobile = /Android|iPhone|iPad|iPod|webOS|Mobile/i.test(navigator.userAgent);
+        toast({
+          title: "4 imagens baixadas",
+          description: isMobile
+            ? "Se a opção de compartilhar não abriu, use os arquivos na pasta Downloads ou tente de novo."
+            : "No celular (Android/iPhone), use 'Exportar PNG' para ver a opção de enviar no WhatsApp.",
+        });
       }
     } catch (error) {
       console.error("Erro ao exportar PNGs:", error);
@@ -2170,26 +2256,30 @@ function Producao() {
           </div>
 
           {/* Abas internas: altura fixa para não mudar ao trocar de aba */}
-          <div className="inline-flex h-12 min-h-12 items-stretch rounded-xl border border-border/60 bg-muted/40 p-1 gap-0.5 mb-4 flex-shrink-0" role="tablist" aria-label="Navegação da análise de produção">
-            <Button
-              variant="ghost"
-              size="sm"
-              role="tab"
-              aria-selected={true}
-              className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-semibold bg-primary/10 text-primary border border-primary/25 shadow-sm hover:bg-primary/15 whitespace-nowrap"
-            >
-              Acompanhamento diário
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              role="tab"
-              aria-selected={false}
-              className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 whitespace-nowrap"
-              onClick={() => setCurrentView("historico")}
-            >
-              Histórico de análise
-            </Button>
+          <div className="flex justify-center mb-4">
+            <div className="inline-flex h-12 min-h-12 items-stretch rounded-xl border border-border/60 bg-muted/40 p-1 gap-0.5 flex-shrink-0" role="tablist" aria-label="Navegação da análise de produção">
+              <Button
+                variant="ghost"
+                size="sm"
+                role="tab"
+                aria-selected={true}
+                className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-semibold bg-primary/10 text-primary border border-primary/25 shadow-sm hover:bg-primary/15 whitespace-nowrap"
+              >
+                <span className="sm:hidden">Acompanhamento</span>
+                <span className="hidden sm:inline">Acompanhamento diário</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                role="tab"
+                aria-selected={false}
+                className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 whitespace-nowrap"
+                onClick={() => setCurrentView("historico")}
+              >
+                <span className="sm:hidden">Histórico</span>
+                <span className="hidden sm:inline">Histórico de análise</span>
+              </Button>
+            </div>
           </div>
 
           {/* Card: Acompanhamento diário da produção */}
@@ -2302,7 +2392,7 @@ function Producao() {
                         }}
                         disabled={exportingAllPng}
                         className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Exportar como PNG"
+                        title="Baixa 4 imagens (Status, Planejado vs Realizado, Reprocesso, Histórico). No celular abre opção de enviar no WhatsApp."
                       >
                         {exportingAllPng ? (
                           <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
@@ -2357,7 +2447,7 @@ function Producao() {
                     }}
                     disabled={exportingAllPng}
                     className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm max-[891px]:w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Exportar como PNG"
+                    title="Baixa 4 imagens. No celular (Android/iPhone) abre opção de enviar no WhatsApp."
                   >
                     {exportingAllPng ? (
                       <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
@@ -2892,49 +2982,35 @@ function Producao() {
                         <Plus className="h-4 w-4 shrink-0" />
                         <span className="truncate">Adicionar Reprocesso</span>
                       </Button>
-                      <ExportToPng
-                        targetRef={reprocessoCardRef}
-                        filenamePrefix="reprocesso"
-                        className="w-full sm:w-auto shrink-0 gap-2"
-                        label="Exportar PNG"
-                        onBeforeCapture={() => {
-                          const card = reprocessoCardRef.current;
-                          if (!card) return;
-                          reprocessoExportRestoreRef.current = [];
-                          const cells = card.querySelectorAll("table tbody tr td:nth-child(5)");
-                          cells.forEach((cell) => {
-                            const input = cell.querySelector("input");
-                            if (!input) return;
-                            const el = input as HTMLInputElement;
-                            const value = el.value ?? "";
-                            const wrapper = document.createElement("div");
-                            wrapper.setAttribute("data-export-descricao", "true");
-                            wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[200px]";
-                            wrapper.textContent = value || "—";
-                            el.style.display = "none";
-                            cell.appendChild(wrapper);
-                            reprocessoExportRestoreRef.current.push({ input: el, wrapper });
-                          });
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          exportAllProducaoAsPNG();
                         }}
-                        onAfterCapture={() => {
-                          reprocessoExportRestoreRef.current.forEach(({ input, wrapper }) => {
-                            wrapper.remove();
-                            input.style.display = "";
-                          });
-                          reprocessoExportRestoreRef.current = [];
-                        }}
-                      />
+                        disabled={exportingAllPng}
+                        title="Exportar os 4 blocos (Status, Planejado vs Realizado, Reprocesso, Histórico) como PNG e compartilhar"
+                        className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 w-full sm:w-auto shrink-0 border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                      >
+                        {exportingAllPng ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4 shrink-0" />
+                        )}
+                        <span className="hidden min-[791px]:inline">{exportingAllPng ? "Exportando…" : "Exportar PNG"}</span>
+                      </button>
                     </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-1 border-t border-border/40">
+                    <div className="flex flex-col gap-2 pt-1 border-t border-border/40">
                       <span className="text-xs text-muted-foreground font-medium">Filtros:</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">Tipo</span>
+                      <div className="flex items-center gap-2 w-full">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Tipo</span>
                         <Select
                           value={reprocessoFiltroTipo || "todos"}
                           onValueChange={(v) => setReprocessoFiltroTipo(v === "todos" ? "" : (v as "Cortado" | "Usado"))}
                         >
-                          <SelectTrigger className="h-8 w-[120px] sm:w-[130px] text-xs">
+                          <SelectTrigger className="h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-xs">
                             <SelectValue placeholder="Todos" />
                           </SelectTrigger>
                           <SelectContent>
@@ -2944,13 +3020,13 @@ function Producao() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">Linha</span>
+                      <div className="flex items-center gap-2 w-full">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Linha</span>
                         <Select
                           value={reprocessoFiltroLinha || "todas"}
                           onValueChange={(v) => setReprocessoFiltroLinha(v === "todas" ? "" : v)}
                         >
-                          <SelectTrigger className="h-8 min-w-[120px] sm:min-w-[140px] text-xs">
+                          <SelectTrigger className="h-8 flex-1 min-w-0 sm:flex-none sm:min-w-[140px] text-xs">
                             <SelectValue placeholder="Todas" />
                           </SelectTrigger>
                           <SelectContent>
@@ -2963,19 +3039,22 @@ function Producao() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setReprocessoAppliedTipo(reprocessoFiltroTipo);
-                          setReprocessoAppliedLinha(reprocessoFiltroLinha);
-                        }}
-                        className="h-8 flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg text-xs font-semibold text-foreground hover:from-primary/20 hover:to-primary/10 hover:border-primary/40"
-                        title="Filtrar por tipo e linha"
-                      >
-                        <Database className="h-3.5 w-3.5" />
-                        <span>Filtrar</span>
-                      </Button>
+                      <div className="flex items-center gap-2 w-full sm:justify-center">
+                        <span className="w-12 shrink-0 sm:hidden" aria-hidden />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setReprocessoAppliedTipo(reprocessoFiltroTipo);
+                            setReprocessoAppliedLinha(reprocessoFiltroLinha);
+                          }}
+                          className="h-8 flex-1 min-w-0 sm:flex-none sm:min-w-[160px] flex items-center justify-center gap-2 px-5 py-2 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg text-xs font-semibold text-foreground hover:from-primary/20 hover:to-primary/10 hover:border-primary/40"
+                          title="Filtrar por tipo e linha"
+                        >
+                          <Database className="h-3.5 w-3.5 shrink-0" />
+                          <span>Filtrar</span>
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
@@ -3488,7 +3567,7 @@ function Producao() {
                                 realizado: parseFormattedNumber(item.quantidadeRealizada),
                                 diferenca: item.diferenca,
                               }))}
-                            margin={{ top: 8, right: 72, left: 4, bottom: 8 }}
+                            margin={{ top: 8, right: chartMarginRight, left: 4, bottom: 8 }}
                             barCategoryGap={40}
                             barGap={22}
                           >
@@ -3506,7 +3585,7 @@ function Producao() {
                             </defs>
                             <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
                             <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
-                            <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                            <YAxis type="category" dataKey="name" width={chartYAxisWidth} tickLine={false} axisLine={false} tick={makeYAxisTickMultiLine(chartTickMaxChars, chartTickMaxLines)} />
                             <Tooltip
                               cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }}
                               contentStyle={{
@@ -3664,7 +3743,7 @@ function Producao() {
                             <BarChart
                               layout="vertical"
                               data={diferencaPorItemData}
-                              margin={{ top: 8, right: 72, left: 8, bottom: 8 }}
+                              margin={{ top: 8, right: chartMarginRight, left: 8, bottom: 8 }}
                               barCategoryGap={32}
                             >
                               <defs>
@@ -3681,7 +3760,7 @@ function Producao() {
                               </defs>
                               <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
                               <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
-                              <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                              <YAxis type="category" dataKey="name" width={chartYAxisWidth} tickLine={false} axisLine={false} tick={makeYAxisTickMultiLine(chartTickMaxChars, chartTickMaxLines)} />
                               <Tooltip
                                 cursor={{ fill: "hsl(var(--warning) / 0.08)", radius: 6 }}
                                 contentStyle={{
@@ -3835,26 +3914,30 @@ function Producao() {
           </div>
 
           {/* Abas internas: mesma altura fixa que na view Cadastro */}
-          <div className="inline-flex h-12 min-h-12 items-stretch rounded-xl border border-border/60 bg-muted/40 p-1 gap-0.5 mb-4 flex-shrink-0" role="tablist" aria-label="Navegação da análise de produção">
-            <Button
-              variant="ghost"
-              size="sm"
-              role="tab"
-              aria-selected={false}
-              className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 whitespace-nowrap"
-              onClick={() => setCurrentView("cadastro")}
-            >
-              Acompanhamento diário
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              role="tab"
-              aria-selected={true}
-              className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-semibold bg-primary/10 text-primary border border-primary/25 shadow-sm hover:bg-primary/15 whitespace-nowrap"
-            >
-              Histórico de análise
-            </Button>
+          <div className="flex justify-center mb-4">
+            <div className="inline-flex h-12 min-h-12 items-stretch rounded-xl border border-border/60 bg-muted/40 p-1 gap-0.5 flex-shrink-0" role="tablist" aria-label="Navegação da análise de produção">
+              <Button
+                variant="ghost"
+                size="sm"
+                role="tab"
+                aria-selected={false}
+                className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 whitespace-nowrap"
+                onClick={() => setCurrentView("cadastro")}
+              >
+                <span className="sm:hidden">Acompanhamento</span>
+                <span className="hidden sm:inline">Acompanhamento diário</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                role="tab"
+                aria-selected={true}
+                className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-semibold bg-primary/10 text-primary border border-primary/25 shadow-sm hover:bg-primary/15 whitespace-nowrap"
+              >
+                <span className="sm:hidden">Histórico</span>
+                <span className="hidden sm:inline">Histórico de análise</span>
+              </Button>
+            </div>
           </div>
 
           {/* Título e descrição — acima do card; fundo branco e linha azul (sem transition para altura estável) */}
