@@ -25,6 +25,7 @@ import Itens from "./pages/Itens";
 import ImportarExcel from "./pages/ImportarExcel";
 import CadastroLinhas from "./pages/CadastroLinhas";
 import Relatorios from "./pages/Relatorios";
+import GuiaDesenvolvedor from "./pages/GuiaDesenvolvedor";
 
 const queryClient = new QueryClient();
 
@@ -61,6 +62,7 @@ const AppRoutes = () => {
         <Route path="/itens" element={<ProtectedRoute><Itens /></ProtectedRoute>} />
         <Route path="/importar-excel" element={<ProtectedRoute><ImportarExcel /></ProtectedRoute>} />
         <Route path="/relatorios" element={<ProtectedRoute><Relatorios /></ProtectedRoute>} />
+        <Route path="/guia-desenvolvedor" element={<ProtectedRoute><GuiaDesenvolvedor /></ProtectedRoute>} />
         <Route path="/financeiro" element={<ProtectedRoute><PlaceholderPage title="Financeiro" /></ProtectedRoute>} />
         <Route path="/estoque" element={<ProtectedRoute><PlaceholderPage title="Estoque" /></ProtectedRoute>} />
         <Route path="/configuracoes" element={<ProtectedRoute><PlaceholderPage title="Configurações" /></ProtectedRoute>} />

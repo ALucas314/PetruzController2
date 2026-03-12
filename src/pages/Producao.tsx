@@ -388,15 +388,19 @@ function Producao() {
       return false;
     });
   }, [reprocessos, reprocessoAppliedTipo, reprocessoAppliedLinha, productionLines]);
+  // Normaliza data vinda do banco (string ISO ou Date) para YYYY-MM-DD (evita mistura BELA/Petruz por fuso)
+  const normalizeDataDia = (dateValue: string | Date | null | undefined): string => {
+    if (!dateValue) return "";
+    if (typeof dateValue === "string") return dateValue.split("T")[0];
+    return new Date(dateValue).toISOString().split("T")[0];
+  };
   // Documentos da data selecionada (para grid na sub-aba Acompanhamento diário)
   const documentsForSelectedDate = useMemo(() => {
     if (!dataCabecalhoSelecionada || !allRecords.length) return [];
+    const dataNorm = dataCabecalhoSelecionada.split("T")[0];
     return allRecords.filter((r) => {
-      const dateVal = r.data_dia || r.data_cabecalho || r.data;
-      const dateStr = dateVal
-        ? (typeof dateVal === "string" ? dateVal.split("T")[0] : new Date(dateVal).toISOString().split("T")[0])
-        : "";
-      return dateStr === dataCabecalhoSelecionada;
+      const dateStr = normalizeDataDia(r.data_dia || r.data_cabecalho || r.data);
+      return dateStr === dataNorm;
     });
   }, [allRecords, dataCabecalhoSelecionada]);
 
@@ -1610,23 +1614,66 @@ function Producao() {
     }
   };
 
+  // Busca documentos de uma data específica e mescla em allRecords/availableDates (resolve "nenhum registro" em 12/03 etc.)
+  const loadDocumentsForDate = useCallback(async (date: string) => {
+    if (!date || !date.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+    try {
+      const result = await getProducaoHistory({
+        dataInicio: date,
+        dataFim: date,
+        limit: 2000,
+      });
+      if (!Array.isArray(result) || result.length === 0) return;
+      setAllRecords((prev) => {
+        const recordsMap = new Map<string, any>();
+        prev.forEach((r) => {
+          const key = r.recordKey ?? `${normalizeDataDia(r.data_dia || r.data_cabecalho)}_${(r.filial_nome || "").trim()}_${r.doc_id ?? "legacy"}`;
+          recordsMap.set(key, { ...r, recordKey: key });
+        });
+        result.forEach((item: any) => {
+          const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+          if (!dateStr) return;
+          const filialNome = (item.filial_nome || "").trim();
+          const docId = item.doc_id ?? null;
+          const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}`;
+          if (!recordsMap.has(recordKey)) {
+            recordsMap.set(recordKey, {
+              ...item,
+              doc_id: docId,
+              recordDate: dateStr,
+              recordKey,
+            });
+          }
+        });
+        const merged = Array.from(recordsMap.values()).sort((a, b) => {
+          const dateA = parseDateString(a.recordDate || "");
+          const dateB = parseDateString(b.recordDate || "");
+          if (dateA.getTime() !== dateB.getTime()) return dateA.getTime() - dateB.getTime();
+          const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "");
+          if (cmpFilial !== 0) return cmpFilial;
+          return (a.id || 0) - (b.id || 0);
+        });
+        return merged;
+      });
+      setAvailableDates((prev) => new Set([...prev, date]));
+    } catch (e) {
+      console.error("Erro ao carregar documentos da data:", e);
+    }
+  }, []);
+
   // Função para carregar todos os registros ordenados (um registro = um documento: data_dia + filial + doc_id)
   // Sem filtro de filial para o grid mostrar todos os documentos da data (BELA, Petruz, etc.)
   const loadAllRecords = async (): Promise<any[]> => {
     try {
-      const result = await getProducaoHistory({ limit: 1000 });
+      const result = await getProducaoHistory({ limit: 3000 });
 
       if (Array.isArray(result) && result.length > 0) {
         const recordsMap = new Map<string, any>();
         const dates = new Set<string>();
 
         result.forEach((item: any) => {
-          const dateValue = item.data_dia || item.data_cabecalho || item.data;
-          if (dateValue) {
-            const dateStr = typeof dateValue === 'string'
-              ? dateValue.split('T')[0]
-              : new Date(dateValue).toISOString().split('T')[0];
-
+          const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+          if (dateStr) {
             dates.add(dateStr);
 
             const filialNome = (item.filial_nome || '').trim();
@@ -1832,6 +1879,16 @@ function Producao() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Quando o usuário seleciona uma data que ainda não está na lista (ex.: 12/03), buscar documentos dessa data
+  // para que "Nenhum documento nesta data" não apareça indevidamente e o histórico mostre BELA e PETRUZ corretamente
+  useEffect(() => {
+    const date = dataCabecalhoSelecionada?.trim();
+    if (!date || availableDates.has(date)) return;
+    if (availableDates.size === 0) return; // evita disparar antes de loadAllRecords ter rodado
+    loadDocumentsForDate(date);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataCabecalhoSelecionada, availableDates]);
 
   // Sincronizar data e filial com o Painel de Controle (dashboard) para acompanhar o diário
   useEffect(() => {
@@ -4354,7 +4411,7 @@ function Producao() {
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <Database className="h-12 w-12 text-muted-foreground/30 mb-4" />
                   <p className="text-sm text-muted-foreground">Nenhum registro encontrado</p>
-                  <p className="text-xs text-muted-foreground/70 mt-1">Os registros salvos aparecerão aqui</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">Confira o intervalo de datas (início e fim) e use &quot;Todas as linhas&quot; e &quot;Todas as filiais&quot; para ver BELA e PETRUZ.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto -mx-4 sm:mx-0 rounded-lg border border-border/40 [&::-webkit-scrollbar]:h-2">
