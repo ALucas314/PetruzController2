@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, DollarSign, ShoppingCart, Minus, Target, Loader2, Download, Pencil } from "lucide-react";
+import { FileText, DollarSign, ShoppingCart, Minus, Target, Loader2, Download, Pencil, Database } from "lucide-react";
 import { AppLayout } from "@/components/AppLayout";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { Button } from "@/components/ui/button";
@@ -223,9 +223,11 @@ export default function Relatorios() {
     }
   }, [dateDe, dateAte, linhaFilter, filial]);
 
+  // Carregar histórico uma vez ao abrir a página; depois só ao clicar em Filtrar
   useEffect(() => {
     loadHistory();
-  }, [loadHistory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const exportCsv = () => {
     const headers = [
@@ -317,25 +319,21 @@ export default function Relatorios() {
             <KpiCard
               title="Total Planejado"
               value={stats ? formatValue(stats.totalPlanejado) : "0"}
-              change={stats?.variacaoPercentual ?? 0}
               icon={DollarSign}
             />
             <KpiCard
               title="Total Realizado"
               value={stats ? formatValue(stats.totalRealizado) : "0"}
-              change={stats?.variacaoPercentual ?? 0}
               icon={ShoppingCart}
             />
             <KpiCard
               title="Diferença"
               value={stats ? formatValue(stats.diferenca) : "0"}
-              change={stats?.variacaoPercentual ?? 0}
               icon={Minus}
             />
             <KpiCard
               title="Percentual Meta"
               value={stats ? `${parseFloat(String(stats.percentualMeta).replace(",", ".")).toFixed(2).replace(".", ",")}%` : "0,00%"}
-              change={stats?.variacaoPercentual ?? 0}
               icon={Target}
             />
           </div>
@@ -395,12 +393,19 @@ export default function Relatorios() {
               </Select>
             </div>
             <div className="flex items-end gap-2">
-              <Button onClick={() => loadHistory()} disabled={historyLoading} className="w-full sm:w-auto">
+              <Button
+                variant="outline"
+                onClick={() => loadHistory()}
+                disabled={historyLoading}
+                className="w-full min-[791px]:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Filtrar pelo período e linha"
+              >
                 {historyLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  "Filtrar"
+                  <Database className="h-4 w-4" />
                 )}
+                <span>{historyLoading ? "Carregando..." : "Filtrar"}</span>
               </Button>
               <Button
                 variant="outline"

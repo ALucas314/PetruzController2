@@ -19,12 +19,16 @@ export const AppLayout = memo(({ children }: { children: ReactNode }) => {
     <div className="min-h-screen max-w-full bg-gradient-to-br from-background via-background to-muted/20 overflow-x-hidden">
       <div
         className={cn(
-          "min-h-screen w-full max-w-full min-w-0 overflow-x-hidden transition-[margin-left,width] duration-300 ease-in-out",
+          "min-h-screen w-full max-w-full min-w-0 overflow-x-hidden transition-[margin-left,width] duration-300 ease-in-out flex flex-col",
           contentClasses
         )}
       >
         <SiteHeader />
-        <main className="pt-14 lg:pt-0 p-3 sm:p-6 lg:p-8 pb-[max(1rem,env(safe-area-inset-bottom))] max-w-[1920px] mx-auto w-full max-w-full min-w-0 overflow-x-hidden">{children}</main>
+        {/* Reserva espaço quando o header é fixed (viewport < 1024px); em lg+ o header é sticky e este spacer some */}
+        <div className="shrink-0 w-full lg:hidden app-header-spacer" aria-hidden />
+        <main className="app-layout-main flex-1 min-h-0 p-3 sm:p-6 lg:p-8 pb-[max(1rem,env(safe-area-inset-bottom))] max-w-[1920px] mx-auto w-full max-w-full overflow-x-hidden">
+          {children}
+        </main>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Calendar } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Calendar, Database, Loader2 } from "lucide-react";
 
 interface DashboardFiltersProps {
   dataInicio?: string;
@@ -10,10 +11,13 @@ interface DashboardFiltersProps {
   filial?: string;
   setFilial?: (v: string) => void;
   filiais?: Array<{ id: number; codigo: string; nome: string }>;
+  onFilter?: () => void;
+  loading?: boolean;
 }
 
 export function DashboardFilters({
   dataInicio = "", setDataInicio, dataFim = "", setDataFim, filial, setFilial, filiais = [],
+  onFilter, loading = false,
 }: DashboardFiltersProps) {
   return (
     <div className="flex flex-wrap gap-2 sm:gap-3 items-center overflow-visible">
@@ -60,6 +64,22 @@ export function DashboardFilters({
             ))}
           </SelectContent>
         </Select>
+      )}
+      {onFilter && (
+        <Button
+          variant="outline"
+          onClick={onFilter}
+          disabled={loading}
+          className="w-full min-[791px]:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Filtrar pelo período e filial"
+        >
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Database className="h-4 w-4" />
+          )}
+          <span>{loading ? "Carregando..." : "Filtrar"}</span>
+        </Button>
       )}
     </div>
   );

@@ -109,6 +109,101 @@ function restoreStyles(restores: RestoreStyle[]) {
   });
 }
 
+export interface CaptureToPngBlobOptions {
+  expandScrollable?: boolean;
+  onBeforeCapture?: () => void | Promise<void>;
+  onAfterCapture?: () => void | Promise<void>;
+  filenamePrefix?: string;
+}
+
+/**
+ * Captura um elemento DOM como PNG e retorna o blob e o nome do arquivo.
+ * Útil para exportação em lote e compartilhamento (ex.: Web Share API no mobile).
+ */
+export async function captureElementToPngBlob(
+  element: HTMLElement,
+  options: CaptureToPngBlobOptions = {}
+): Promise<{ blob: Blob; fileName: string }> {
+  const {
+    expandScrollable = true,
+    onBeforeCapture,
+    onAfterCapture,
+    filenamePrefix = "export",
+  } = options;
+
+  let restores: RestoreStyle[] = [];
+
+  try {
+    if (onBeforeCapture) {
+      await Promise.resolve(onBeforeCapture());
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    if (expandScrollable) {
+      restores = expandScrollableContainers(element);
+      element.style.overflow = "visible";
+      element.style.maxHeight = "none";
+      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      await new Promise((r) => setTimeout(r, 150));
+    }
+
+    const dataUrl = await toPng(element, {
+      backgroundColor: "#ffffff",
+      pixelRatio: 2,
+      quality: 1.0,
+      cacheBust: true,
+      skipAutoScale: false,
+      skipFonts: false,
+      filter: () => true,
+    });
+
+    const img = new Image();
+    img.src = dataUrl;
+
+    const { blob, fileName } = await new Promise<{ blob: Blob; fileName: string }>((resolve, reject) => {
+      img.onload = () => {
+        try {
+          const padding = 40;
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width + padding * 2;
+          canvas.height = img.height + padding * 2;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, padding, padding);
+          }
+          const safePrefix = (filenamePrefix || "export").replace(/[^a-zA-Z0-9_-]/g, "-");
+          const date = new Date();
+          const dateStr = date.toISOString().slice(0, 10);
+          const timeStr = date.toTimeString().slice(0, 8).replace(/:/g, "");
+          const fileName = `${safePrefix}-${dateStr}-${timeStr}.png`;
+
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                reject(new Error("Falha ao gerar PNG"));
+                return;
+              }
+              resolve({ blob, fileName });
+            },
+            "image/png",
+            1.0
+          );
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = () => reject(new Error("Falha ao carregar imagem"));
+    });
+
+    return { blob, fileName };
+  } finally {
+    if (restores.length) restoreStyles(restores);
+    if (onAfterCapture) await Promise.resolve(onAfterCapture());
+  }
+}
+
 /**
  * Botão que exporta o elemento referenciado por targetRef como PNG.
  * Usado para exportar o Histórico de Análise de Produção (e outros blocos) como imagem.

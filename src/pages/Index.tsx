@@ -45,6 +45,28 @@ const Index = () => {
     } catch {}
     return "";
   });
+  // Valores "aplicados" do filtro — só atualizam ao clicar em Filtrar
+  const [appliedDataInicio, setAppliedDataInicio] = useState<string>(() => {
+    try {
+      const d = localStorage.getItem(DASHBOARD_SYNC_KEY_DATE);
+      if (d) return d;
+    } catch {}
+    return new Date().toISOString().split("T")[0];
+  });
+  const [appliedDataFim, setAppliedDataFim] = useState<string>(() => {
+    try {
+      const d = localStorage.getItem(DASHBOARD_SYNC_KEY_DATE);
+      if (d) return d;
+    } catch {}
+    return new Date().toISOString().split("T")[0];
+  });
+  const [appliedFilial, setAppliedFilial] = useState<string>(() => {
+    try {
+      const f = localStorage.getItem(DASHBOARD_SYNC_KEY_FILIAL);
+      if (f) return f;
+    } catch {}
+    return "";
+  });
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,19 +77,26 @@ const Index = () => {
   const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
 
   const [chartBarMargin, setChartBarMargin] = useState({ top: 28, right: 24, left: 24, bottom: 8 });
+  const [barMaxSize, setBarMaxSize] = useState(96);
+  const [pieOuterRadius, setPieOuterRadius] = useState(72);
+  const [linhaBarSize, setLinhaBarSize] = useState(20);
   useEffect(() => {
-    const update = () => setChartBarMargin(
-      window.innerWidth < 640 ? { top: 28, right: 16, left: 4, bottom: 8 } : { top: 28, right: 24, left: 24, bottom: 8 }
-    );
+    const update = () => {
+      const w = window.innerWidth;
+      setChartBarMargin(w < 640 ? { top: 28, right: 16, left: 4, bottom: 8 } : { top: 28, right: 24, left: 24, bottom: 8 });
+      setBarMaxSize(w >= 1024 ? 132 : 96);
+      setPieOuterRadius(w >= 1024 ? 88 : 72);
+      setLinhaBarSize(w >= 1024 ? 26 : w >= 640 ? 22 : 20);
+    };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
 
-  // Função para calcular datas: usa intervalo (dataInicio/dataFim) se ambos preenchidos; senão últimos 30 dias
+  // Função para calcular datas: usa valores aplicados (após clicar em Filtrar)
   const getDateRange = () => {
-    if (dataInicio && dataFim) {
-      return { dataInicio, dataFim };
+    if (appliedDataInicio && appliedDataFim) {
+      return { dataInicio: appliedDataInicio, dataFim: appliedDataFim };
     }
     const hoje = new Date();
     const dataFimDefault = hoje.toISOString().split("T")[0];
@@ -89,12 +118,12 @@ const Index = () => {
       .catch((err) => console.error("Erro ao carregar filiais:", err));
   }, []);
 
-  // Função para carregar dados do dashboard (mesma fonte OCPD da produção diária)
+  // Função para carregar dados do dashboard (usa filtros aplicados ao clicar em Filtrar)
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
     try {
       const { dataInicio: di, dataFim: df } = getDateRange();
-      const filialNome = filial || undefined;
+      const filialNome = appliedFilial || undefined;
       const [statsResult, chartResult, linesResult] = await Promise.all([
         getDashboardStats({ dataInicio: di, dataFim: df, filialNome }),
         getProductionChart({ dataInicio: di, dataFim: df, filialNome }),
@@ -108,11 +137,18 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
-  }, [filial, dataInicio, dataFim]);
+  }, [appliedFilial, appliedDataInicio, appliedDataFim]);
 
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
+
+  // Aplicar filtro ao clicar no botão Filtrar (atualiza valores aplicados; o useEffect recarrega)
+  const handleApplyFilter = useCallback(() => {
+    setAppliedDataInicio(dataInicio);
+    setAppliedDataFim(dataFim);
+    setAppliedFilial(filial);
+  }, [dataInicio, dataFim, filial]);
 
   // Atualizar ao voltar para a aba (ex.: após salvar na Produção) para acompanhar o diário
   useEffect(() => {
@@ -130,22 +166,23 @@ const Index = () => {
     return num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
-  // Componente customizado para renderizar labels nos gráficos de barra
+  // Labels em cima das barras — legíveis e alinhados ao tema
   const CustomBarLabel = (props: any) => {
-    const { x, y, width, value, dataKey } = props;
-    if (!value || value === 0 || !x || !y || !width) return null;
+    const { x, y, width, value } = props;
+    if (value == null || value === 0 || !x || !y || !width) return null;
+    const str = typeof value === "number" ? value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : String(value);
 
     return (
       <text
         x={x + width / 2}
-        y={y - 6}
-        fill="hsl(var(--muted-foreground))"
-        fontSize={11}
-        fontWeight={600}
+        y={y - 10}
+        fill="hsl(var(--foreground))"
+        fontSize={13}
+        fontWeight={700}
         textAnchor="middle"
-        className="drop-shadow-sm"
+        style={{ letterSpacing: "0.03em", fontVariantNumeric: "tabular-nums", paintOrder: "stroke fill", stroke: "hsl(var(--card))", strokeWidth: 3, strokeLinejoin: "round" }}
       >
-        {value.toLocaleString("pt-BR")}
+        {str}
       </text>
     );
   };
@@ -155,10 +192,10 @@ const Index = () => {
     const totalPlanejado = stats ? parseFloat(String(stats.totalPlanejado || "0").replace(",", ".")) : 0;
     const totalRealizado = stats ? parseFloat(String(stats.totalRealizado || "0").replace(",", ".")) : 0;
     const totalDiferenca = stats ? parseFloat(String(stats.diferenca || "0").replace(",", ".")) : 0;
-    const label = dataInicio && dataFim
-      ? (dataInicio === dataFim
-          ? new Date(dataInicio + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
-          : `${new Date(dataInicio + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} a ${new Date(dataFim + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`)
+    const label = appliedDataInicio && appliedDataFim
+      ? (appliedDataInicio === appliedDataFim
+          ? new Date(appliedDataInicio + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
+          : `${new Date(appliedDataInicio + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} a ${new Date(appliedDataFim + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`)
       : "Total";
     return [
       {
@@ -175,16 +212,19 @@ const Index = () => {
     const totalPlanejada = stats ? parseFloat(stats.totalPlanejado || "0") : 0;
     const totalRealizada = stats ? parseFloat(stats.totalRealizado || "0") : 0;
     const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
+    const successFill = "url(#dashboard-pie-success)";
+    const dangerFill = "url(#dashboard-pie-danger)";
+    const mutedColor = "hsl(var(--muted-foreground))";
 
     if (totalPlanejada === 0) {
-      return [{ name: "Sem meta definida", value: 100, color: "#6b7280" }];
+      return [{ name: "Sem meta definida", value: 100, color: mutedColor, fill: mutedColor }];
     }
     if (perc >= 100) {
-      return [{ name: "Meta atingida (≥100%)", value: 100, color: "#10b981" }];
+      return [{ name: "Meta atingida (≥100%)", value: 100, color: "hsl(var(--success))", fill: successFill }];
     }
     return [
-      { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "#10b981" },
-      { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "#ef4444" },
+      { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "hsl(var(--success))", fill: successFill },
+      { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "hsl(var(--destructive))", fill: dangerFill },
     ];
   })();
 
@@ -206,6 +246,8 @@ const Index = () => {
             dataFim={dataFim} setDataFim={setDataFim}
             filial={filial} setFilial={setFilial}
             filiais={filiais}
+            onFilter={handleApplyFilter}
+            loading={loading}
           />
         </div>
       </div>
@@ -221,25 +263,21 @@ const Index = () => {
             <KpiCard
               title="Total Planejado"
               value={stats ? formatValue(stats.totalPlanejado) : "0"}
-              change={stats?.variacaoPercentual || 0}
               icon={DollarSign}
             />
             <KpiCard
               title="Total Realizado"
               value={stats ? formatValue(stats.totalRealizado) : "0"}
-              change={stats?.variacaoPercentual || 0}
               icon={ShoppingCart}
             />
             <KpiCard
               title="Diferença"
               value={stats ? formatValue(stats.diferenca) : "0"}
-              change={stats?.variacaoPercentual || 0}
               icon={Minus}
             />
             <KpiCard
               title="Percentual Meta"
               value={stats ? `${parseFloat(String(stats.percentualMeta).replace(",", ".")).toFixed(2).replace(".", ",")}%` : "0,00%"}
-              change={stats?.variacaoPercentual || 0}
               icon={Target}
             />
           </div>
@@ -247,77 +285,93 @@ const Index = () => {
           {/* Seção: Análise Gráfica — otimizada para desktop */}
           <div className="space-y-6 lg:space-y-8">
             {/* Gráfico único: Planejado vs Realizado vs Diferença por período */}
-            <div ref={chartPlanejadoRealizadoRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+            <div ref={chartPlanejadoRealizadoRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
               <div className="mb-5 lg:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
-                    <Target className="h-5 w-5 lg:h-6 lg:w-6 text-primary" />
+                  <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
+                    <Target className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
                   </div>
                   <div>
-                    <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Planejado vs Realizado vs Diferença</h3>
-                    <p className="text-xs sm:text-sm text-muted-foreground/80 mt-0.5">Soma do total planejado, realizado e diferença no período filtrado</p>
+                    <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Planejado vs Realizado vs Diferença</h3>
+                    <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Soma do total planejado, realizado e diferença no período filtrado</p>
                   </div>
                 </div>
                 <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="dashboard-planejado-realizado-diferenca" expandScrollable={false} className="shrink-0" />
               </div>
-              <div className="h-[300px] sm:h-[340px] lg:h-[420px] w-full">
+              <div className="dashboard-bar-chart dashboard-bar-chart-wrap h-[300px] sm:h-[340px] lg:h-[420px] w-full rounded-2xl p-4 sm:p-5">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={chartData}
                     margin={chartBarMargin}
-                    barCategoryGap="12%"
-                    barGap={8}
+                    barCategoryGap="16%"
+                    barGap={12}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
+                    <defs>
+                      <linearGradient id="dashboard-primary-bar" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
+                        <stop offset="45%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                        <stop offset="100%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
+                      </linearGradient>
+                      <linearGradient id="dashboard-success-bar" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(160 84% 52%)" stopOpacity={1} />
+                        <stop offset="45%" stopColor="hsl(var(--success))" stopOpacity={1} />
+                        <stop offset="100%" stopColor="hsl(160 84% 28%)" stopOpacity={0.95} />
+                      </linearGradient>
+                      <linearGradient id="dashboard-warning-bar" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(38 92% 62%)" stopOpacity={1} />
+                        <stop offset="45%" stopColor="hsl(var(--warning))" stopOpacity={1} />
+                        <stop offset="100%" stopColor="hsl(38 92% 38%)" stopOpacity={0.95} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 6" vertical={false} horizontal={true} />
                     <XAxis
                       dataKey="name"
-                      stroke="hsl(var(--muted-foreground))"
-                      fontSize={12}
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fontSize: 11 }}
+                      tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--muted-foreground))" }}
+                      dy={6}
                     />
                     <YAxis
-                      stroke="hsl(var(--muted-foreground))"
-                      fontSize={12}
                       tickLine={false}
                       axisLine={false}
-                      allowDataOverflow
-                      tick={false}
+                      allowDecimals={false}
+                      tick={{ fontSize: 11, fontWeight: 600, fill: "hsl(var(--muted-foreground))" }}
+                      tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)}
+                      width={40}
                     />
                     <Tooltip
+                      cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 10 }}
                       contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "12px",
-                        padding: "12px 16px",
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                        backgroundColor: "hsl(var(--card) / 0.98)",
+                        backdropFilter: "blur(12px)",
+                        WebkitBackdropFilter: "blur(12px)",
+                        border: "1px solid hsl(var(--border) / 0.8)",
+                        borderRadius: "14px",
+                        padding: "16px 20px",
+                        boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
                         fontSize: "13px",
+                        fontWeight: 500,
                       }}
-                      labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                      formatter={(value: number) => [value.toLocaleString("pt-BR"), ""]}
+                      labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 8, fontSize: 14 }}
+                      formatter={(value: number) => [value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }), ""]}
+                      itemStyle={{ fontWeight: 600 }}
                     />
-                    <Legend wrapperStyle={{ paddingTop: 8 }} align="center" layout="horizontal" />
-                    <Bar dataKey="planejado" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} name="Planejado" maxBarSize={80}>
-                      <LabelList
-                        content={(props: any) => <CustomBarLabel {...props} dataKey="planejado" />}
-                        position="top"
-                        style={{ fontSize: 11 }}
-                      />
+                    <Legend
+                      wrapperStyle={{ paddingTop: 18 }}
+                      align="center"
+                      layout="horizontal"
+                      iconType="circle"
+                      iconSize={10}
+                      formatter={(value) => <span style={{ color: "hsl(var(--foreground) / 0.9)", fontWeight: 600, marginLeft: 6, letterSpacing: "0.02em" }}>{value}</span>}
+                    />
+                    <Bar dataKey="planejado" fill="url(#dashboard-primary-bar)" radius={[10, 10, 0, 0]} name="Planejado" maxBarSize={barMaxSize} isAnimationActive animationDuration={700} animationEasing="ease-out">
+                      <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="planejado" />} position="top" />
                     </Bar>
-                    <Bar dataKey="realizado" fill="hsl(var(--success))" radius={[6, 6, 0, 0]} name="Realizado" maxBarSize={80}>
-                      <LabelList
-                        content={(props: any) => <CustomBarLabel {...props} dataKey="realizado" />}
-                        position="top"
-                        style={{ fontSize: 11 }}
-                      />
+                    <Bar dataKey="realizado" fill="url(#dashboard-success-bar)" radius={[10, 10, 0, 0]} name="Realizado" maxBarSize={barMaxSize} isAnimationActive animationDuration={700} animationEasing="ease-out">
+                      <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="realizado" />} position="top" />
                     </Bar>
-                    <Bar dataKey="diferenca" fill="hsl(var(--warning))" radius={[6, 6, 0, 0]} name="Diferença (Planejado − Realizado)" maxBarSize={80}>
-                      <LabelList
-                        content={(props: any) => <CustomBarLabel {...props} dataKey="diferenca" />}
-                        position="top"
-                        style={{ fontSize: 11 }}
-                      />
+                    <Bar dataKey="diferenca" fill="url(#dashboard-warning-bar)" radius={[10, 10, 0, 0]} name="Diferença (Planejado − Realizado)" maxBarSize={barMaxSize} isAnimationActive animationDuration={700} animationEasing="ease-out">
+                      <LabelList content={(props: any) => <CustomBarLabel {...props} dataKey="diferenca" />} position="top" />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
@@ -327,50 +381,76 @@ const Index = () => {
             {/* Status de Produção e Produção por Linha — lado a lado no PC */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
             {/* Gráfico: Status de Produção — mesmo percentual do quadro Percentual Meta */}
-            <div ref={chartStatusProducaoRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+            <div ref={chartStatusProducaoRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
                 <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-success/10 border border-success/20 shadow-sm">
-                      <Factory className="h-5 w-5 lg:h-6 lg:w-6 text-success" />
+                    <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-success/25 via-success/15 to-success/10 border border-success/25 shadow-lg shadow-success/10">
+                      <Factory className="h-6 w-6 lg:h-7 lg:w-7 text-success" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-base sm:text-lg font-bold text-card-foreground">Status de Produção</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground">Mesmo percentual do quadro “Percentual Meta” (total realizado ÷ total planejado)</p>
+                      <h3 className="text-base sm:text-lg font-bold tracking-tight text-card-foreground">Status de Produção</h3>
+                      <p className="text-xs sm:text-sm text-muted-foreground/90">Mesmo percentual do quadro “Percentual Meta” (total realizado ÷ total planejado)</p>
                     </div>
                   </div>
                   <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="dashboard-status-producao" expandScrollable={false} className="shrink-0" />
                 </div>
-                <div className="h-[240px] sm:h-[260px] lg:h-[300px] w-full flex items-center justify-center">
+                <div className="dashboard-pie-chart dashboard-pie-chart-wrap h-[240px] sm:h-[260px] lg:h-[300px] w-full flex items-center justify-center p-4 sm:p-5">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
+                      <defs>
+                        <radialGradient id="dashboard-pie-success" cx="0.35" cy="0.35" r="0.65">
+                          <stop offset="0%" stopColor="hsl(160 84% 52%)" stopOpacity={1} />
+                          <stop offset="70%" stopColor="hsl(var(--success))" stopOpacity={1} />
+                          <stop offset="100%" stopColor="hsl(160 84% 28%)" stopOpacity={0.95} />
+                        </radialGradient>
+                        <radialGradient id="dashboard-pie-danger" cx="0.35" cy="0.35" r="0.65">
+                          <stop offset="0%" stopColor="hsl(0 72% 58%)" stopOpacity={1} />
+                          <stop offset="70%" stopColor="hsl(var(--destructive))" stopOpacity={1} />
+                          <stop offset="100%" stopColor="hsl(0 62% 28%)" stopOpacity={0.95} />
+                        </radialGradient>
+                      </defs>
                       <Pie
                         data={statusData}
                         cx="50%"
                         cy="50%"
                         labelLine={false}
-                        outerRadius={72}
+                        outerRadius={pieOuterRadius}
+                        innerRadius={0}
                         fill="#8884d8"
                         dataKey="value"
                         stroke="hsl(var(--card))"
-                        strokeWidth={2}
+                        strokeWidth={2.5}
                         className="[&_.recharts-pie-sector]:outline-none"
+                        isAnimationActive
+                        animationDuration={700}
+                        animationEasing="ease-out"
                       >
                         {statusData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
+                          <Cell key={`cell-${index}`} fill={entry.fill ?? entry.color} />
                         ))}
                       </Pie>
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "12px",
-                          padding: "12px 16px",
-                          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                          backgroundColor: "hsl(var(--card) / 0.98)",
+                          backdropFilter: "blur(12px)",
+                          WebkitBackdropFilter: "blur(12px)",
+                          border: "1px solid hsl(var(--border) / 0.8)",
+                          borderRadius: "14px",
+                          padding: "16px 20px",
+                          boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
                           fontSize: "13px",
+                          fontWeight: 500,
                         }}
-                        formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
+                        formatter={(value: number) => [`${value.toFixed(1).replace(".", ",")}%`, ""]}
+                        itemStyle={{ fontWeight: 600 }}
                       />
-                      <Legend wrapperStyle={{ paddingTop: 8 }} />
+                      <Legend
+                        wrapperStyle={{ paddingTop: 18 }}
+                        align="center"
+                        iconType="circle"
+                        iconSize={10}
+                        formatter={(value) => <span style={{ color: "hsl(var(--foreground) / 0.9)", fontWeight: 600, marginLeft: 6, letterSpacing: "0.02em" }}>{value}</span>}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -387,51 +467,63 @@ const Index = () => {
                 const meta = row?.meta ?? 0;
                 const pct = meta > 0 ? ((realizado / meta) * 100).toFixed(1).replace(".", ",") : "—";
                 return (
-                  <div className="rounded-lg border border-border bg-card px-3 py-2.5 shadow-md text-xs">
-                    <p className="font-semibold text-foreground mb-1.5 border-b border-border pb-1">{label}</p>
-                    <p><span className="text-primary font-medium">Realizado:</span> {formatChartNumber(realizado)}</p>
-                    <p><span className="text-muted-foreground font-medium">Meta:</span> {formatChartNumber(meta)}</p>
-                    <p className="mt-1 text-muted-foreground">% da meta: <span className="font-semibold text-foreground">{pct}%</span></p>
+                  <div className="rounded-xl border border-border/80 bg-card/98 backdrop-blur-xl px-4 py-3 shadow-[0_20px_40px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.05)] text-xs font-medium">
+                    <p className="font-bold text-foreground mb-2 border-b border-border/60 pb-2 text-sm">{label}</p>
+                    <p className="tabular-nums"><span className="text-primary font-semibold">Realizado:</span> {formatChartNumber(realizado)}</p>
+                    <p className="tabular-nums"><span className="text-muted-foreground font-medium">Meta:</span> {formatChartNumber(meta)}</p>
+                    <p className="mt-1.5 text-muted-foreground">% da meta: <span className="font-bold text-foreground">{pct}%</span></p>
                   </div>
                 );
               };
-              const chartHeight = Math.min(320, Math.max(200, sorted.length * 28));
+              const linhaBarHeight = linhaBarSize * 2 + 28;
+              const chartHeight = Math.min(560, Math.max(200, sorted.length * linhaBarHeight));
               return (
-                <div ref={chartProducaoLinhaRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                <div ref={chartProducaoLinhaRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
                   <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 text-primary shadow-sm">
-                        <Factory className="h-5 w-5 lg:h-6 lg:w-6" />
+                      <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10 text-primary">
+                        <Factory className="h-6 w-6 lg:h-7 lg:w-7" />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="text-base sm:text-lg lg:text-xl font-bold text-foreground">Produção por Linha</h3>
-                        <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Compare realizado (azul) com meta (cinza). Ordenado do maior ao menor realizado.</p>
+                        <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-foreground">Produção por Linha</h3>
+                        <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Compare realizado (azul) com meta (cinza). Ordenado do maior ao menor realizado.</p>
                       </div>
                     </div>
                     <ExportToPng targetRef={chartProducaoLinhaRef} filenamePrefix="dashboard-producao-linha" expandScrollable={false} className="shrink-0 w-full sm:w-auto min-h-[44px] sm:min-h-0" />
                   </div>
-                  <div className="flex flex-wrap gap-3 mb-3">
+                  <div className="flex flex-wrap gap-4 mb-4">
                     <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
-                      <span className="w-3 h-3 rounded-sm bg-primary shadow-sm" aria-hidden />
-                      <span className="text-muted-foreground">Realizado (produzido)</span>
+                      <span className="w-3.5 h-3.5 rounded-md bg-primary shadow-sm ring-2 ring-primary/20" aria-hidden />
+                      <span className="text-muted-foreground font-medium">Realizado (produzido)</span>
                     </span>
                     <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
-                      <span className="w-3 h-3 rounded-sm bg-muted-foreground/50" aria-hidden />
-                      <span className="text-muted-foreground">Meta (planejado)</span>
+                      <span className="w-3.5 h-3.5 rounded-md bg-muted-foreground/50 shadow-sm ring-2 ring-muted-foreground/20" aria-hidden />
+                      <span className="text-muted-foreground font-medium">Meta (planejado)</span>
                     </span>
                   </div>
-                  <div className="rounded-xl bg-muted/20 lg:bg-muted/30 p-4 lg:p-5 border border-border/40">
+                  <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5">
                     <ResponsiveContainer width="100%" height={chartHeight}>
-                      <BarChart layout="vertical" data={sorted} margin={{ top: 8, right: 56, left: 4, bottom: 8 }}>
-                        <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" opacity={0.4} horizontal={false} />
+                      <BarChart layout="vertical" data={sorted} margin={{ top: 8, right: 56, left: 4, bottom: 8 }} barCategoryGap={24} barGap={14}>
+                        <defs>
+                          <linearGradient id="dashboard-linha-primary" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
+                            <stop offset="50%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                            <stop offset="100%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
+                          </linearGradient>
+                          <linearGradient id="dashboard-linha-meta" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.55} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
                         <XAxis type="number" tickLine={false} axisLine={false} tick={false} label={false} />
-                        <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "hsl(var(--foreground))" }} />
-                        <Tooltip content={<TooltipProducaoLinha />} />
-                        <Bar dataKey="valor" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} name="Realizado" maxBarSize={24} barCategoryGap="40%">
+                        <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                        <Tooltip content={<TooltipProducaoLinha />} cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }} />
+                        <Bar dataKey="valor" fill="url(#dashboard-linha-primary)" radius={[0, 8, 8, 0]} name="Realizado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
                           <LabelList dataKey="valor" position="right" formatter={(v: number) => formatChartNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                         </Bar>
-                        <Bar dataKey="meta" fill="hsl(var(--muted-foreground))" fillOpacity={0.5} radius={[0, 6, 6, 0]} name="Meta" maxBarSize={24} barCategoryGap="40%">
-                          <LabelList dataKey="meta" position="right" formatter={(v: number) => formatChartNumber(v)} style={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                        <Bar dataKey="meta" fill="url(#dashboard-linha-meta)" radius={[0, 8, 8, 0]} name="Meta" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                          <LabelList dataKey="meta" position="right" formatter={(v: number) => formatChartNumber(v)} style={{ fontSize: 12, fontWeight: 500, fill: "hsl(var(--muted-foreground))" }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>

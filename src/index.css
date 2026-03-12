@@ -6,6 +6,8 @@
 
 @layer base {
   :root {
+    /* Altura do header (fixo em viewports < 1024px); atualizado via JS no SiteHeader */
+    --app-header-height: 8rem;
     --background: 216 20% 95%;
     --foreground: 220 30% 15%;
 
@@ -89,6 +91,20 @@
     --sidebar-border: 222 25% 14%;
     --sidebar-ring: 199 89% 48%;
     --sidebar-muted: 215 14% 50%;
+  }
+}
+
+/* Espaço para o header fixo: bem compacto no celular, maior no tablet */
+@media (max-width: 639px) {
+  .app-header-spacer {
+    height: var(--app-header-height, 4rem);
+    min-height: 3.75rem;
+  }
+}
+@media (min-width: 640px) and (max-width: 1023px) {
+  .app-header-spacer {
+    height: var(--app-header-height, 7.5rem);
+    min-height: 7rem;
   }
 }
 
@@ -228,17 +244,24 @@
     }
   }
 
-  /* Gráfico de pizza Problemas e Ações — aparência moderna */
+  /* Gráfico de pizza Problemas e Ações — aparência moderna (gradientes + rótulos) */
   .octp-pie-chart-wrapper .recharts-wrapper,
   .octp-pie-chart-wrapper .recharts-surface {
     overflow: visible !important;
+  }
+  .octp-pie-chart-wrapper .recharts-pie-sector {
+    transition: opacity 0.2s ease, filter 0.2s ease;
+  }
+  .octp-pie-chart-wrapper .recharts-pie-sector:hover {
+    opacity: 0.95;
+    filter: brightness(1.05);
   }
   .octp-pie-chart-wrapper .recharts-pie-label-text,
   .octp-pie-chart-wrapper .recharts-label-text,
   .octp-pie-chart-wrapper .recharts-pie .recharts-layer text {
     font-size: 13px !important;
     font-weight: 700 !important;
-    letter-spacing: 0.02em !important;
+    letter-spacing: 0.04em !important;
     fill: hsl(var(--foreground)) !important;
     paint-order: stroke fill;
     stroke: rgba(255, 255, 255, 0.95);
@@ -263,6 +286,130 @@
   @media (min-width: 1024px) {
     .chart-card:hover {
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+    }
+  }
+
+  /* Gráfico de barras dashboard — visual premium */
+  .dashboard-bar-chart .recharts-cartesian-grid-horizontal line {
+    stroke: hsl(var(--border));
+    stroke-opacity: 0.15;
+    stroke-dasharray: 3 6;
+  }
+  .dashboard-bar-chart .recharts-bar-rectangle {
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s ease, opacity 0.2s ease;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.08)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.06));
+  }
+  .dashboard-bar-chart .recharts-bar-rectangle:hover {
+    filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.12)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.08)) brightness(1.06);
+    opacity: 1;
+  }
+  .dashboard-bar-chart .recharts-cartesian-axis-tick-value {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    fill: hsl(var(--muted-foreground));
+  }
+  .dashboard-bar-chart .recharts-legend-wrapper {
+    padding-top: 1.25rem !important;
+  }
+  .dashboard-bar-chart .recharts-legend-item {
+    margin-right: 1.25rem;
+  }
+  .dashboard-bar-chart .recharts-legend-item-text {
+    font-size: 12px;
+    font-weight: 600;
+    fill: hsl(var(--foreground) / 0.9);
+    letter-spacing: 0.02em;
+  }
+  .dashboard-bar-chart .recharts-legend-item .recharts-legend-icon {
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px hsl(var(--background));
+  }
+  .dashboard-bar-chart-wrap {
+    background: linear-gradient(160deg, hsl(var(--primary) / 0.04) 0%, transparent 50%, hsl(var(--muted) / 0.06) 100%);
+    box-shadow: inset 0 1px 0 0 hsl(var(--border) / 0.5), 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .dark .dashboard-bar-chart-wrap {
+    background: linear-gradient(160deg, hsl(var(--primary) / 0.08) 0%, transparent 50%, hsl(var(--muted) / 0.1) 100%);
+    box-shadow: inset 0 1px 0 0 hsl(var(--border) / 0.3);
+  }
+
+  /* Gráfico de pizza Status de Produção — visual premium */
+  .dashboard-pie-chart .recharts-wrapper,
+  .dashboard-pie-chart .recharts-surface {
+    overflow: visible !important;
+  }
+  .dashboard-pie-chart .recharts-pie-sector {
+    transition: filter 0.25s ease, transform 0.2s ease;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.08)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.05));
+    outline: none !important;
+  }
+  .dashboard-pie-chart .recharts-pie-sector:hover {
+    filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.12)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.08)) brightness(1.05);
+  }
+  .dashboard-pie-chart .recharts-legend-item-text {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    fill: hsl(var(--foreground) / 0.9) !important;
+    letter-spacing: 0.02em;
+  }
+  .dashboard-pie-chart .recharts-legend-item .recharts-legend-icon {
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px hsl(var(--background));
+  }
+  .dashboard-pie-chart-wrap {
+    background: linear-gradient(160deg, hsl(var(--success) / 0.06) 0%, transparent 40%, hsl(var(--muted) / 0.06) 100%);
+    box-shadow: inset 0 1px 0 0 hsl(var(--border) / 0.5), 0 1px 2px rgba(0, 0, 0, 0.04);
+    border-radius: 1rem;
+  }
+  .dark .dashboard-pie-chart-wrap {
+    background: linear-gradient(160deg, hsl(var(--success) / 0.1) 0%, transparent 40%, hsl(var(--muted) / 0.1) 100%);
+    box-shadow: inset 0 1px 0 0 hsl(var(--border) / 0.3);
+  }
+
+  /* Gráfico Produção por Linha (barras horizontais) — visual premium */
+  .dashboard-linha-chart .recharts-cartesian-grid-vertical line {
+    stroke: hsl(var(--border));
+    stroke-opacity: 0.15;
+    stroke-dasharray: 3 6;
+  }
+  .dashboard-linha-chart .recharts-bar-rectangle {
+    transition: filter 0.25s ease, opacity 0.2s ease;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.08)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.05));
+    outline: none !important;
+  }
+  .dashboard-linha-chart .recharts-bar-rectangle:hover {
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.1)) brightness(1.04);
+    opacity: 1;
+  }
+  .dashboard-linha-chart .recharts-cartesian-axis-tick-value {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    fill: hsl(var(--foreground)) !important;
+  }
+  .dashboard-linha-chart .recharts-label-list text {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    fill: hsl(var(--foreground)) !important;
+  }
+  .dashboard-linha-chart-wrap {
+    background: linear-gradient(160deg, hsl(var(--primary) / 0.04) 0%, transparent 50%, hsl(var(--muted) / 0.06) 100%);
+    box-shadow: inset 0 1px 0 0 hsl(var(--border) / 0.5), 0 1px 2px rgba(0, 0, 0, 0.04);
+    border-radius: 1rem;
+  }
+  .dark .dashboard-linha-chart-wrap {
+    background: linear-gradient(160deg, hsl(var(--primary) / 0.08) 0%, transparent 50%, hsl(var(--muted) / 0.1) 100%);
+    box-shadow: inset 0 1px 0 0 hsl(var(--border) / 0.3);
+  }
+
+  /* Header fixed em mobile/tablet: main reserva espaço. No desktop (lg) o header é sticky e fica só na área de conteúdo. */
+  .app-layout-main {
+    padding-top: var(--app-header-height, 5.25rem);
+  }
+  @media (min-width: 1024px) {
+    .app-layout-main {
+      padding-top: 0;
     }
   }
 }

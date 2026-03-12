@@ -20,8 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck } from "lucide-react";
-import { ExportToPng } from "@/components/ExportToPng";
+import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck, FilePlus } from "lucide-react";
+import { ExportToPng, captureElementToPngBlob } from "@/components/ExportToPng";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +29,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { toPng } from "html-to-image";
 import {
   BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList,
@@ -115,6 +114,16 @@ const OCTP_STATUS_OPTIONS = [
   { id: "Em andamento", label: "Em andamento", color: "#eab308" },     // Amarelo
   { id: "A iniciar", label: "A iniciar", color: "#3b82f6" },           // Azul
 ] as const;
+
+/** Gradientes premium para o gráfico de pizza OCTP (claro → base → escuro, igual Status de Produção) */
+const OCTP_PIE_GRADIENTS: Record<string, { light: string; dark: string }> = {
+  "#ef4444": { light: "#f87171", dark: "#b91c1c" },
+  "#22c55e": { light: "#4ade80", dark: "#15803d" },
+  "#eab308": { light: "#facc15", dark: "#a16207" },
+  "#f97316": { light: "#fb923c", dark: "#c2410c" },
+  "#3b82f6": { light: "#60a5fa", dark: "#1d4ed8" },
+  "#6b7280": { light: "#9ca3af", dark: "#4b5563" },
+};
 
 // Quebra texto em até 3 linhas para labels do eixo (gráfico Planejado vs Realizado)
 function wrapTextInThreeLines(text: string, maxCharsPerLine = 22): string[] {
@@ -203,7 +212,7 @@ function Producao() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
-  const { setDocumentNav } = useDocumentNav();
+  const { setDocumentNav, documentNav } = useDocumentNav();
   const producaoCardRef = useRef<HTMLDivElement>(null);
   const historicoCardRef = useRef<HTMLDivElement>(null);
   const reprocessoCardRef = useRef<HTMLDivElement>(null);
@@ -215,10 +224,15 @@ function Producao() {
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
   const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
   const [chartBarMargin, setChartBarMargin] = useState({ top: 28, right: 24, left: 24, bottom: 8 });
+  const [linhaBarSize, setLinhaBarSize] = useState(20);
+  const [pieOuterRadius, setPieOuterRadius] = useState(72);
   useEffect(() => {
-    const update = () => setChartBarMargin(
-      window.innerWidth < 640 ? { top: 28, right: 16, left: 4, bottom: 8 } : { top: 28, right: 24, left: 24, bottom: 8 }
-    );
+    const update = () => {
+      const w = window.innerWidth;
+      setChartBarMargin(w < 640 ? { top: 28, right: 16, left: 4, bottom: 8 } : { top: 28, right: 24, left: 24, bottom: 8 });
+      setLinhaBarSize(w >= 1024 ? 26 : w >= 640 ? 22 : 20);
+      setPieOuterRadius(w >= 1024 ? 88 : 72);
+    };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
@@ -271,16 +285,19 @@ function Producao() {
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   // Reprocessos
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
-  // Filtros do card de reprocesso (tipo e linha)
+  // Filtros do card de reprocesso (tipo e linha) — valores do formulário
   const [reprocessoFiltroTipo, setReprocessoFiltroTipo] = useState<"" | "Cortado" | "Usado">("");
   const [reprocessoFiltroLinha, setReprocessoFiltroLinha] = useState<string>("");
-  // Lista de reprocessos filtrada por tipo e linha (para exibição no card)
+  // Valores aplicados ao clicar em Filtrar (usados para exibir a tabela)
+  const [reprocessoAppliedTipo, setReprocessoAppliedTipo] = useState<"" | "Cortado" | "Usado">("");
+  const [reprocessoAppliedLinha, setReprocessoAppliedLinha] = useState<string>("");
+  // Lista de reprocessos filtrada pelos valores aplicados (só atualiza ao clicar em Filtrar)
   const reprocessosFiltrados = useMemo(() => {
     return reprocessos.filter((r) => {
-      if (reprocessoFiltroTipo && r.tipo !== reprocessoFiltroTipo) return false;
-      if (!reprocessoFiltroLinha) return true;
+      if (reprocessoAppliedTipo && r.tipo !== reprocessoAppliedTipo) return false;
+      if (!reprocessoAppliedLinha) return true;
       const linhaVal = (r.linha ?? "").toString().trim();
-      const filtroVal = reprocessoFiltroLinha.trim();
+      const filtroVal = reprocessoAppliedLinha.trim();
       if (linhaVal === filtroVal) return true;
       const selectedLine = productionLines.find((l) => (l.code ? String(l.code) : `line-${l.id}`) === filtroVal);
       if (selectedLine) {
@@ -289,7 +306,7 @@ function Producao() {
       }
       return false;
     });
-  }, [reprocessos, reprocessoFiltroTipo, reprocessoFiltroLinha, productionLines]);
+  }, [reprocessos, reprocessoAppliedTipo, reprocessoAppliedLinha, productionLines]);
   // OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status)
   const [octpInicio, setOctpInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
@@ -304,6 +321,7 @@ function Producao() {
   const [historyDataFim, setHistoryDataFim] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyLinhaFilter, setHistoryLinhaFilter] = useState<string>("");
   const [historyFilialFilter, setHistoryFilialFilter] = useState<string>("todas");
+  const [exportingAllPng, setExportingAllPng] = useState(false);
 
   const [items, setItems] = useState<ProductionItem[]>([
     {
@@ -1838,13 +1856,7 @@ function Producao() {
     saveDraftProducao,
   ]);
 
-  // Ao abrir o histórico, carregar com os filtros atuais (intervalo de datas e linha)
-  useEffect(() => {
-    if (currentView === "historico") {
-      loadHistory();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentView]);
+  // Histórico só carrega ao clicar em Filtrar (não ao abrir a aba)
 
   // Registrar navegação entre documentos no header (setas + novo doc) - sempre oferecer "Novo documento" nesta página
   useEffect(() => {
@@ -1877,61 +1889,136 @@ function Producao() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentView, currentRecordIndex, currentRecordId, allRecords.length, dataCabecalhoSelecionada]);
 
-  // Função para exportar análise de produção como PNG
-  const exportProducaoAsPNG = async () => {
-    if (!producaoCardRef.current) return;
+  // Exporta os 4 blocos (Status de Produção, Planejado vs Realizado, Reprocesso, Histórico) como PNGs separados,
+  // com dados filtrados pela filial e data do documento aberto. No mobile oferece compartilhar (ex.: WhatsApp).
+  const exportAllProducaoAsPNG = async () => {
+    const dataDoc = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
+    const filialDoc = filialSelecionada || "";
 
+    setExportingAllPng(true);
+    let switchedToHistoricoForExport = false;
     try {
-      await new Promise(resolve => setTimeout(resolve, 400));
+      // Ajustar filtros do histórico para a filial e data do documento e recarregar (para o PNG do histórico refletir o documento)
+      setHistoryDataInicio(dataDoc);
+      setHistoryDataFim(dataDoc);
+      setHistoryFilialFilter(filialDoc || "todas");
+      await loadHistory({
+        dataInicio: dataDoc,
+        dataFim: dataDoc,
+        filialCodigo: filialDoc || undefined,
+      });
+      await new Promise((r) => setTimeout(r, 400));
 
-      const element = producaoCardRef.current;
-
-      // Capturar o elemento usando html-to-image com configurações para manter fidelidade
-      const dataUrl = await toPng(element, {
-        backgroundColor: '#ffffff',
-        pixelRatio: 2,
-        quality: 1.0,
-        cacheBust: true,
-        skipAutoScale: false,
-        skipFonts: false,
-        filter: (node) => {
-          // Não filtrar nenhum nó para manter tudo visível
-          return true;
+      const targets: Array<{
+        ref: React.RefObject<HTMLElement | null>;
+        filenamePrefix: string;
+        expandScrollable: boolean;
+        onBeforeCapture?: () => void | Promise<void>;
+        onAfterCapture?: () => void | Promise<void>;
+      }> = [
+        { ref: chartStatusProducaoRef, filenamePrefix: "status-producao", expandScrollable: false },
+        { ref: chartPlanejadoRealizadoRef, filenamePrefix: "planejado-realizado", expandScrollable: true },
+        {
+          ref: reprocessoCardRef,
+          filenamePrefix: "reprocesso",
+          expandScrollable: true,
+          onBeforeCapture: () => {
+            const card = reprocessoCardRef.current;
+            if (!card) return;
+            reprocessoExportRestoreRef.current = [];
+            const cells = card.querySelectorAll("table tbody tr td:nth-child(5)");
+            cells.forEach((cell) => {
+              const input = cell.querySelector("input");
+              if (!input) return;
+              const el = input as HTMLInputElement;
+              const value = el.value ?? "";
+              const wrapper = document.createElement("div");
+              wrapper.setAttribute("data-export-descricao", "true");
+              wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[200px]";
+              wrapper.textContent = value || "—";
+              el.style.display = "none";
+              cell.appendChild(wrapper);
+              reprocessoExportRestoreRef.current.push({ input: el, wrapper });
+            });
+          },
+          onAfterCapture: () => {
+            reprocessoExportRestoreRef.current.forEach(({ input, wrapper }) => {
+              wrapper.remove();
+              input.style.display = "";
+            });
+            reprocessoExportRestoreRef.current = [];
+          },
         },
-      });
+        { ref: historicoCardRef, filenamePrefix: "historico-producao", expandScrollable: true },
+      ];
 
-      // Criar imagem a partir do data URL
-      const img = new Image();
-      img.src = dataUrl;
+      const filesToShare: File[] = [];
 
-      await new Promise((resolve) => {
-        img.onload = () => {
-          // Criar canvas com padding
-          const padding = 40;
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width + (padding * 2);
-          canvas.height = img.height + (padding * 2);
-          const ctx = canvas.getContext('2d');
+      // Se estamos no cadastro, o card Histórico não está no DOM; mudamos brevemente para a view histórico para capturá-lo
+      if (currentView === "cadastro" && !historicoCardRef.current) {
+        setCurrentView("historico");
+        switchedToHistoricoForExport = true;
+        await new Promise((r) => setTimeout(r, 700));
+      }
 
-          if (ctx) {
-            // Fundo branco
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Desenhar a imagem com padding
-            ctx.drawImage(img, padding, padding);
-          }
-
-          // Download
+      for (const t of targets) {
+        const el = t.ref.current;
+        if (!el) continue;
+        await new Promise((r) => setTimeout(r, 200));
+        try {
+          const { blob, fileName } = await captureElementToPngBlob(el, {
+            expandScrollable: t.expandScrollable,
+            onBeforeCapture: t.onBeforeCapture,
+            onAfterCapture: t.onAfterCapture,
+            filenamePrefix: t.filenamePrefix,
+          });
+          const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
-          link.download = `analise - producao - ${new Date().toISOString().split('T')[0]}.png`;
-          link.href = canvas.toDataURL("image/png", 1.0);
+          link.download = fileName;
+          link.href = url;
           link.click();
-          resolve(undefined);
-        };
-      });
+          setTimeout(() => URL.revokeObjectURL(url), 300);
+          filesToShare.push(new File([blob], fileName, { type: "image/png" }));
+        } catch (err) {
+          console.error(`Export PNG failed for ${t.filenamePrefix}:`, err);
+        }
+      }
+
+      if (switchedToHistoricoForExport) {
+        setCurrentView("cadastro");
+      }
+
+      if (filesToShare.length > 0 && typeof navigator !== "undefined" && navigator.share) {
+        const canShare =
+          navigator.canShare != null
+            ? navigator.canShare({ files: filesToShare, title: "Produção" })
+            : true;
+        if (canShare) {
+          try {
+            await navigator.share({
+              files: filesToShare,
+              title: "Produção",
+              text: `Produção - ${dataDoc}${filialDoc ? ` - ${filiais.find((f) => f.codigo === filialDoc)?.nome ?? ""}` : ""}`,
+            });
+          } catch (shareErr: unknown) {
+            if ((shareErr as Error)?.name !== "AbortError") {
+              console.error("Share failed:", shareErr);
+            }
+          }
+        }
+      }
     } catch (error) {
-      console.error("Erro ao exportar análise de produção:", error);
+      console.error("Erro ao exportar PNGs:", error);
+      if (switchedToHistoricoForExport) {
+        setCurrentView("cadastro");
+      }
+      if (typeof window !== "undefined" && "toast" in window) {
+        (window as unknown as { toast: { error: (m: string) => void } }).toast?.error?.(
+          "Não foi possível exportar as imagens. Tente novamente."
+        );
+      }
+    } finally {
+      setExportingAllPng(false);
     }
   };
 
@@ -2057,34 +2144,41 @@ function Producao() {
       );
     }
 
-    // Conteúdo do cadastro
+    // Conteúdo do cadastro (key evita reconciliação com a view histórico = sem animações estranhas na troca de aba)
     if (currentView === "cadastro") {
       return (
-        <div className="space-y-6 min-w-0">
-          {/* Botão de voltar - só seta, área de toque adequada no mobile */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setCurrentView("menu")}
-            className="mt-6 mb-2 size-11 min-h-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md transition-all"
-            aria-label="Voltar ao menu"
-          >
-            <ArrowLeft className="size-5 text-foreground" strokeWidth={2.5} />
-          </Button>
-
-          {/* Abas internas: Acompanhamento diário / Histórico */}
-          <div className="flex gap-2 items-center mb-4">
+        <div key="cadastro" className="space-y-6 min-w-0">
+          {/* Voltar — mesma estrutura que na view Histórico para altura consistente */}
+          <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
             <Button
-              variant="secondary"
+              variant="ghost"
+              size="icon"
+              onClick={() => setCurrentView("menu")}
+              className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
+              aria-label="Voltar ao menu"
+              title="Voltar ao menu"
+            >
+              <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
+            </Button>
+          </div>
+
+          {/* Abas internas: altura fixa para não mudar ao trocar de aba */}
+          <div className="inline-flex h-12 min-h-12 items-stretch rounded-xl border border-border/60 bg-muted/40 p-1 gap-0.5 mb-4 flex-shrink-0" role="tablist" aria-label="Navegação da análise de produção">
+            <Button
+              variant="ghost"
               size="sm"
-              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium"
+              role="tab"
+              aria-selected={true}
+              className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-semibold bg-primary/10 text-primary border border-primary/25 shadow-sm hover:bg-primary/15 whitespace-nowrap"
             >
               Acompanhamento diário
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium"
+              role="tab"
+              aria-selected={false}
+              className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 whitespace-nowrap"
               onClick={() => setCurrentView("historico")}
             >
               Histórico de análise
@@ -2092,7 +2186,7 @@ function Producao() {
           </div>
 
           {/* Card: Acompanhamento diário da produção */}
-          <div ref={producaoCardRef} data-export-target className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] transition-all duration-500 overflow-hidden group/card">
+          <div ref={producaoCardRef} data-export-target className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden group/card">
             {/* Efeito de brilho sutil */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/2 via-primary/0.5 to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-500 pointer-events-none z-0 rounded-2xl" />
             {/* Borda superior com gradiente */}
@@ -2100,23 +2194,27 @@ function Producao() {
 
             <div className="relative z-10">
             <div
-              className="relative w-full flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-4 sm:p-6 lg:p-8 transition-all duration-500 group/button bg-gradient-to-r from-transparent via-primary/2 to-transparent"
+              className="relative w-full flex flex-col gap-4 p-4 sm:p-6 lg:p-8 transition-all duration-500 group/button bg-gradient-to-r from-transparent via-primary/2 to-transparent min-[892px]:flex-row min-[892px]:items-center min-[892px]:justify-between"
             >
-                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-5 min-w-0">
+                {/* Tablet/celular: coluna centralizada; computador: linha com ícone à esquerda */}
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-5 min-w-0 order-1 max-[891px]:flex-col max-[891px]:items-center max-[891px]:text-center max-[891px]:gap-4">
                   {/* Ícone com efeito glassmorphism melhorado */}
                   <div className="relative flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 shadow-[0_4px_16px_rgba(59,130,246,0.2)] group-hover/button:shadow-[0_8px_24px_rgba(59,130,246,0.4)] group-hover/button:scale-110 transition-all duration-500 border border-primary/30 backdrop-blur-sm">
                     <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/30 via-white/10 to-transparent opacity-0 group-hover/button:opacity-100 transition-opacity duration-500" />
                     <Factory className="relative h-7 w-7 text-primary drop-shadow-lg" />
                   </div>
 
-                  <div className="text-left space-y-2">
-                    <h2 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent group-hover/button:from-primary group-hover/button:to-primary/80 transition-all duration-500">
-                      Acompanhamento diário da produção
-                    </h2>
+                  <div className="text-left space-y-2 min-w-0 flex-1 w-full max-[891px]:text-center">
+                    <div className="relative rounded-2xl min-h-[2.5rem] flex items-center justify-center">
+                      <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/30 via-white/10 to-transparent opacity-0 group-hover/button:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                      <h2 className="relative z-10 text-xl sm:text-2xl font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent group-hover/button:from-primary group-hover/button:to-primary/80 transition-all duration-500 text-center">
+                        Acompanhamento diário da produção
+                      </h2>
+                    </div>
                     <p className="text-sm text-muted-foreground/80 font-medium">
                       Registre e gerencie a produção do dia
                     </p>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 pt-1">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 pt-1 max-[891px]:items-center max-[891px]:justify-center">
                       <div className="flex items-center gap-2.5">
                         <Clock className="h-4 w-4 sm:h-5 sm:w-5 text-primary/70" />
                         <span className="text-sm sm:text-base font-mono font-semibold text-primary">
@@ -2153,55 +2251,79 @@ function Producao() {
                             </div>
                           </div>
                         </div>
-
-                        {/* Botões de navegação e novo cadastro - agrupados */}
-                        <div className="flex items-center gap-1">
-                          {/* Botões de navegação - setas lado a lado */}
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              navigateToPreviousRecord();
-                            }}
-                            disabled={!hasPreviousRecord()}
-                            className="flex items-center justify-center h-8 w-8 rounded-md border border-border/50 bg-background/50 hover:bg-primary/10 hover:border-primary/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background/50"
-                            title={hasPreviousRecord() ? "Registro anterior" : "Não há registros anteriores"}
-                          >
-                            <ChevronLeft className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              navigateToNextRecord();
-                            }}
-                            disabled={!hasNextRecord()}
-                            className="flex items-center justify-center h-8 w-8 rounded-md border border-border/50 bg-background/50 hover:bg-primary/10 hover:border-primary/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background/50"
-                            title={hasNextRecord() ? "Próximo registro" : "Não há registros posteriores"}
-                          >
-                            <ChevronRight className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                          </button>
-
-                          {/* Botão de novo cadastro */}
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              createNewCadastro();
-                            }}
-                            className="flex items-center justify-center h-8 w-8 rounded-md border border-primary/30 bg-primary/10 hover:bg-primary/20 hover:border-primary/40 transition-all duration-200"
-                            title="Criar novo cadastro"
-                          >
-                            <Plus className="h-4 w-4 text-primary" />
-                          </button>
-                        </div>
                       </div>
+                    </div>
+
+                    {/* Abaixo de 892px: botões logo abaixo da hora/data, empilhados e centralizados */}
+                    <div className="flex flex-col gap-2 w-full min-[892px]:hidden pt-2 items-center max-w-sm mx-auto">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          documentNav?.onNewDocument?.() ?? navigate("/analise-producao");
+                        }}
+                        className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm w-full"
+                        title="Novo documento"
+                        aria-label="Novo documento"
+                      >
+                        <FilePlus className="h-4 w-4 shrink-0" />
+                        <span>Novo documento</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          saveToDatabase();
+                        }}
+                        disabled={saving || items.length === 0}
+                        className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-success z-20 relative backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                        title="Salvar no banco de dados"
+                      >
+                        {saving ? (
+                          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                        ) : (
+                          <Save className="h-4 w-4 shrink-0" />
+                        )}
+                        <span>{saving ? "Salvando..." : "Salvar"}</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          exportAllProducaoAsPNG();
+                        }}
+                        disabled={exportingAllPng}
+                        className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Exportar como PNG"
+                      >
+                        {exportingAllPng ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4 shrink-0" />
+                        )}
+                        <span>{exportingAllPng ? "Exportando…" : "Exportar PNG"}</span>
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                {/* Botões de ação - empilham no mobile, touch-friendly */}
-                <div className="flex flex-wrap items-center gap-2 sm:gap-2">
+                {/* A partir de 892px: botões à direita do cabeçalho */}
+                <div className="hidden min-[892px]:flex flex-wrap items-center gap-2 sm:gap-2 order-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      documentNav?.onNewDocument?.() ?? navigate("/analise-producao");
+                    }}
+                    className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm max-[891px]:w-full"
+                    title="Novo documento"
+                    aria-label="Novo documento"
+                  >
+                    <FilePlus className="h-4 w-4 shrink-0" />
+                    <span className="hidden sm:inline">Novo documento</span>
+                  </button>
                   <button
                     onClick={(e) => {
                       e.preventDefault();
@@ -2209,7 +2331,7 @@ function Producao() {
                       saveToDatabase();
                     }}
                     disabled={saving || items.length === 0}
-                    className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-success z-20 relative backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-success z-20 relative backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed max-[891px]:w-full"
                     title="Salvar no banco de dados"
                   >
                     {saving ? (
@@ -2224,31 +2346,18 @@ function Producao() {
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      loadFromDatabase();
+                      exportAllProducaoAsPNG();
                     }}
-                    disabled={loading}
-                    className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Carregar do banco de dados"
-                  >
-                    {loading ? (
-                      <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                    ) : (
-                      <Database className="h-4 w-4 shrink-0" />
-                    )}
-                    <span className="hidden min-[791px]:inline">Carregar</span>
-                  </button>
-
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      exportProducaoAsPNG();
-                    }}
-                    className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm"
+                    disabled={exportingAllPng}
+                    className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm max-[891px]:w-full disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Exportar como PNG"
                   >
-                    <Download className="h-4 w-4 shrink-0" />
-                    <span className="hidden min-[791px]:inline">Exportar PNG</span>
+                    {exportingAllPng ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4 shrink-0" />
+                    )}
+                    <span className="hidden min-[791px]:inline">{exportingAllPng ? "Exportando…" : "Exportar PNG"}</span>
                   </button>
                 </div>
               </div>
@@ -2847,6 +2956,19 @@ function Producao() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setReprocessoAppliedTipo(reprocessoFiltroTipo);
+                          setReprocessoAppliedLinha(reprocessoFiltroLinha);
+                        }}
+                        className="h-8 flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg text-xs font-semibold text-foreground hover:from-primary/20 hover:to-primary/10 hover:border-primary/40"
+                        title="Filtrar por tipo e linha"
+                      >
+                        <Database className="h-3.5 w-3.5" />
+                        <span>Filtrar</span>
+                      </Button>
                     </div>
                   </div>
 
@@ -3252,9 +3374,21 @@ function Producao() {
                         <p className="text-sm text-muted-foreground py-8 text-center rounded-xl bg-muted/20 border border-dashed border-border/60">Selecione os status nos registros acima para ver o gráfico.</p>
                       ) : (
                         <div className="flex flex-col sm:flex-row items-center sm:items-stretch sm:justify-center w-full gap-6 sm:gap-8">
-                          <div className="octp-pie-chart-wrapper w-full max-w-[300px] sm:max-w-[280px] min-w-[240px] h-[260px] sm:h-[280px] shrink-0 flex items-center justify-center mx-auto sm:mx-0 [filter:drop-shadow(0_4px_12px_rgba(0,0,0,0.06))]">
+                          <div className="octp-pie-chart-wrapper w-full max-w-[300px] sm:max-w-[280px] min-w-[240px] h-[260px] sm:h-[280px] shrink-0 flex items-center justify-center mx-auto sm:mx-0 rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-4 sm:p-5 shadow-[0_4px_24px_rgba(0,0,0,0.06)] [filter:drop-shadow(0_4px_20px_rgba(0,0,0,0.06))]">
                             <ResponsiveContainer width="100%" height="100%">
                               <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                                <defs>
+                                  {octpStatusPieData.map((entry, i) => {
+                                    const stops = OCTP_PIE_GRADIENTS[entry.color] ?? { light: entry.color, dark: entry.color };
+                                    return (
+                                      <radialGradient key={entry.name} id={`octp-pie-grad-${i}`} cx="0.35" cy="0.35" r="0.65">
+                                        <stop offset="0%" stopColor={stops.light} stopOpacity={1} />
+                                        <stop offset="70%" stopColor={entry.color} stopOpacity={1} />
+                                        <stop offset="100%" stopColor={stops.dark} stopOpacity={0.95} />
+                                      </radialGradient>
+                                    );
+                                  })}
+                                </defs>
                                 <Pie
                                   data={octpStatusPieData}
                                   dataKey="value"
@@ -3266,22 +3400,31 @@ function Producao() {
                                   paddingAngle={4}
                                   label={({ value }) => `${value}%`}
                                   labelLine={{ strokeWidth: 1.5, stroke: "hsl(var(--foreground) / 0.35)" }}
+                                  stroke="hsl(var(--card))"
+                                  strokeWidth={2.5}
+                                  className="[&_.recharts-pie-sector]:outline-none"
+                                  isAnimationActive
+                                  animationDuration={700}
+                                  animationEasing="ease-out"
                                 >
-                                  {octpStatusPieData.map((entry) => (
-                                    <Cell key={entry.name} fill={entry.color} stroke="rgba(255,255,255,0.9)" strokeWidth={2.5} />
+                                  {octpStatusPieData.map((entry, i) => (
+                                    <Cell key={entry.name} fill={`url(#octp-pie-grad-${i})`} />
                                   ))}
                                 </Pie>
                                 <Tooltip
                                   formatter={(value: number, name: string, props: { payload?: { count?: number } }) => [`${value}% (${props?.payload?.count ?? 0} registro(s))`, name]}
                                   contentStyle={{
-                                    borderRadius: "12px",
-                                    backgroundColor: "hsl(var(--card))",
-                                    border: "1px solid hsl(var(--border))",
+                                    backgroundColor: "hsl(var(--card) / 0.98)",
+                                    backdropFilter: "blur(12px)",
+                                    WebkitBackdropFilter: "blur(12px)",
+                                    border: "1px solid hsl(var(--border) / 0.8)",
+                                    borderRadius: "14px",
+                                    padding: "16px 20px",
+                                    boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
                                     fontSize: "13px",
-                                    boxShadow: "0 8px 24px rgba(0,0,0,0.1)",
-                                    padding: "10px 14px",
+                                    fontWeight: 500,
                                   }}
-                                  itemStyle={{ paddingTop: "4px" }}
+                                  itemStyle={{ fontWeight: 600, paddingTop: "4px" }}
                                 />
                               </PieChart>
                             </ResponsiveContainer>
@@ -3306,58 +3449,80 @@ function Producao() {
 
                 {/* Seção: Análise Gráfica — otimizada para desktop */}
                 <div className="space-y-6 lg:space-y-8">
+                  {/* No PC: Planejado vs Realizado e Status de Produção lado a lado */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
                   {/* Gráfico 1: Planejado vs Realizado */}
-                  <div ref={chartPlanejadoRealizadoRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                  <div ref={chartPlanejadoRealizadoRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden min-w-0">
                     <div className="mb-5 lg:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 border border-primary/30 shadow-sm">
-                          <Target className="h-5 w-5 lg:h-6 lg:w-6 text-primary" />
+                        <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
+                          <Target className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
                         </div>
                         <div className="min-w-0">
-                          <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Planejado vs Realizado</h3>
-                          <p className="text-xs sm:text-sm text-muted-foreground/80 mt-0.5">Comparação por item de produção</p>
+                          <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Planejado vs Realizado</h3>
+                          <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Comparação por item de produção</p>
                         </div>
                       </div>
                       <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="grafico-planejado-realizado" expandScrollable className="shrink-0" />
                     </div>
                     <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
                       <div
-                        className="w-full"
-                        style={{ height: Math.max(280, items.length * 44) }}
+                        className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5 w-full min-w-0"
+                        style={{ height: Math.min(720, Math.max(200, items.length * (linhaBarSize * 2 + 52))) }}
                       >
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
                             layout="vertical"
-                            data={items.map((item) => ({
-                              name: item.descricaoItem || item.codigoItem || item.op || `Item ${item.numero}`,
-                              planejado: parseFormattedNumber(item.quantidadePlanejada),
-                              realizado: parseFormattedNumber(item.quantidadeRealizada),
-                              diferenca: item.diferenca,
-                            }))}
+                            data={[...items]
+                              .sort((a, b) => parseFormattedNumber(b.quantidadeRealizada) - parseFormattedNumber(a.quantidadeRealizada))
+                              .map((item) => ({
+                                name: item.descricaoItem || item.codigoItem || item.op || `Item ${item.numero}`,
+                                planejado: parseFormattedNumber(item.quantidadePlanejada),
+                                realizado: parseFormattedNumber(item.quantidadeRealizada),
+                                diferenca: item.diferenca,
+                              }))}
                             margin={{ top: 8, right: 72, left: 4, bottom: 8 }}
-                            barCategoryGap="20%"
-                            barGap={8}
+                            barCategoryGap={40}
+                            barGap={22}
                           >
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} horizontal={false} />
-                            <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
-                            <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+                            <defs>
+                              <linearGradient id="producao-linha-primary" x1="0" y1="0" x2="1" y2="0">
+                                <stop offset="0%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
+                                <stop offset="50%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                                <stop offset="100%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
+                              </linearGradient>
+                              <linearGradient id="producao-linha-success" x1="0" y1="0" x2="1" y2="0">
+                                <stop offset="0%" stopColor="hsl(160 84% 28%)" stopOpacity={0.95} />
+                                <stop offset="50%" stopColor="hsl(var(--success))" stopOpacity={1} />
+                                <stop offset="100%" stopColor="hsl(160 84% 52%)" stopOpacity={1} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
+                            <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                            <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                             <Tooltip
+                              cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }}
                               contentStyle={{
-                                backgroundColor: "hsl(var(--card))",
-                                border: "1px solid hsl(var(--border))",
-                                borderRadius: "12px",
-                                padding: "12px 16px",
-                                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                                backgroundColor: "hsl(var(--card) / 0.98)",
+                                backdropFilter: "blur(12px)",
+                                WebkitBackdropFilter: "blur(12px)",
+                                border: "1px solid hsl(var(--border) / 0.8)",
+                                borderRadius: "14px",
+                                padding: "16px 20px",
+                                boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
                                 fontSize: "13px",
+                                fontWeight: 500,
                               }}
-                              labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
+                              labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 8 }}
+                              formatter={(value: number) => [formatNumber(value), ""]}
+                              itemStyle={{ fontWeight: 600 }}
                             />
-                            <Legend wrapperStyle={{ paddingTop: 8 }} align="center" layout="horizontal" />
-                            <Bar dataKey="planejado" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} name="Planejado" maxBarSize={28}>
-                              <LabelList dataKey="planejado" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 11 }} />
+                            <Legend wrapperStyle={{ paddingTop: 18 }} align="center" layout="horizontal" iconType="circle" iconSize={10} formatter={(value) => <span style={{ color: "hsl(var(--foreground) / 0.9)", fontWeight: 600, marginLeft: 6, letterSpacing: "0.02em" }}>{value}</span>} />
+                            <Bar dataKey="planejado" fill="url(#producao-linha-primary)" radius={[0, 8, 8, 0]} name="Planejado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                              <LabelList dataKey="planejado" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                             </Bar>
-                            <Bar dataKey="realizado" fill="hsl(var(--success))" radius={[0, 6, 6, 0]} name="Realizado" maxBarSize={28}>
-                              <LabelList dataKey="realizado" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 11 }} />
+                            <Bar dataKey="realizado" fill="url(#producao-linha-success)" radius={[0, 8, 8, 0]} name="Realizado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                              <LabelList dataKey="realizado" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                             </Bar>
                           </BarChart>
                         </ResponsiveContainer>
@@ -3365,23 +3530,120 @@ function Producao() {
                     </div>
                   </div>
 
+                  {/* Status de Produção — no PC fica ao lado do Planejado vs Realizado */}
+                  <div ref={chartStatusProducaoRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden min-w-0">
+                    <div className="mb-4 lg:mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-success/25 via-success/15 to-success/10 border border-success/25 shadow-lg shadow-success/10">
+                          <Factory className="h-6 w-6 lg:h-7 lg:w-7 text-success" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Status de Produção</h3>
+                          <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Mesmo percentual do quadro "Percentual Meta" (total realizado ÷ total planejado)</p>
+                        </div>
+                      </div>
+                      <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="grafico-status-producao" expandScrollable={false} className="shrink-0" />
+                    </div>
+                    <div className="dashboard-pie-chart dashboard-pie-chart-wrap h-[240px] sm:h-[260px] lg:h-[300px] w-full flex items-center justify-center p-4 sm:p-5">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          {(() => {
+                            const { totalPlanejada, totalRealizada } = calcularTotaisProducao();
+                            const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
+                            const successFill = "url(#producao-pie-success)";
+                            const dangerFill = "url(#producao-pie-danger)";
+                            const mutedColor = "hsl(var(--muted-foreground))";
+                            const statusData =
+                              totalPlanejada === 0
+                                ? [{ name: "Sem meta definida", value: 100, color: mutedColor, fill: mutedColor }]
+                                : perc >= 100
+                                  ? [{ name: "Meta atingida (≥100%)", value: 100, color: "hsl(var(--success))", fill: successFill }]
+                                  : [
+                                      { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "hsl(var(--success))", fill: successFill },
+                                      { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "hsl(var(--destructive))", fill: dangerFill },
+                                    ];
+                            return (
+                              <>
+                                <defs>
+                                  <radialGradient id="producao-pie-success" cx="0.35" cy="0.35" r="0.65">
+                                    <stop offset="0%" stopColor="hsl(160 84% 52%)" stopOpacity={1} />
+                                    <stop offset="70%" stopColor="hsl(var(--success))" stopOpacity={1} />
+                                    <stop offset="100%" stopColor="hsl(160 84% 28%)" stopOpacity={0.95} />
+                                  </radialGradient>
+                                  <radialGradient id="producao-pie-danger" cx="0.35" cy="0.35" r="0.65">
+                                    <stop offset="0%" stopColor="hsl(0 72% 58%)" stopOpacity={1} />
+                                    <stop offset="70%" stopColor="hsl(var(--destructive))" stopOpacity={1} />
+                                    <stop offset="100%" stopColor="hsl(0 62% 28%)" stopOpacity={0.95} />
+                                  </radialGradient>
+                                </defs>
+                                <Pie
+                                  data={statusData}
+                                  cx="50%"
+                                  cy="50%"
+                                  labelLine={false}
+                                  outerRadius={pieOuterRadius}
+                                  innerRadius={0}
+                                  fill="#8884d8"
+                                  dataKey="value"
+                                  stroke="hsl(var(--card))"
+                                  strokeWidth={2.5}
+                                  className="[&_.recharts-pie-sector]:outline-none"
+                                  isAnimationActive
+                                  animationDuration={700}
+                                  animationEasing="ease-out"
+                                >
+                                  {statusData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.fill ?? entry.color} />
+                                  ))}
+                                </Pie>
+                                <Tooltip
+                                  contentStyle={{
+                                    backgroundColor: "hsl(var(--card) / 0.98)",
+                                    backdropFilter: "blur(12px)",
+                                    WebkitBackdropFilter: "blur(12px)",
+                                    border: "1px solid hsl(var(--border) / 0.8)",
+                                    borderRadius: "14px",
+                                    padding: "16px 20px",
+                                    boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
+                                    fontSize: "13px",
+                                    fontWeight: 500,
+                                  }}
+                                  formatter={(value: number) => [`${value.toFixed(1).replace(".", ",")}%`, ""]}
+                                  itemStyle={{ fontWeight: 600 }}
+                                />
+                                <Legend
+                                  wrapperStyle={{ paddingTop: 18 }}
+                                  align="center"
+                                  iconType="circle"
+                                  iconSize={10}
+                                  formatter={(value) => <span style={{ color: "hsl(var(--foreground) / 0.9)", fontWeight: 600, marginLeft: 6, letterSpacing: "0.02em" }}>{value}</span>}
+                                />
+                              </>
+                            );
+                          })()}
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  </div>
+
                   {/* Gráficos em Grid */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
                     {/* Gráfico 2: Diferença por Item - barras horizontais: nome à esquerda, valor à direita */}
-                    <div ref={chartDiferencaItemRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                    <div ref={chartDiferencaItemRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
                       <div className="mb-5 lg:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-warning/10 border border-warning/20 shadow-sm">
-                            <TrendingUp className="h-5 w-5 lg:h-6 lg:w-6 text-warning" />
+                          <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-warning/25 via-warning/15 to-warning/10 border border-warning/25 shadow-lg shadow-warning/10">
+                            <TrendingUp className="h-6 w-6 lg:h-7 lg:w-7 text-warning" />
                           </div>
                           <div className="min-w-0">
-                            <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Diferença por Item</h3>
-                            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Variação entre planejado e realizado</p>
+                            <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Diferença por Item</h3>
+                            <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Variação entre planejado e realizado (vermelho = faltando, verde = sobra)</p>
                           </div>
                         </div>
                         <ExportToPng targetRef={chartDiferencaItemRef} filenamePrefix="grafico-diferenca-item" expandScrollable={false} className="shrink-0" />
                       </div>
-                      <div className="w-full" style={{ height: Math.max(260, items.length * 44) }}>
+                      <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5 w-full" style={{ height: Math.min(640, Math.max(200, items.length * (linhaBarSize + 44))) }}>
                       <ResponsiveContainer width="100%" height="100%">
                         {(() => {
                           const diferencaPorItemData = [...items]
@@ -3396,23 +3658,44 @@ function Producao() {
                               layout="vertical"
                               data={diferencaPorItemData}
                               margin={{ top: 8, right: 72, left: 8, bottom: 8 }}
+                              barCategoryGap={32}
                             >
-                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} horizontal={false} />
-                              <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tick={false} />
-                              <YAxis type="category" dataKey="name" width={200} stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+                              <defs>
+                                <linearGradient id="producao-diferenca-danger" x1="0" y1="0" x2="1" y2="0">
+                                  <stop offset="0%" stopColor="hsl(0 62% 28%)" stopOpacity={0.95} />
+                                  <stop offset="50%" stopColor="hsl(var(--destructive))" stopOpacity={1} />
+                                  <stop offset="100%" stopColor="hsl(0 72% 58%)" stopOpacity={1} />
+                                </linearGradient>
+                                <linearGradient id="producao-diferenca-success" x1="0" y1="0" x2="1" y2="0">
+                                  <stop offset="0%" stopColor="hsl(160 84% 28%)" stopOpacity={0.95} />
+                                  <stop offset="50%" stopColor="hsl(var(--success))" stopOpacity={1} />
+                                  <stop offset="100%" stopColor="hsl(160 84% 52%)" stopOpacity={1} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
+                              <XAxis type="number" tickLine={false} axisLine={false} tick={false} />
+                              <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                               <Tooltip
+                                cursor={{ fill: "hsl(var(--warning) / 0.08)", radius: 6 }}
                                 contentStyle={{
-                                  backgroundColor: "hsl(var(--card))",
-                                  border: "1px solid hsl(var(--border))",
-                                  borderRadius: "8px",
-                                  padding: "8px",
+                                  backgroundColor: "hsl(var(--card) / 0.98)",
+                                  backdropFilter: "blur(12px)",
+                                  WebkitBackdropFilter: "blur(12px)",
+                                  border: "1px solid hsl(var(--border) / 0.8)",
+                                  borderRadius: "14px",
+                                  padding: "16px 20px",
+                                  boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
+                                  fontSize: "13px",
+                                  fontWeight: 500,
                                 }}
+                                labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 8 }}
                                 formatter={(value: number) => [formatNumber(value), "Diferença"]}
+                                itemStyle={{ fontWeight: 600 }}
                               />
-                              <Bar dataKey="diferenca" name="Diferença" radius={[0, 4, 4, 0]} maxBarSize={28}>
-                                <LabelList dataKey="diferenca" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 11 }} className="fill-foreground" />
+                              <Bar dataKey="diferenca" name="Diferença" radius={[0, 8, 8, 0]} barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                                <LabelList dataKey="diferenca" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                                 {diferencaPorItemData.map((entry, i) => (
-                                  <Cell key={i} fill={entry.isFaltando ? "hsl(var(--destructive))" : "hsl(var(--success))"} />
+                                  <Cell key={i} fill={entry.isFaltando ? "url(#producao-diferenca-danger)" : "url(#producao-diferenca-success)"} />
                                 ))}
                               </Bar>
                             </BarChart>
@@ -3446,7 +3729,7 @@ function Producao() {
                           </div>
                         );
                       }
-                      const chartH = Math.min(320, Math.max(200, productionDataLinha.length * 28));
+                      const chartH = Math.min(560, Math.max(200, productionDataLinha.length * (linhaBarSize * 2 + 28)));
                       const TooltipProducaoLinha = ({ active, payload, label }: any) => {
                         if (!active || !payload?.length || !label) return null;
                         const row = payload[0]?.payload;
@@ -3454,50 +3737,61 @@ function Producao() {
                         const meta = row?.meta ?? 0;
                         const pct = meta > 0 ? ((realizado / meta) * 100).toFixed(1).replace(".", ",") : "—";
                         return (
-                          <div className="rounded-lg border border-border bg-card px-3 py-2.5 shadow-md text-xs">
-                            <p className="font-semibold text-foreground mb-1.5 border-b border-border pb-1">{label}</p>
-                            <p><span className="text-primary font-medium">Realizado:</span> {formatNumber(realizado)}</p>
-                            <p><span className="text-muted-foreground font-medium">Meta:</span> {formatNumber(meta)}</p>
-                            <p className="mt-1 text-muted-foreground">% da meta: <span className="font-semibold text-foreground">{pct}%</span></p>
+                          <div className="rounded-xl border border-border/80 bg-card/98 backdrop-blur-xl px-4 py-3 shadow-[0_20px_40px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.05)] text-xs font-medium">
+                            <p className="font-bold text-foreground mb-2 border-b border-border/60 pb-2 text-sm">{label}</p>
+                            <p className="tabular-nums"><span className="text-primary font-semibold">Realizado:</span> {formatNumber(realizado)}</p>
+                            <p className="tabular-nums"><span className="text-muted-foreground font-medium">Meta:</span> {formatNumber(meta)}</p>
+                            <p className="mt-1.5 text-muted-foreground">% da meta: <span className="font-bold text-foreground">{pct}%</span></p>
                           </div>
                         );
                       };
                       return (
-                        <div ref={chartProducaoLinhaRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
+                        <div ref={chartProducaoLinhaRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
                           <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                             <div className="flex items-center gap-3 min-w-0">
-                              <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 text-primary shadow-sm">
-                                <Factory className="h-5 w-5 lg:h-6 lg:w-6" />
+                              <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10 text-primary">
+                                <Factory className="h-6 w-6 lg:h-7 lg:w-7" />
                               </div>
                               <div className="min-w-0">
-                                <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Produção por Linha</h3>
-                                <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Compare realizado (azul) com meta (cinza). Ordenado do maior ao menor realizado.</p>
+                                <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Produção por Linha</h3>
+                                <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Compare realizado (azul) com meta (cinza). Ordenado do maior ao menor realizado.</p>
                               </div>
                             </div>
                             <ExportToPng targetRef={chartProducaoLinhaRef} filenamePrefix="grafico-producao-linha" expandScrollable={false} className="shrink-0 w-full sm:w-auto min-h-[44px] sm:min-h-0" />
                           </div>
-                          <div className="flex flex-wrap gap-3 mb-3">
+                          <div className="flex flex-wrap gap-4 mb-4">
                             <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
-                              <span className="w-3 h-3 rounded-sm bg-primary shadow-sm" aria-hidden />
-                              <span className="text-muted-foreground">Realizado (produzido)</span>
+                              <span className="w-3.5 h-3.5 rounded-md bg-primary shadow-sm ring-2 ring-primary/20" aria-hidden />
+                              <span className="text-muted-foreground font-medium">Realizado (produzido)</span>
                             </span>
                             <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
-                              <span className="w-3 h-3 rounded-sm bg-muted-foreground/50" aria-hidden />
-                              <span className="text-muted-foreground">Meta (planejado)</span>
+                              <span className="w-3.5 h-3.5 rounded-md bg-muted-foreground/50 shadow-sm ring-2 ring-muted-foreground/20" aria-hidden />
+                              <span className="text-muted-foreground font-medium">Meta (planejado)</span>
                             </span>
                           </div>
-                          <div className="rounded-xl bg-muted/20 lg:bg-muted/30 p-4 lg:p-5 border border-border/40">
+                          <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5">
                             <ResponsiveContainer width="100%" height={chartH}>
-                              <BarChart layout="vertical" data={productionDataLinha} margin={{ top: 8, right: 56, left: 4, bottom: 8 }} barCategoryGap="40%">
-                                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" opacity={0.4} horizontal={false} />
-                                <XAxis type="number" tickLine={false} axisLine={false} tick={false} />
-                                <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "hsl(var(--foreground))" }} />
-                                <Tooltip content={<TooltipProducaoLinha />} />
-                                <Bar dataKey="valor" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} name="Realizado" maxBarSize={24}>
+                              <BarChart layout="vertical" data={productionDataLinha} margin={{ top: 8, right: 56, left: 4, bottom: 8 }} barCategoryGap={24} barGap={14}>
+                                <defs>
+                                  <linearGradient id="producao-linha-valor" x1="0" y1="0" x2="1" y2="0">
+                                    <stop offset="0%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
+                                    <stop offset="50%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                                    <stop offset="100%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
+                                  </linearGradient>
+                                  <linearGradient id="producao-linha-meta" x1="0" y1="0" x2="1" y2="0">
+                                    <stop offset="0%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.35} />
+                                    <stop offset="100%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.55} />
+                                  </linearGradient>
+                                </defs>
+                                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
+                                <XAxis type="number" tickLine={false} axisLine={false} tick={false} label={false} />
+                                <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                                <Tooltip content={<TooltipProducaoLinha />} cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }} />
+                                <Bar dataKey="valor" fill="url(#producao-linha-valor)" radius={[0, 8, 8, 0]} name="Realizado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
                                   <LabelList dataKey="valor" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                                 </Bar>
-                                <Bar dataKey="meta" fill="hsl(var(--muted-foreground))" fillOpacity={0.5} radius={[0, 6, 6, 0]} name="Meta" maxBarSize={24}>
-                                  <LabelList dataKey="meta" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                <Bar dataKey="meta" fill="url(#producao-linha-meta)" radius={[0, 8, 8, 0]} name="Meta" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                                  <LabelList dataKey="meta" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 500, fill: "hsl(var(--muted-foreground))" }} />
                                 </Bar>
                               </BarChart>
                             </ResponsiveContainer>
@@ -3505,73 +3799,6 @@ function Producao() {
                         </div>
                       );
                     })()}
-                  </div>
-
-                  {/* Status de Produção — abaixo do grid (largura total) */}
-                  <div ref={chartStatusProducaoRef} className="chart-card rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.08)] lg:shadow-[0_8px_32px_rgba(0,0,0,0.1)]">
-                    <div className="mb-4 lg:mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex h-11 w-11 lg:h-12 lg:w-12 shrink-0 items-center justify-center rounded-xl bg-success/10 border border-success/20 shadow-sm">
-                          <Factory className="h-5 w-5 lg:h-6 lg:w-6 text-success" />
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className="text-base sm:text-lg lg:text-xl font-bold text-card-foreground">Status de Produção</h3>
-                          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">Mesmo percentual do quadro "Percentual Meta" (total realizado ÷ total planejado)</p>
-                        </div>
-                      </div>
-                      <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="grafico-status-producao" expandScrollable={false} className="shrink-0" />
-                    </div>
-                    <div className="h-[240px] sm:h-[260px] lg:h-[300px] w-full flex items-center justify-center">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        {(() => {
-                          const { totalPlanejada, totalRealizada } = calcularTotaisProducao();
-                          const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
-                          const statusData =
-                            totalPlanejada === 0
-                              ? [{ name: "Sem meta definida", value: 100, color: "#6b7280" }]
-                              : perc >= 100
-                                ? [{ name: "Meta atingida (≥100%)", value: 100, color: "#10b981" }]
-                                : [
-                                    { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "#10b981" },
-                                    { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "#ef4444" },
-                                  ];
-                          return (
-                            <>
-                              <Pie
-                                data={statusData}
-                                cx="50%"
-                                cy="50%"
-                                labelLine={false}
-                                outerRadius={72}
-                                fill="#8884d8"
-                                dataKey="value"
-                                stroke="hsl(var(--card))"
-                                strokeWidth={2}
-                                className="[&_.recharts-pie-sector]:outline-none"
-                              >
-                                {statusData.map((entry, index) => (
-                                  <Cell key={`cell-${index}`} fill={entry.color} />
-                                ))}
-                              </Pie>
-                              <Tooltip
-                                contentStyle={{
-                                  backgroundColor: "hsl(var(--card))",
-                                  border: "1px solid hsl(var(--border))",
-                                  borderRadius: "12px",
-                                  padding: "12px 16px",
-                                  boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                                  fontSize: "13px",
-                                }}
-                                formatter={(value: number) => [`${value.toFixed(1)}%`, ""]}
-                              />
-                              <Legend wrapperStyle={{ paddingTop: 8 }} />
-                            </>
-                          );
-                        })()}
-                      </PieChart>
-                    </ResponsiveContainer>
-                    </div>
                   </div>
 
                 </div>
@@ -3582,42 +3809,50 @@ function Producao() {
       );
     }
 
-    // Conteúdo do histórico
+    // Conteúdo do histórico (key evita reconciliação com a view cadastro = sem animações estranhas na troca de aba)
     if (currentView === "historico") {
       return (
-        <div className="space-y-6 min-w-0 overflow-x-hidden">
-          {/* Botão de voltar - só seta */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setCurrentView("menu")}
-            className="mt-6 mb-2 size-11 min-h-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md transition-all"
-            aria-label="Voltar ao menu"
-          >
-            <ArrowLeft className="size-5 text-foreground" strokeWidth={2.5} />
-          </Button>
+        <div key="historico" className="space-y-6 min-w-0 overflow-x-hidden">
+          {/* Voltar — mesma estrutura que na view Cadastro para altura consistente */}
+          <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setCurrentView("menu")}
+              className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
+              aria-label="Voltar ao menu"
+              title="Voltar ao menu"
+            >
+              <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
+            </Button>
+          </div>
 
-          {/* Abas internas: Acompanhamento diário / Histórico */}
-          <div className="flex gap-2 items-center mb-4">
+          {/* Abas internas: mesma altura fixa que na view Cadastro */}
+          <div className="inline-flex h-12 min-h-12 items-stretch rounded-xl border border-border/60 bg-muted/40 p-1 gap-0.5 mb-4 flex-shrink-0" role="tablist" aria-label="Navegação da análise de produção">
             <Button
               variant="ghost"
               size="sm"
-              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium"
+              role="tab"
+              aria-selected={false}
+              className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 whitespace-nowrap"
               onClick={() => setCurrentView("cadastro")}
             >
               Acompanhamento diário
             </Button>
             <Button
-              variant="secondary"
+              variant="ghost"
               size="sm"
-              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium"
+              role="tab"
+              aria-selected={true}
+              className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-semibold bg-primary/10 text-primary border border-primary/25 shadow-sm hover:bg-primary/15 whitespace-nowrap"
             >
               Histórico de análise
             </Button>
           </div>
 
-          {/* Título e descrição — acima do card (layout reorganizado para mobile) */}
-          <div className="relative mb-4 sm:mb-5 rounded-2xl p-4 sm:py-5 sm:px-0 transition-all duration-500 group/button">
+          {/* Título e descrição — acima do card; fundo branco e linha azul (sem transition para altura estável) */}
+          <div className="relative mb-4 sm:mb-5 rounded-2xl p-4 sm:p-6 lg:p-8 group/button bg-background overflow-hidden border border-border/50 shadow-sm">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0 rounded-t-2xl" />
             <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/30 via-white/10 to-transparent opacity-0 group-hover/button:opacity-100 transition-opacity duration-500 pointer-events-none" />
             <div className="relative z-10 flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3 sm:gap-5 text-center sm:text-left">
               <div className="relative flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 via-primary/15 to-primary/10 shadow-[0_4px_16px_rgba(59,130,246,0.2)] group-hover/button:shadow-[0_8px_24px_rgba(59,130,246,0.4)] group-hover/button:scale-110 transition-all duration-500 border border-primary/30 backdrop-blur-sm">
@@ -3635,8 +3870,8 @@ function Producao() {
             </div>
           </div>
 
-          {/* Card: filtros + tabela */}
-          <div ref={historicoCardRef} className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] transition-all duration-500 overflow-hidden group/card">
+          {/* Card: filtros + tabela (sem transition para altura estável ao trocar de aba) */}
+          <div ref={historicoCardRef} className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden group/card">
             {/* Efeito de brilho sutil */}
             <div className="absolute inset-0 bg-gradient-to-br from-primary/2 via-primary/0.5 to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-500 pointer-events-none z-0 rounded-2xl" />
             {/* Borda superior com gradiente */}
@@ -3724,7 +3959,7 @@ function Producao() {
                       loadHistory();
                     }}
                     disabled={historyLoading}
-                    className="w-full min-[791px]:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full min-[791px]:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Filtrar histórico pelo intervalo e linha"
                   >
                     {historyLoading ? (
@@ -3732,7 +3967,7 @@ function Producao() {
                     ) : (
                       <Database className="h-4 w-4" />
                     )}
-                    <span className="hidden min-[791px]:inline">{historyLoading ? "Carregando..." : "Filtrar"}</span>
+                    <span>{historyLoading ? "Carregando..." : "Filtrar"}</span>
                   </button>
                   <ExportToPng
                     targetRef={historicoCardRef}
