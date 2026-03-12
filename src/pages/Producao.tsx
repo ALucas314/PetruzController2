@@ -1917,7 +1917,14 @@ function Producao() {
         onAfterCapture?: () => void | Promise<void>;
       }> = [
         { ref: chartStatusProducaoRef, filenamePrefix: "status-producao", expandScrollable: false },
-        { ref: chartPlanejadoRealizadoRef, filenamePrefix: "planejado-realizado", expandScrollable: true },
+        {
+          ref: chartPlanejadoRealizadoRef,
+          filenamePrefix: "planejado-realizado",
+          expandScrollable: false,
+          onBeforeCapture: () => {
+            chartPlanejadoRealizadoRef.current?.scrollIntoView({ behavior: "instant", block: "center" });
+          },
+        },
         {
           ref: reprocessoCardRef,
           filenamePrefix: "reprocesso",
@@ -3374,7 +3381,7 @@ function Producao() {
                         <p className="text-sm text-muted-foreground py-8 text-center rounded-xl bg-muted/20 border border-dashed border-border/60">Selecione os status nos registros acima para ver o gráfico.</p>
                       ) : (
                         <div className="flex flex-col sm:flex-row items-center sm:items-stretch sm:justify-center w-full gap-6 sm:gap-8">
-                          <div className="octp-pie-chart-wrapper w-full max-w-[300px] sm:max-w-[280px] min-w-[240px] h-[260px] sm:h-[280px] shrink-0 flex items-center justify-center mx-auto sm:mx-0 rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-4 sm:p-5 shadow-[0_4px_24px_rgba(0,0,0,0.06)] [filter:drop-shadow(0_4px_20px_rgba(0,0,0,0.06))]">
+                          <div className="octp-pie-chart-wrapper w-full max-w-[340px] sm:max-w-[320px] min-w-[260px] h-[280px] sm:h-[320px] shrink-0 flex items-center justify-center mx-auto sm:mx-0 rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 shadow-[0_4px_24px_rgba(0,0,0,0.06)] [filter:drop-shadow(0_4px_20px_rgba(0,0,0,0.06))]">
                             <ResponsiveContainer width="100%" height="100%">
                               <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                                 <defs>
@@ -3463,7 +3470,7 @@ function Producao() {
                           <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Comparação por item de produção</p>
                         </div>
                       </div>
-                      <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="grafico-planejado-realizado" expandScrollable className="shrink-0" />
+                      <ExportToPng targetRef={chartPlanejadoRealizadoRef} filenamePrefix="grafico-planejado-realizado" expandScrollable={false} className="shrink-0" />
                     </div>
                     <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
                       <div
@@ -3498,7 +3505,7 @@ function Producao() {
                               </linearGradient>
                             </defs>
                             <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
-                            <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                            <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
                             <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                             <Tooltip
                               cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }}
@@ -3673,7 +3680,7 @@ function Producao() {
                                 </linearGradient>
                               </defs>
                               <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
-                              <XAxis type="number" tickLine={false} axisLine={false} tick={false} />
+                              <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
                               <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                               <Tooltip
                                 cursor={{ fill: "hsl(var(--warning) / 0.08)", radius: 6 }}
@@ -3784,7 +3791,7 @@ function Producao() {
                                   </linearGradient>
                                 </defs>
                                 <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
-                                <XAxis type="number" tickLine={false} axisLine={false} tick={false} label={false} />
+                                <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} label={false} />
                                 <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                                 <Tooltip content={<TooltipProducaoLinha />} cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }} />
                                 <Bar dataKey="valor" fill="url(#producao-linha-valor)" radius={[0, 8, 8, 0]} name="Realizado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
