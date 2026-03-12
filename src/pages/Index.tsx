@@ -335,8 +335,7 @@ const Index = () => {
                       tickLine={false}
                       axisLine={false}
                       allowDecimals={false}
-                      tick={{ fontSize: 11, fontWeight: 600, fill: "hsl(var(--muted-foreground))" }}
-                      tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)}
+                      tick={false}
                       width={40}
                     />
                     <Tooltip
