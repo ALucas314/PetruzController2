@@ -3729,7 +3729,7 @@ function Producao() {
                         </div>
                         <ExportToPng targetRef={chartDiferencaItemRef} filenamePrefix="grafico-diferenca-item" expandScrollable={false} className="shrink-0" />
                       </div>
-                      <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5 w-full" style={{ height: Math.min(640, Math.max(200, items.length * (linhaBarSize + 44))) }}>
+                      <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5 w-full" style={{ height: Math.min(720, Math.max(280, items.length * (linhaBarSize * 2 + 56))) }}>
                       <ResponsiveContainer width="100%" height="100%">
                         {(() => {
                           const diferencaPorItemData = [...items]
@@ -3743,8 +3743,8 @@ function Producao() {
                             <BarChart
                               layout="vertical"
                               data={diferencaPorItemData}
-                              margin={{ top: 8, right: chartMarginRight, left: 8, bottom: 8 }}
-                              barCategoryGap={32}
+                              margin={{ top: 12, right: chartMarginRight, left: 12, bottom: 12 }}
+                              barCategoryGap={48}
                             >
                               <defs>
                                 <linearGradient id="producao-diferenca-danger" x1="0" y1="0" x2="1" y2="0">
