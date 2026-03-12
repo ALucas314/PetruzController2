@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, DollarSign, ShoppingCart, Minus, Target, Loader2, Download, Pencil, Database } from "lucide-react";
+import { FileText, ClipboardList, CheckCircle2, ArrowRightLeft, Percent, Loader2, Download, Pencil, Database } from "lucide-react";
 import { AppLayout } from "@/components/AppLayout";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { Button } from "@/components/ui/button";
@@ -319,22 +319,22 @@ export default function Relatorios() {
             <KpiCard
               title="Total Planejado"
               value={stats ? formatValue(stats.totalPlanejado) : "0"}
-              icon={DollarSign}
+              icon={ClipboardList}
             />
             <KpiCard
               title="Total Realizado"
               value={stats ? formatValue(stats.totalRealizado) : "0"}
-              icon={ShoppingCart}
+              icon={CheckCircle2}
             />
             <KpiCard
               title="Diferença"
               value={stats ? formatValue(stats.diferenca) : "0"}
-              icon={Minus}
+              icon={ArrowRightLeft}
             />
             <KpiCard
               title="Percentual Meta"
               value={stats ? `${parseFloat(String(stats.percentualMeta).replace(",", ".")).toFixed(2).replace(".", ",")}%` : "0,00%"}
-              icon={Target}
+              icon={Percent}
             />
           </div>
         )}

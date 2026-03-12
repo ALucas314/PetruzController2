@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { DollarSign, ShoppingCart, Factory, Target, Minus, Loader2 } from "lucide-react";
+import { ClipboardList, CheckCircle2, ArrowRightLeft, Factory, Percent, Target, Loader2 } from "lucide-react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
 import { AppLayout } from "@/components/AppLayout";
@@ -263,22 +263,22 @@ const Index = () => {
             <KpiCard
               title="Total Planejado"
               value={stats ? formatValue(stats.totalPlanejado) : "0"}
-              icon={DollarSign}
+              icon={ClipboardList}
             />
             <KpiCard
               title="Total Realizado"
               value={stats ? formatValue(stats.totalRealizado) : "0"}
-              icon={ShoppingCart}
+              icon={CheckCircle2}
             />
             <KpiCard
               title="Diferença"
               value={stats ? formatValue(stats.diferenca) : "0"}
-              icon={Minus}
+              icon={ArrowRightLeft}
             />
             <KpiCard
               title="Percentual Meta"
               value={stats ? `${parseFloat(String(stats.percentualMeta).replace(",", ".")).toFixed(2).replace(".", ",")}%` : "0,00%"}
-              icon={Target}
+              icon={Percent}
             />
           </div>
 
