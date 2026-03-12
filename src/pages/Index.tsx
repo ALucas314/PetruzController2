@@ -515,7 +515,7 @@ const Index = () => {
                           </linearGradient>
                         </defs>
                         <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
-                        <XAxis type="number" tickLine={false} axisLine={false} tick={false} label={false} />
+                        <XAxis type="number" tickLine={false} axisLine={false} tick={false} />
                         <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
                         <Tooltip content={<TooltipProducaoLinha />} cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }} />
                         <Bar dataKey="valor" fill="url(#dashboard-linha-primary)" radius={[0, 8, 8, 0]} name="Realizado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">

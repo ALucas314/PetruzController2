@@ -10,7 +10,6 @@ import {
   ChevronDown,
   CalendarCheck,
   FileSpreadsheet,
-  BookOpen,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -49,7 +48,6 @@ const menuItems: MenuItem[] = [
     ]
   },
   { title: "Importar Excel", url: "/importar-excel", icon: FileSpreadsheet },
-  { title: "Guia do Desenvolvedor", url: "/guia-desenvolvedor", icon: BookOpen },
 ];
 
 // ============================================================================
