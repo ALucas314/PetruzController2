@@ -267,6 +267,8 @@ function Producao() {
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
   const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
   const historicoProducaoLinhaRef = useRef<HTMLDivElement>(null);
+  /** Ref para o header sempre chamar a versão mais recente de saveToDatabase (com todos os campos atualizados) */
+  const saveToDatabaseRef = useRef<() => void | Promise<void>>(() => {});
   const [chartBarMargin, setChartBarMargin] = useState({ top: 28, right: 24, left: 24, bottom: 8 });
   const [linhaBarSize, setLinhaBarSize] = useState(20);
   const [pieOuterRadius, setPieOuterRadius] = useState(72);
@@ -418,6 +420,7 @@ function Producao() {
       return numeroRegistro === num;
     });
   }, [documentsForSelectedDate, gridFilterNumeroDocApplied, allRecords]);
+
   // OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status)
   const [octpInicio, setOctpInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
@@ -427,6 +430,13 @@ function Producao() {
   const [filiaisLoadError, setFiliaisLoadError] = useState<string | null>(null);
   const [itemCatalogLoadError, setItemCatalogLoadError] = useState<string | null>(null);
   const [filialSelecionada, setFilialSelecionada] = useState<string>("");
+
+  // Resolve filial por valor do Select (código ou id quando código vem vazio do banco)
+  const filialSelecionadaObj = useMemo(() => {
+    if (!filialSelecionada) return null;
+    return filiais.find((f) => (f.codigo && String(f.codigo).trim() === filialSelecionada) || `id:${f.id}` === filialSelecionada) ?? null;
+  }, [filiais, filialSelecionada]);
+
   // Filtros do histórico: intervalo de datas, linha e filial (padrão = data de hoje, permitindo seleção)
   const [historyDataInicio, setHistoryDataInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyDataFim, setHistoryDataFim] = useState<string>(() => new Date().toISOString().split("T")[0]);
@@ -902,7 +912,7 @@ function Producao() {
   // Carregar OCTP por data (início) + documento (dataCabecalhoSelecionada + filial)
   const loadOCTP = useCallback(async () => {
     const dataDocumento = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
-    const filialNome = filiais.find((f) => f.codigo === filialSelecionada)?.nome ?? null;
+    const filialNome = filialSelecionadaObj?.nome ?? null;
 
     setOctpLoading(true);
     try {
@@ -971,7 +981,7 @@ function Producao() {
 
   const addOCTPItem = async () => {
     const dataDocumento = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
-    const filialNome = filiais.find((f) => f.codigo === filialSelecionada)?.nome ?? null;
+    const filialNome = filialSelecionadaObj?.nome ?? null;
 
     const newNumero = octpItems.length > 0 ? Math.max(...octpItems.map((o) => o.numero)) + 1 : 1;
     try {
@@ -1014,7 +1024,7 @@ function Producao() {
     setOctpItems(octpItems.map((o) => (o.id === id ? updated : o)));
     const payload: Record<string, unknown> = {
       dataDia: dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
-      filialNome: filiais.find((f) => f.codigo === filialSelecionada)?.nome ?? null,
+      filialNome: filialSelecionadaObj?.nome ?? null,
     };
     if (field === "numero") payload.numero = value as number;
     else if (field === "problema") payload.problema = value as string;
@@ -1254,17 +1264,9 @@ function Producao() {
     setSaving(true);
     setSaveStatus(null);
 
-    // Validar se filial foi selecionada
-    if (!filialSelecionada) {
-      setSaveStatus({ success: false, message: "Por favor, selecione uma filial antes de salvar" });
-      setSaving(false);
-      return;
-    }
-
-    // Buscar o nome completo da filial (ex: "BELA IACA POLPAS DE FRUTAS INDUSTRIA E COMERCIO LTDA" ou "PETRUZ FRUITY INDUSTRIA, COMERCIO E DISTRIBUIDORA LTDA - PA")
-    const filialSelecionadaObj = filiais.find(f => f.codigo === filialSelecionada);
+    // Validar se filial foi selecionada (resolvida por código ou id quando código vem vazio)
     if (!filialSelecionadaObj || !filialSelecionadaObj.nome) {
-      setSaveStatus({ success: false, message: "Filial selecionada não encontrada" });
+      setSaveStatus({ success: false, message: "Por favor, selecione uma filial antes de salvar" });
       setSaving(false);
       return;
     }
@@ -1394,6 +1396,7 @@ function Producao() {
       setSaving(false);
     }
   };
+  saveToDatabaseRef.current = saveToDatabase;
 
   // Função para carregar dados do Supabase (docId: null = documento legado, string = documento com doc_id)
   const loadFromDatabase = async (data?: string, filialNomeOverride?: string, docId?: string | null) => {
@@ -1402,7 +1405,7 @@ function Producao() {
 
     try {
       const dataToLoad = data || dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
-      const filialNomeToUse = filialNomeOverride ?? (filialSelecionada ? filiais.find(f => f.codigo === filialSelecionada)?.nome : undefined);
+      const filialNomeToUse = filialNomeOverride ?? filialSelecionadaObj?.nome;
       const result = await loadProducao({ data: dataToLoad, filialNome: filialNomeToUse, docId });
 
       if (result.data && result.data.length > 0) {
@@ -1450,10 +1453,9 @@ function Producao() {
 
         // Carregar a filial do primeiro registro (todos devem ter a mesma filial)
         if (result.data.length > 0 && result.data[0].filial_nome) {
-          // Encontrar o código da filial pelo nome
           const filialEncontrada = filiais.find(f => f.nome === result.data[0].filial_nome);
           if (filialEncontrada) {
-            setFilialSelecionada(filialEncontrada.codigo);
+            setFilialSelecionada(filialEncontrada.codigo?.trim() ? filialEncontrada.codigo.trim() : `id:${filialEncontrada.id}`);
           }
         }
 
@@ -1612,8 +1614,8 @@ function Producao() {
       if (!dataInicio && !dataFim && opts?.data) params.set("data", opts.data);
       // Filial: só envia filtro quando o usuário escolheu uma filial específica no histórico; "todas" = não filtra
       if (filialCodigo && filialCodigo !== "todas") {
-        const filialNome = filiais.find(f => f.codigo === filialCodigo)?.nome;
-        if (filialNome) params.set("filialNome", filialNome);
+        const filial = filiais.find(f => (f.codigo && String(f.codigo).trim() === filialCodigo) || `id:${f.id}` === filialCodigo);
+        if (filial?.nome) params.set("filialNome", filial.nome);
       }
       const result = await getProducaoHistory({
         limit: params.get("limit") ? Number(params.get("limit")) : 500,
@@ -1762,7 +1764,7 @@ function Producao() {
     }
 
     const currentDate = dataCabecalhoSelecionada;
-    const currentFilialNome = filiais.find(f => f.codigo === filialSelecionada)?.nome ?? '';
+    const currentFilialNome = filialSelecionadaObj?.nome ?? '';
     const index = allRecords.findIndex(r => {
       const recordDate = r.data_dia || r.data_cabecalho || r.data;
       const dateStr = typeof recordDate === 'string'
@@ -1795,8 +1797,8 @@ function Producao() {
     setCurrentDocId(record.doc_id ?? null);
     const recordFilialNome = (record.filial_nome || '').trim();
     if (recordFilialNome) {
-      const codigo = filiais.find(f => (f.nome || '').trim() === recordFilialNome)?.codigo;
-      if (codigo) setFilialSelecionada(codigo);
+      const filialEncontrada = filiais.find(f => (f.nome || '').trim() === recordFilialNome);
+      if (filialEncontrada) setFilialSelecionada(filialEncontrada.codigo?.trim() ? filialEncontrada.codigo.trim() : `id:${filialEncontrada.id}`);
     }
 
     await loadFromDatabase(dateStr, recordFilialNome || undefined, record.doc_id ?? undefined);
@@ -1913,7 +1915,7 @@ function Producao() {
     try {
       const data = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
       localStorage.setItem("dashboard_producao_data_dia", data);
-      const filialNome = filialSelecionada ? filiais.find((f) => f.codigo === filialSelecionada)?.nome : "";
+      const filialNome = filialSelecionadaObj?.nome ?? "";
       if (filialNome) localStorage.setItem("dashboard_producao_filial_nome", filialNome);
     } catch {}
   }, [dataCabecalhoSelecionada, filialSelecionada, filiais]);
@@ -1925,7 +1927,7 @@ function Producao() {
     openedFromStateRef.current = true;
     setDataCabecalhoSelecionada(state.loadData);
     const filial = filiais.find((f) => (f.nome || "").trim() === (state.loadFilialNome || "").trim());
-    if (filial?.codigo) setFilialSelecionada(filial.codigo);
+    if (filial) setFilialSelecionada(filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`);
     setCurrentView("cadastro");
     loadFromDatabase(state.loadData, state.loadFilialNome);
   }, [location.state, filiais]);
@@ -2065,12 +2067,12 @@ function Producao() {
       canSave: items.length > 0,
       onSave: () => {
         if (saving || items.length === 0) return;
-        void saveToDatabase();
+        void saveToDatabaseRef.current?.();
       },
     });
     return () => setDocumentNav(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentView, currentRecordIndex, currentRecordId, allRecords.length, dataCabecalhoSelecionada, saving, items.length]);
+  }, [currentView, currentRecordIndex, currentRecordId, allRecords.length, dataCabecalhoSelecionada, saving, items.length, filialSelecionada]);
 
   // Exporta os 4 blocos (Status de Produção, Planejado vs Realizado, Reprocesso, Histórico) como PNGs separados,
   // com dados filtrados pela filial e data do documento aberto. No mobile oferece compartilhar (ex.: WhatsApp).
@@ -2508,23 +2510,6 @@ function Producao() {
                         )}
                         <span>{saving ? "Salvando..." : "Salvar"}</span>
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          exportAllProducaoAsPNG();
-                        }}
-                        disabled={exportingAllPng}
-                        className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Baixa 4 imagens (Status, Planejado vs Realizado, Reprocesso, Histórico). No celular abre opção de enviar no WhatsApp."
-                      >
-                        {exportingAllPng ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4 shrink-0" />
-                        )}
-                        <span>{exportingAllPng ? "Exportando…" : "Exportar PNG"}</span>
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -2737,7 +2722,7 @@ function Producao() {
                         </SelectItem>
                       ) : (
                         filiais.map((filial) => (
-                          <SelectItem key={filial.id} value={filial.codigo ?? String(filial.id)}>
+                          <SelectItem key={filial.id} value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}>
                             {filial.nome}
                           </SelectItem>
                         ))
@@ -4364,7 +4349,7 @@ function Producao() {
                         {filiais.map((filial) => (
                           <SelectItem
                             key={filial.id}
-                            value={filial.codigo ?? String(filial.id)}
+                            value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}
                           >
                             {filial.nome}
                           </SelectItem>
@@ -4459,7 +4444,7 @@ function Producao() {
                             const dataDia = (record.data_dia || record.data_cabecalho) as string;
                             if (dataDia) setDataCabecalhoSelecionada(dataDia);
                             const filial = recordFilialNome ? filiais.find((f) => (f.nome || "").trim() === recordFilialNome) : null;
-                            if (filial?.codigo) setFilialSelecionada(filial.codigo);
+                            if (filial) setFilialSelecionada(filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`);
                             setCurrentView("cadastro");
                             loadFromDatabase(dataDia, recordFilialNome || undefined);
                           };

@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, CircleUser, LogOut, Menu, Save, Loader2 } from "lucide-react";
+import { BarChart3, ChevronLeft, ChevronRight, CircleUser, Loader2, LogOut, Menu, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -143,33 +143,25 @@ export function SiteHeader() {
 
         <div className="flex-1 min-w-0" />
 
-        {/* Botões de ação do documento — cabe em uma linha */}
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {documentNav?.onSave && (
-            <TooltipProvider delayDuration={300}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center justify-center min-h-[40px] min-w-[40px] sm:min-w-0 sm:h-8 sm:px-3 sm:py-2 h-9 w-9 sm:w-auto rounded-lg bg-gradient-to-r from-success/10 to-success/5 border border-success/30 shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 text-sm font-semibold text-success z-20 relative disabled:opacity-50 disabled:cursor-not-allowed p-0 sm:p-2"
-                    onClick={() => documentNav.onSave?.()}
-                    disabled={documentNav.saving || documentNav.canSave === false}
-                    aria-label="Salvar documento"
-                    title="Salvar no banco de dados"
-                  >
-                    {documentNav.saving ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Salvar no banco de dados</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-        </div>
+        {/* Botão Salvar — visível apenas quando a tela for menor que 1024px */}
+        {documentNav?.onSave && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="lg:hidden h-9 min-h-[40px] sm:min-h-0 sm:h-8 gap-1.5 px-3 rounded-lg border border-success/30 bg-success/5 text-success hover:bg-success/10 hover:border-success/50 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 font-medium"
+            title="Salvar no banco de dados"
+            disabled={documentNav.saving || documentNav.canSave === false}
+            onClick={() => documentNav.onSave?.()}
+          >
+            {documentNav.saving ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-success" />
+            ) : (
+              <Save className="h-4 w-4 shrink-0" />
+            )}
+            <span className="text-sm">Salvar</span>
+          </Button>
+        )}
 
         {/* Perfil — uma linha no mobile */}
         {user ? (
