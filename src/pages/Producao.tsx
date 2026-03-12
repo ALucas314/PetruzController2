@@ -264,6 +264,7 @@ function Producao() {
   const chartDiferencaItemRef = useRef<HTMLDivElement>(null);
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
   const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
+  const historicoProducaoLinhaRef = useRef<HTMLDivElement>(null);
   const [chartBarMargin, setChartBarMargin] = useState({ top: 28, right: 24, left: 24, bottom: 8 });
   const [linhaBarSize, setLinhaBarSize] = useState(20);
   const [pieOuterRadius, setPieOuterRadius] = useState(72);
@@ -3959,6 +3960,114 @@ function Producao() {
               </div>
             </div>
           </div>
+
+          {/* Gráfico Produção por Linha (histórico) — realizado vs meta agregado pelo filtro */}
+          {(() => {
+            const porLinhaHist = (historyData || []).reduce<Record<string, { valor: number; meta: number }>>((acc, record) => {
+              const linha = (record.linha != null ? String(record.linha).trim() : "") || "Sem linha";
+              if (!acc[linha]) acc[linha] = { valor: 0, meta: 0 };
+              const qtdR = parseFloat(String(record.qtd_realizada ?? "0").toString().replace(",", ".")) || 0;
+              const qtdP = parseFloat(String(record.qtd_planejada ?? "0").toString().replace(",", ".")) || 0;
+              acc[linha].valor += qtdR;
+              acc[linha].meta += qtdP;
+              return acc;
+            }, {});
+            const productionDataLinhaHist = Object.entries(porLinhaHist)
+              .map(([key, v]) => ({
+                name: key === "Sem linha" ? key : (productionLines.find(l => l.code === key || (l.name || "").trim() === key)?.name || key),
+                valor: v.valor,
+                meta: v.meta,
+              }))
+              .filter(d => d.valor > 0 || d.meta > 0)
+              .sort((a, b) => b.valor - a.valor);
+            if (productionDataLinhaHist.length === 0) {
+              return (
+                <div className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] overflow-hidden">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 text-primary">
+                      <Factory className="h-6 w-6 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="text-base sm:text-lg font-bold tracking-tight text-foreground">Produção por Linha</h3>
+                      <p className="text-sm text-muted-foreground">Filtre o histórico para ver realizado vs meta por linha.</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 rounded-xl border border-border/60 bg-card/50 p-5 flex items-center justify-center min-h-[160px] text-muted-foreground text-sm">
+                    Nenhum dado por linha no intervalo selecionado.
+                  </div>
+                </div>
+              );
+            }
+            const chartHHist = Math.min(560, Math.max(200, productionDataLinhaHist.length * (linhaBarSize * 2 + 28)));
+            const TooltipProducaoLinhaHist = ({ active, payload, label }: any) => {
+              if (!active || !payload?.length || !label) return null;
+              const row = payload[0]?.payload;
+              const realizado = row?.valor ?? 0;
+              const meta = row?.meta ?? 0;
+              const pct = meta > 0 ? ((realizado / meta) * 100).toFixed(1).replace(".", ",") : "—";
+              return (
+                <div className="rounded-xl border border-border/80 bg-card/98 backdrop-blur-xl px-4 py-3 shadow-[0_20px_40px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.05)] text-xs font-medium">
+                  <p className="font-bold text-foreground mb-2 border-b border-border/60 pb-2 text-sm">{label}</p>
+                  <p className="tabular-nums"><span className="text-primary font-semibold">Realizado:</span> {formatNumber(realizado)}</p>
+                  <p className="tabular-nums"><span className="text-muted-foreground font-medium">Meta:</span> {formatNumber(meta)}</p>
+                  <p className="mt-1.5 text-muted-foreground">% da meta: <span className="font-bold text-foreground">{pct}%</span></p>
+                </div>
+              );
+            };
+            return (
+              <div ref={historicoProducaoLinhaRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
+                <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10 text-primary">
+                      <Factory className="h-6 w-6 lg:h-7 lg:w-7" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-foreground">Produção por Linha</h3>
+                      <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Compare realizado (azul) com meta (cinza). Ordenado do maior ao menor realizado.</p>
+                    </div>
+                  </div>
+                  <ExportToPng targetRef={historicoProducaoLinhaRef} filenamePrefix="historico-producao-por-linha" expandScrollable={false} className="shrink-0 w-full sm:w-auto min-h-[44px] sm:min-h-0" label="Exportar PNG" />
+                </div>
+                <div className="flex flex-wrap gap-4 mb-4">
+                  <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
+                    <span className="w-3.5 h-3.5 rounded-md bg-primary shadow-sm ring-2 ring-primary/20" aria-hidden />
+                    <span className="text-muted-foreground font-medium">Realizado (produzido)</span>
+                  </span>
+                  <span className="inline-flex items-center gap-2 text-xs sm:text-sm">
+                    <span className="w-3.5 h-3.5 rounded-md bg-muted-foreground/50 shadow-sm ring-2 ring-muted-foreground/20" aria-hidden />
+                    <span className="text-muted-foreground font-medium">Meta (planejado)</span>
+                  </span>
+                </div>
+                <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5">
+                  <ResponsiveContainer width="100%" height={chartHHist}>
+                    <BarChart layout="vertical" data={productionDataLinhaHist} margin={{ top: 8, right: 56, left: 4, bottom: 8 }} barCategoryGap={24} barGap={14}>
+                      <defs>
+                        <linearGradient id="historico-linha-valor" x1="0" y1="0" x2="1" y2="0">
+                          <stop offset="0%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
+                          <stop offset="50%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                          <stop offset="100%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
+                        </linearGradient>
+                        <linearGradient id="historico-linha-meta" x1="0" y1="0" x2="1" y2="0">
+                          <stop offset="0%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="hsl(var(--muted-foreground))" stopOpacity={0.55} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
+                      <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} label={false} />
+                      <YAxis type="category" dataKey="name" width={140} tickLine={false} axisLine={false} tick={{ fontSize: 13, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                      <Tooltip content={<TooltipProducaoLinhaHist />} cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }} />
+                      <Bar dataKey="valor" fill="url(#historico-linha-valor)" radius={[0, 8, 8, 0]} name="Realizado" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                        <LabelList dataKey="valor" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                      </Bar>
+                      <Bar dataKey="meta" fill="url(#historico-linha-meta)" radius={[0, 8, 8, 0]} name="Meta" barSize={linhaBarSize} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                        <LabelList dataKey="meta" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 500, fill: "hsl(var(--muted-foreground))" }} />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Card: filtros + tabela (sem transition para altura estável ao trocar de aba) */}
           <div ref={historicoCardRef} className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden group/card">
