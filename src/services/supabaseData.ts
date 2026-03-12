@@ -351,6 +351,9 @@ export async function saveProducao(payload: {
     return row;
   };
 
+  // Só atualizar/excluir linhas que JÁ são desta filial no banco (evita juntar documentos de BELA e PETRUZ)
+  const filialFilter = filialNome && String(filialNome).trim() !== "" ? String(filialNome).trim() : null;
+
   let updated = 0;
   let inserted = 0;
   const insertedRows: { id: number }[] = [];
@@ -358,7 +361,9 @@ export async function saveProducao(payload: {
     const id = existingIds[i];
     const row = buildRow(items[i], i);
     if (id != null && Number.isInteger(Number(id))) {
-      const { error: upErr } = await supabase.from("OCPD").update(row).eq("id", Number(id));
+      let updateQuery = supabase.from("OCPD").update(row).eq("id", Number(id));
+      if (filialFilter) updateQuery = updateQuery.eq("filial_nome", filialFilter);
+      const { error: upErr } = await updateQuery;
       if (upErr) throw upErr;
       updated++;
     } else {
@@ -370,7 +375,9 @@ export async function saveProducao(payload: {
   }
   const toDelete = existingIds.slice(items.length).filter((id) => id != null && Number.isInteger(Number(id)));
   for (const id of toDelete) {
-    const { error: delErr } = await supabase.from("OCPD").delete().eq("id", Number(id));
+    let deleteQuery = supabase.from("OCPD").delete().eq("id", Number(id));
+    if (filialFilter) deleteQuery = deleteQuery.eq("filial_nome", filialFilter);
+    const { error: delErr } = await deleteQuery;
     if (delErr) throw delErr;
   }
   if (items.length > 0 && inserted === 0 && updated === 0) {
@@ -379,6 +386,12 @@ export async function saveProducao(payload: {
     );
   }
   return { success: true, inserted, updated, total: items.length, data: insertedRows };
+}
+
+/** Remove um registro da tabela OCPD pelo id. Use ao excluir uma linha do card de produção que já foi salva no banco. */
+export async function deleteProducaoRecord(id: number) {
+  const { error } = await supabase.from("OCPD").delete().eq("id", Number(id));
+  if (error) throw error;
 }
 
 // --- Histórico produção ---

@@ -40,6 +40,7 @@ import {
   getItemByCode,
   loadProducao,
   saveProducao,
+  deleteProducaoRecord,
   getDraft,
   saveDraft,
   getProducaoHistory,
@@ -1063,17 +1064,36 @@ function Producao() {
     })).filter((d) => d.count > 0);
   }, [octpItems]);
 
-  // Remover linha
+  // Remover linha (só estado local)
   const removeItem = (id: number) => {
     if (items.length > 1) {
       const newItems = items.filter((item) => item.id !== id);
-      // Renumerar itens
       const renumberedItems = newItems.map((item, index) => ({
         ...item,
         numero: index + 1,
       }));
       setItems(renumberedItems);
     }
+  };
+
+  // Excluir linha: faz DELETE no banco pelo id da OCPD (ocpdId é preenchido ao carregar ou após salvar)
+  const handleExcluirLinha = async (item: ProductionItem) => {
+    if (items.length <= 1) return;
+    const idBanco = item.ocpdId ?? (typeof item.id === "number" && item.id > 100 ? item.id : null);
+    if (idBanco != null) {
+      try {
+        await deleteProducaoRecord(idBanco);
+      } catch (err) {
+        console.error("Erro ao excluir registro OCPD:", err);
+        toast({
+          title: "Erro ao excluir",
+          description: "Não foi possível excluir o registro no banco. Tente novamente.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    removeItem(item.id);
   };
 
 
@@ -1331,23 +1351,21 @@ function Producao() {
         setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]);
       }
 
-      if (wasUpdate) {
-        // Atualizar ocpdId nos itens que foram inseridos agora (backend retorna data com os novos ids)
-        if (result.data && Array.isArray(result.data) && result.data.length > 0) {
-          const newIds = result.data.map((r: { id: number }) => r.id);
-          setItems(prev => {
-            let idx = 0;
-            return prev.map(item => {
-              if (item.ocpdId != null) return item;
-              const assigned = newIds[idx];
-              if (assigned != null) {
-                idx++;
-                return { ...item, ocpdId: assigned, id: assigned };
-              }
-              return item;
-            });
+      // Sempre atualizar ocpdId nos itens inseridos (para o botão Excluir fazer DELETE no banco)
+      if (result.data && Array.isArray(result.data) && result.data.length > 0) {
+        const newIds = result.data.map((r: { id: number }) => r.id);
+        setItems(prev => {
+          let idx = 0;
+          return prev.map(item => {
+            if (item.ocpdId != null) return item;
+            const assigned = newIds[idx];
+            if (assigned != null) {
+              idx++;
+              return { ...item, ocpdId: assigned, id: assigned };
+            }
+            return item;
           });
-        }
+        });
       }
 
       setTimeout(() => {
@@ -2908,7 +2926,7 @@ function Producao() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => removeItem(item.id)}
+                                onClick={() => handleExcluirLinha(item)}
                                 className="h-8 w-8 sm:h-9 sm:w-9 text-destructive hover:text-destructive"
                                 disabled={items.length === 1}
                               >
