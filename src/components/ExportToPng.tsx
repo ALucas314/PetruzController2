@@ -16,6 +16,8 @@ export interface ExportToPngProps {
   label?: string;
   /** Se true, expande containers com overflow para capturar tabela/conteúdo inteiro */
   expandScrollable?: boolean;
+  /** Marca d'água exibida no canto inferior direito do PNG (ex.: "Bela", "Petruz") */
+  watermark?: string;
   /** Chamado antes da captura (ex.: substituir inputs por texto para aparecer completo no PNG) */
   onBeforeCapture?: () => void | Promise<void>;
   /** Chamado depois da captura (ex.: restaurar DOM) */
@@ -109,11 +111,31 @@ function restoreStyles(restores: RestoreStyle[]) {
   });
 }
 
+const PADDING = 40;
+
+/** Desenha marca d'água pequena no canto inferior direito do canvas. */
+function drawWatermark(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, text: string) {
+  if (!text?.trim()) return;
+  const label = String(text).trim();
+  ctx.save();
+  ctx.font = "500 26px system-ui, -apple-system, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.globalAlpha = 0.45;
+  ctx.fillStyle = "#374151";
+  const x = canvas.width / 2;
+  const y = PADDING + 12;
+  ctx.fillText(label, x, y);
+  ctx.restore();
+}
+
 export interface CaptureToPngBlobOptions {
   expandScrollable?: boolean;
   onBeforeCapture?: () => void | Promise<void>;
   onAfterCapture?: () => void | Promise<void>;
   filenamePrefix?: string;
+  /** Marca d'água no canto inferior direito (ex.: "Bela", "Petruz") */
+  watermark?: string;
 }
 
 /**
@@ -129,6 +151,7 @@ export async function captureElementToPngBlob(
     onBeforeCapture,
     onAfterCapture,
     filenamePrefix = "export",
+    watermark,
   } = options;
 
   let restores: RestoreStyle[] = [];
@@ -163,15 +186,15 @@ export async function captureElementToPngBlob(
     const { blob, fileName } = await new Promise<{ blob: Blob; fileName: string }>((resolve, reject) => {
       img.onload = () => {
         try {
-          const padding = 40;
           const canvas = document.createElement("canvas");
-          canvas.width = img.width + padding * 2;
-          canvas.height = img.height + padding * 2;
+          canvas.width = img.width + PADDING * 2;
+          canvas.height = img.height + PADDING * 2;
           const ctx = canvas.getContext("2d");
           if (ctx) {
             ctx.fillStyle = "#ffffff";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, padding, padding);
+            ctx.drawImage(img, PADDING, PADDING);
+            if (watermark) drawWatermark(ctx, canvas, watermark);
           }
           const safePrefix = (filenamePrefix || "export").replace(/[^a-zA-Z0-9_-]/g, "-");
           const date = new Date();
@@ -215,6 +238,7 @@ export function ExportToPng({
   className,
   label = "Exportar PNG",
   expandScrollable = true,
+  watermark,
   onBeforeCapture,
   onAfterCapture,
 }: ExportToPngProps) {
@@ -262,15 +286,15 @@ export function ExportToPng({
       await new Promise<void>((resolve, reject) => {
         img.onload = () => {
           try {
-            const padding = 40;
             const canvas = document.createElement("canvas");
-            canvas.width = img.width + padding * 2;
-            canvas.height = img.height + padding * 2;
+            canvas.width = img.width + PADDING * 2;
+            canvas.height = img.height + PADDING * 2;
             const ctx = canvas.getContext("2d");
             if (ctx) {
               ctx.fillStyle = "#ffffff";
               ctx.fillRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(img, padding, padding);
+              ctx.drawImage(img, PADDING, PADDING);
+              if (watermark) drawWatermark(ctx, canvas, watermark);
             }
             // Nome seguro: só letras, números, hífen e underscore (evita "Ol.png" ou nome truncado no Windows)
             const safePrefix = (filenamePrefix || "historico-analise-producao").replace(/[^a-zA-Z0-9_-]/g, "-");

@@ -447,7 +447,40 @@ function Producao() {
   const [historyDataInicio, setHistoryDataInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyDataFim, setHistoryDataFim] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyLinhaFilter, setHistoryLinhaFilter] = useState<string>("");
+  /** IDs das linhas do histórico destacadas em vermelho (botão "Marcar") — persistido por usuário no localStorage */
+  const [historicoLinhasVermelhas, setHistoricoLinhasVermelhas] = useState<Set<string>>(new Set());
   const [historyFilialFilter, setHistoryFilialFilter] = useState<string>("todas");
+
+  // Persistir linhas vermelhas do histórico por usuário (localStorage); só desmarque ao clicar em Desmarcar
+  const historicoVermelhoStorageKey = user?.id ? `erp_historico_linhas_vermelhas_${user.id}` : null;
+  const skipNextHistoricoVermelhoSaveRef = useRef(true); // evita sobrescrever ao carregar
+  useEffect(() => {
+    if (!historicoVermelhoStorageKey) return;
+    try {
+      const raw = localStorage.getItem(historicoVermelhoStorageKey);
+      if (raw) {
+        const arr = JSON.parse(raw) as unknown;
+        if (Array.isArray(arr) && arr.every((x) => typeof x === "string")) {
+          setHistoricoLinhasVermelhas(new Set(arr as string[]));
+        }
+      }
+      skipNextHistoricoVermelhoSaveRef.current = true;
+    } catch {
+      skipNextHistoricoVermelhoSaveRef.current = false;
+    }
+  }, [historicoVermelhoStorageKey]);
+  useEffect(() => {
+    if (!historicoVermelhoStorageKey) return;
+    if (skipNextHistoricoVermelhoSaveRef.current) {
+      skipNextHistoricoVermelhoSaveRef.current = false;
+      return;
+    }
+    try {
+      localStorage.setItem(historicoVermelhoStorageKey, JSON.stringify(Array.from(historicoLinhasVermelhas)));
+    } catch {
+      // ignora quota ou localStorage indisponível
+    }
+  }, [historicoVermelhoStorageKey, historicoLinhasVermelhas]);
   const [exportingAllPng, setExportingAllPng] = useState(false);
 
   const [items, setItems] = useState<ProductionItem[]>([
@@ -4439,6 +4472,7 @@ function Producao() {
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-[52px] sm:w-14 text-center px-1" />
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Data</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Hora</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">OP</TableHead>
@@ -4460,6 +4494,16 @@ function Producao() {
                           // Data do dia de produção (cadastrada)
                           const dataFormatada = formatDateShort(record.data_dia || record.data_cabecalho);
                           const recordFilialNome = record.filial_nome != null ? String(record.filial_nome).trim() : "";
+                          const historicoRowKey = record.recordKey ?? `hist_${record.id ?? index}_${record.doc_id ?? ""}`;
+                          const isLinhaVermelha = historicoLinhasVermelhas.has(historicoRowKey);
+                          const toggleLinhaVermelha = () => {
+                            setHistoricoLinhasVermelhas((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(historicoRowKey)) next.delete(historicoRowKey);
+                              else next.add(historicoRowKey);
+                              return next;
+                            });
+                          };
                           const openDocument = () => {
                             const dataDia = (record.data_dia || record.data_cabecalho) as string;
                             if (dataDia) setDataCabecalhoSelecionada(dataDia);
@@ -4490,7 +4534,23 @@ function Producao() {
                           const horaFinalStr = formatHoraFinal(record.hora_final);
 
                           return (
-                            <TableRow key={record.id || index}>
+                            <TableRow
+                              key={record.id || index}
+                              className={isLinhaVermelha ? "bg-red-100 dark:bg-red-950/50 border-l-4 border-l-red-500" : undefined}
+                            >
+                              <TableCell className="text-center px-1 align-middle">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="inline-flex h-8 w-8 sm:w-auto sm:min-w-[72px] items-center justify-center gap-1 rounded-md border border-input bg-background px-2 sm:px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
+                                  onClick={(e) => { e.stopPropagation(); toggleLinhaVermelha(); }}
+                                  title={isLinhaVermelha ? "Remover destaque da linha" : "Destacar linha em vermelho"}
+                                >
+                                  <span className={`rounded-full border-2 h-4 w-4 sm:h-3.5 sm:w-3.5 shrink-0 ${isLinhaVermelha ? "border-red-500 bg-red-500" : "border-muted-foreground/50 bg-transparent"}`} />
+                                  <span className="hidden sm:inline">{isLinhaVermelha ? "Desmarcar" : "Marcar"}</span>
+                                </Button>
+                              </TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{dataFormatada}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{horaFormatada}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-semibold">{record.op || "-"}</TableCell>
