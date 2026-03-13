@@ -81,11 +81,14 @@ interface ProductionLine {
   name: string;
 }
 
+export type GrupoReprocesso = "Reprocesso" | "Matéria Prima Açaí" | "Matéria Prima Fruto";
+
 interface ReprocessoItem {
   id: number;
   numero: number;
   tipo: "Cortado" | "Usado";
   linha: string;
+  grupo: GrupoReprocesso;
   codigo: string;
   descricao: string;
   quantidade: string;
@@ -369,16 +372,19 @@ function Producao() {
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   // Reprocessos
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
-  // Filtros do card de reprocesso (tipo e linha) — valores do formulário
+  // Filtros do card de reprocesso (tipo, linha e grupo) — valores do formulário
   const [reprocessoFiltroTipo, setReprocessoFiltroTipo] = useState<"" | "Cortado" | "Usado">("");
   const [reprocessoFiltroLinha, setReprocessoFiltroLinha] = useState<string>("");
+  const [reprocessoFiltroGrupo, setReprocessoFiltroGrupo] = useState<"" | GrupoReprocesso>("");
   // Valores aplicados ao clicar em Filtrar (usados para exibir a tabela)
   const [reprocessoAppliedTipo, setReprocessoAppliedTipo] = useState<"" | "Cortado" | "Usado">("");
   const [reprocessoAppliedLinha, setReprocessoAppliedLinha] = useState<string>("");
+  const [reprocessoAppliedGrupo, setReprocessoAppliedGrupo] = useState<"" | GrupoReprocesso>("");
   // Lista de reprocessos filtrada pelos valores aplicados (só atualiza ao clicar em Filtrar)
   const reprocessosFiltrados = useMemo(() => {
     return reprocessos.filter((r) => {
       if (reprocessoAppliedTipo && r.tipo !== reprocessoAppliedTipo) return false;
+      if (reprocessoAppliedGrupo && r.grupo !== reprocessoAppliedGrupo) return false;
       if (!reprocessoAppliedLinha) return true;
       const linhaVal = (r.linha ?? "").toString().trim();
       const filtroVal = reprocessoAppliedLinha.trim();
@@ -390,7 +396,7 @@ function Producao() {
       }
       return false;
     });
-  }, [reprocessos, reprocessoAppliedTipo, reprocessoAppliedLinha, productionLines]);
+  }, [reprocessos, reprocessoAppliedTipo, reprocessoAppliedLinha, reprocessoAppliedGrupo, productionLines]);
   // Normaliza data vinda do banco (string ISO ou Date) para YYYY-MM-DD (evita mistura BELA/Petruz por fuso)
   const normalizeDataDia = (dateValue: string | Date | null | undefined): string => {
     if (!dateValue) return "";
@@ -836,6 +842,7 @@ function Producao() {
       numero: newNumero,
       tipo: "Cortado",
       linha: "",
+      grupo: "Reprocesso",
       codigo: "",
       descricao: "",
       quantidade: "",
@@ -1474,6 +1481,11 @@ function Producao() {
 
         // Carregar reprocessos: preferir array da OCPR (múltiplos); senão usar campos do primeiro registro OCPD
         const loadedReprocessos: ReprocessoItem[] = [];
+        const grupoPadrao: GrupoReprocesso = "Reprocesso";
+        const parseGrupo = (v: unknown): GrupoReprocesso => {
+          if (v === "Matéria Prima Açaí" || v === "Matéria Prima Fruto") return v;
+          return "Reprocesso";
+        };
         if (result.reprocessos && Array.isArray(result.reprocessos) && result.reprocessos.length > 0) {
           result.reprocessos.forEach((r: any, idx: number) => {
             loadedReprocessos.push({
@@ -1481,6 +1493,7 @@ function Producao() {
               numero: r.numero ?? idx + 1,
               tipo: (r.tipo === "Usado" ? "Usado" : "Cortado") as "Cortado" | "Usado",
               linha: r.linha || "",
+              grupo: parseGrupo(r.grupo) || grupoPadrao,
               codigo: r.codigo || "",
               descricao: r.descricao || "",
               quantidade: r.quantidade != null ? String(r.quantidade).replace(".", ",") : "",
@@ -1494,6 +1507,7 @@ function Producao() {
               numero: firstRecord.reprocesso_numero || 1,
               tipo: (firstRecord.reprocesso_tipo as "Cortado" | "Usado") || "Cortado",
               linha: (firstRecord as any).reprocesso_linha || "",
+              grupo: parseGrupo((firstRecord as any).reprocesso_grupo) || grupoPadrao,
               codigo: firstRecord.reprocesso_codigo || "",
               descricao: firstRecord.reprocesso_descricao || "",
               quantidade: firstRecord.reprocesso_quantidade ? firstRecord.reprocesso_quantidade.toString().replace(".", ",") : "",
@@ -3223,9 +3237,9 @@ function Producao() {
                       </button>
                     </div>
                     </div>
-                    <div className="flex flex-col gap-2 pt-1 border-t border-border/40">
+                    <div className="flex flex-col gap-2 pt-1 border-t border-border/40 min-[634px]:flex-row min-[634px]:items-center min-[634px]:gap-3 min-[634px]:flex-wrap">
                       <span className="text-xs text-muted-foreground font-medium">Filtros:</span>
-                      <div className="flex items-center gap-2 w-full">
+                      <div className="flex items-center gap-2 w-full min-[634px]:w-auto">
                         <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Tipo</span>
                         <Select
                           value={reprocessoFiltroTipo || "todos"}
@@ -3241,13 +3255,13 @@ function Producao() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="flex items-center gap-2 w-full">
+                      <div className="flex items-center gap-2 w-full min-[634px]:w-auto">
                         <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Linha</span>
                         <Select
                           value={reprocessoFiltroLinha || "todas"}
                           onValueChange={(v) => setReprocessoFiltroLinha(v === "todas" ? "" : v)}
                         >
-                          <SelectTrigger className="h-8 flex-1 min-w-0 sm:flex-none sm:min-w-[140px] text-xs">
+                          <SelectTrigger className="h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-xs">
                             <SelectValue placeholder="Todas" />
                           </SelectTrigger>
                           <SelectContent>
@@ -3260,17 +3274,35 @@ function Producao() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="flex items-center gap-2 w-full sm:justify-center">
-                        <span className="w-12 shrink-0 sm:hidden" aria-hidden />
+                      <div className="flex items-center gap-2 w-full min-[634px]:w-auto">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Grupo</span>
+                        <Select
+                          value={reprocessoFiltroGrupo || "todos"}
+                          onValueChange={(v) => setReprocessoFiltroGrupo(v === "todos" ? "" : (v as GrupoReprocesso))}
+                        >
+                          <SelectTrigger className="h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-xs">
+                            <SelectValue placeholder="Todos" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="todos">Todos</SelectItem>
+                            <SelectItem value="Reprocesso">Reprocesso</SelectItem>
+                            <SelectItem value="Matéria Prima Açaí">Matéria Prima Açaí</SelectItem>
+                            <SelectItem value="Matéria Prima Fruto">Matéria Prima Fruto</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-center gap-2 w-full min-[634px]:w-auto min-[634px]:justify-start sm:justify-center">
+                        <span className="w-12 shrink-0 sm:hidden min-[634px]:hidden" aria-hidden />
                         <Button
                           type="button"
                           variant="outline"
                           onClick={() => {
                             setReprocessoAppliedTipo(reprocessoFiltroTipo);
                             setReprocessoAppliedLinha(reprocessoFiltroLinha);
+                            setReprocessoAppliedGrupo(reprocessoFiltroGrupo);
                           }}
                           className="h-8 flex-1 min-w-0 sm:flex-none sm:min-w-[160px] flex items-center justify-center gap-2 px-5 py-2 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg text-xs font-semibold text-foreground hover:from-primary/20 hover:to-primary/10 hover:border-primary/40"
-                          title="Filtrar por tipo e linha"
+                          title="Filtrar por tipo, linha e grupo"
                         >
                           <Database className="h-3.5 w-3.5 shrink-0" />
                           <span>Filtrar</span>
@@ -3287,6 +3319,7 @@ function Producao() {
                             <TableHead className="w-12 sm:w-16 text-center text-xs sm:text-sm">N°</TableHead>
                             <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Tipo do Reprocesso</TableHead>
                             <TableHead className="min-w-[120px] sm:min-w-[160px] text-xs sm:text-sm">Linha</TableHead>
+                            <TableHead className="min-w-[160px] sm:min-w-[180px] text-xs sm:text-sm">Grupo</TableHead>
                             <TableHead className="min-w-[120px] sm:min-w-[140px] text-xs sm:text-sm">Código do reprocesso</TableHead>
                             <TableHead className="min-w-[150px] sm:min-w-[200px] text-xs sm:text-sm">Descrição do reprocesso</TableHead>
                             <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Quantidade</TableHead>
@@ -3296,7 +3329,7 @@ function Producao() {
                         <TableBody>
                           {reprocessosFiltrados.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
+                              <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
                                 {reprocessos.length === 0
                                   ? "Nenhum reprocesso cadastrado. Clique em \"Adicionar Reprocesso\" para começar."
                                   : "Nenhum reprocesso corresponde aos filtros selecionados."}
@@ -3346,6 +3379,21 @@ function Producao() {
                                       placeholder="Linha"
                                     />
                                   )}
+                                </TableCell>
+                                <TableCell className="p-2 sm:p-4">
+                                  <Select
+                                    value={reprocesso.grupo}
+                                    onValueChange={(value: GrupoReprocesso) => updateReprocesso(reprocesso.id, "grupo", value)}
+                                  >
+                                    <SelectTrigger className="h-8 sm:h-9 text-xs sm:text-sm min-w-[120px]">
+                                      <SelectValue placeholder="Grupo" />
+                                    </SelectTrigger>
+                                    <SelectContent className="text-xs sm:text-sm">
+                                      <SelectItem value="Reprocesso">Reprocesso</SelectItem>
+                                      <SelectItem value="Matéria Prima Açaí">Matéria Prima Açaí</SelectItem>
+                                      <SelectItem value="Matéria Prima Fruto">Matéria Prima Fruto</SelectItem>
+                                    </SelectContent>
+                                  </Select>
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
                                   <Input
@@ -4360,7 +4408,7 @@ function Producao() {
                   <div className="flex items-center gap-2 w-full min-w-0 lg:w-auto">
                     <Label htmlFor="history-linha" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Linha</Label>
                     <Select value={historyLinhaFilter || "todas"} onValueChange={(v) => setHistoryLinhaFilter(v === "todas" ? "" : v)}>
-                      <SelectTrigger id="history-linha" className="h-9 w-full min-w-0 lg:w-[220px] text-sm">
+                      <SelectTrigger id="history-linha" className="h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-xs">
                         <SelectValue placeholder="Todas as linhas" />
                       </SelectTrigger>
                       <SelectContent>

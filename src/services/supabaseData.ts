@@ -207,8 +207,11 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
   const { data: producaoData, error } = await query;
   if (error) throw error;
   const rows = producaoData || [];
-  const reprocessos: Array<{ numero: number; tipo: string; linha: string; codigo: string | null; descricao: string | null; quantidade: number }> = [];
+  const reprocessos: Array<{ numero: number; tipo: string; linha: string; grupo: string | null; codigo: string | null; descricao: string | null; quantidade: number }> = [];
   const first = rows[0] as Record<string, unknown> | undefined;
+  const defaultGrupo = "Reprocesso";
+  const parseGrupo = (v: unknown): string | null =>
+    v != null && ["Reprocesso", "Matéria Prima Açaí", "Matéria Prima Fruto"].includes(String(v)) ? String(v) : null;
   // Preferir array completo na coluna JSONB "reprocessos"; senão usar campos do primeiro registro (colunas reprocesso_*)
   if (first?.reprocessos && Array.isArray(first.reprocessos) && first.reprocessos.length > 0) {
     for (const r of first.reprocessos as Array<Record<string, unknown>>) {
@@ -216,6 +219,7 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
         numero: Number(r.numero ?? 1),
         tipo: String(r.tipo ?? "Cortado"),
         linha: (r.linha != null && String(r.linha).trim() !== "" ? String(r.linha).trim() : "") as string,
+        grupo: parseGrupo(r.grupo) ?? defaultGrupo,
         codigo: (r.codigo != null ? String(r.codigo) : null),
         descricao: (r.descricao != null ? String(r.descricao) : null),
         quantidade: parseFloat(String(r.quantidade ?? 0)),
@@ -226,6 +230,7 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
       numero: Number(first.reprocesso_numero ?? 1),
       tipo: String(first.reprocesso_tipo ?? "Cortado"),
       linha: (first.reprocesso_linha != null ? String(first.reprocesso_linha).trim() : "") as string,
+      grupo: parseGrupo(first.reprocesso_grupo) ?? defaultGrupo,
       codigo: (first.reprocesso_codigo as string) ?? null,
       descricao: (first.reprocesso_descricao as string) ?? null,
       quantidade: parseFloat(String(first.reprocesso_quantidade ?? 0)),
@@ -294,6 +299,7 @@ export async function saveProducao(payload: {
           numero: Number(r.numero ?? 0),
           tipo: String(r.tipo ?? "Cortado"),
           linha: r.linha != null && String(r.linha).trim() !== "" ? String(r.linha).trim() : null,
+          grupo: r.grupo != null && ["Reprocesso", "Matéria Prima Açaí", "Matéria Prima Fruto"].includes(String(r.grupo)) ? String(r.grupo) : "Reprocesso",
           codigo: r.codigo != null ? String(r.codigo) : null,
           descricao: r.descricao != null ? String(r.descricao) : null,
           quantidade: parseFloat(String(r.quantidade ?? 0).replace(",", ".")) || 0,
@@ -339,6 +345,7 @@ export async function saveProducao(payload: {
     reprocesso_numero: index === 0 && firstRep ? Number(firstRep.numero) : null,
     reprocesso_tipo: index === 0 && firstRep ? String(firstRep.tipo ?? "") : null,
     reprocesso_linha: index === 0 && firstRep && firstRep.linha != null && String(firstRep.linha).trim() !== "" ? String(firstRep.linha).trim() : null,
+    reprocesso_grupo: index === 0 && firstRep && firstRep.grupo != null && ["Reprocesso", "Matéria Prima Açaí", "Matéria Prima Fruto"].includes(String(firstRep.grupo)) ? String(firstRep.grupo) : null,
     reprocesso_codigo: index === 0 && firstRep ? (firstRep.codigo != null ? String(firstRep.codigo) : null) : null,
     reprocesso_descricao: index === 0 && firstRep ? (firstRep.descricao != null ? String(firstRep.descricao) : null) : null,
     reprocesso_quantidade: index === 0 && firstRep ? parseFloat(String(firstRep.quantidade ?? 0).replace(",", ".")) : 0,

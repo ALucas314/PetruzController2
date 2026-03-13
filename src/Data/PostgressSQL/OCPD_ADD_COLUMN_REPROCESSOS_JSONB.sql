@@ -11,4 +11,4 @@ ALTER TABLE "OCPD"
 -- Índice para consultas que filtram por reprocessos (opcional)
 CREATE INDEX IF NOT EXISTS idx_ocpd_reprocessos ON "OCPD" USING GIN (reprocessos);
 
-COMMENT ON COLUMN "OCPD".reprocessos IS 'Array JSON de reprocessos: [{"numero": 1, "tipo": "Cortado"|"Usado", "codigo": "...", "descricao": "...", "quantidade": 0.00}, ...]';
+COMMENT ON COLUMN "OCPD".reprocessos IS 'Array JSON de reprocessos: [{"numero": 1, "tipo": "Cortado"|"Usado", "linha": "...", "grupo": "Reprocesso"|"Matéria Prima Açaí"|"Matéria Prima Fruto", "codigo": "...", "descricao": "...", "quantidade": 0.00}, ...]';

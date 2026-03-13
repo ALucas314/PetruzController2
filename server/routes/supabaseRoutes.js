@@ -1269,6 +1269,8 @@ router.post("/producao/save", async (req, res) => {
         filial_nome: filialNome || null,
         reprocesso_numero: isFirstItem && reprocessos && reprocessos.length > 0 ? reprocessos[0].numero : null,
         reprocesso_tipo: isFirstItem && reprocessos && reprocessos.length > 0 ? reprocessos[0].tipo : null,
+        reprocesso_linha: isFirstItem && reprocessos && reprocessos.length > 0 ? (reprocessos[0].linha || null) : null,
+        reprocesso_grupo: isFirstItem && reprocessos && reprocessos.length > 0 ? (reprocessos[0].grupo || null) : null,
         reprocesso_codigo: isFirstItem && reprocessos && reprocessos.length > 0 ? reprocessos[0].codigo : null,
         reprocesso_descricao: isFirstItem && reprocessos && reprocessos.length > 0 ? reprocessos[0].descricao : null,
         reprocesso_quantidade: isFirstItem && reprocessos && reprocessos.length > 0 ? parseFloat(reprocessos[0].quantidade) || 0 : 0,
@@ -1338,6 +1340,8 @@ router.post("/producao/save", async (req, res) => {
         filial_nome: filialNome || null,
         numero: r.numero ?? 1,
         tipo: r.tipo || "Cortado",
+        linha: r.linha || null,
+        grupo: r.grupo || null,
         codigo: r.codigo || null,
         descricao: r.descricao || null,
         quantidade: parseFloat(r.quantidade) || 0,
@@ -1406,7 +1410,7 @@ router.get("/producao/load", async (req, res) => {
     try {
       let oprQuery = supabase
         .from("OCPR")
-        .select("numero, tipo, codigo, descricao, quantidade")
+        .select("numero, tipo, linha, grupo, codigo, descricao, quantidade")
         .eq("data_dia", data || new Date().toISOString().split("T")[0])
         .order("numero", { ascending: true });
       if (filialNome) oprQuery = oprQuery.eq("filial_nome", filialNome);

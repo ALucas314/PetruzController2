@@ -74,7 +74,7 @@ function expandScrollableContainers(root: HTMLElement): RestoreStyle[] {
 
   // Por último expande o root para o tamanho total do conteúdo (assim a captura pega a tabela inteira)
   const rootComputed = window.getComputedStyle(root);
-  const rootClips = rootComputed.overflow !== "visible" || rootComputed.overflowX !== "visible" || rootComputed.overflowY !== "visible" || rootComputed.overflow === "hidden";
+  const rootClips = rootComputed.overflow !== "visible" || rootComputed.overflowX !== "visible" || rootComputed.overflowY !== "visible";
   if (rootClips || toExpand.length > 0) {
     const backup: Record<string, string> = {
       overflow: root.style.overflow,
@@ -104,7 +104,7 @@ function expandScrollableContainers(root: HTMLElement): RestoreStyle[] {
 function restoreStyles(restores: RestoreStyle[]) {
   restores.forEach(({ el, styles }) => {
     Object.entries(styles).forEach(([key, value]) => {
-      (el.style as Record<string, string>)[key] = value;
+      (el.style as unknown as Record<string, string>)[key] = value;
     });
   });
 }
