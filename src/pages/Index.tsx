@@ -230,9 +230,9 @@ const Index = () => {
 
   return (
     <AppLayout>
-      {/* Header: título em cima, filtros em baixo */}
-      <div className="mb-6 sm:mb-8 space-y-5">
-        <div className="space-y-1">
+      {/* Header: título em cima, filtros em baixo — menos margem superior no mobile/tablet */}
+      <div className="mb-6 sm:mb-8 space-y-5 -mt-2 sm:-mt-1 lg:mt-0">
+        <div className="space-y-1 text-center sm:text-left">
           <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
             Painel de Controle
           </h1>
