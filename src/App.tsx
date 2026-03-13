@@ -3,13 +3,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import { DocumentNavProvider } from "@/contexts/DocumentNavContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppSidebar } from "@/components/AppSidebar";
-import LandingPage from "./pages/LandingPage";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -32,10 +31,9 @@ const queryClient = new QueryClient();
 // Componente interno para ter acesso ao useLocation
 const AppRoutes = () => {
   const location = useLocation();
-  const isLandingPage = location.pathname === "/";
   const isAuthPage = ["/login", "/cadastro", "/esqueci-senha", "/redefinir-senha"].includes(location.pathname);
   const isLegalPage = ["/termos", "/privacidade"].includes(location.pathname);
-  const hideSidebar = isLandingPage || isAuthPage || isLegalPage;
+  const hideSidebar = isAuthPage || isLegalPage;
   
   const sidebarElement = useMemo(() => {
     if (hideSidebar) return null;
@@ -47,7 +45,7 @@ const AppRoutes = () => {
       {sidebarElement}
       
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
         <Route path="/cadastro" element={<Register />} />
         <Route path="/esqueci-senha" element={<ForgotPassword />} />

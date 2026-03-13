@@ -7,7 +7,7 @@
 @layer base {
   :root {
     /* Altura do header (fixo em viewports < 1024px); atualizado via JS no SiteHeader */
-    --app-header-height: 8rem;
+    --app-header-height: 3rem;
     --background: 216 20% 95%;
     --foreground: 220 30% 15%;
 
@@ -94,17 +94,17 @@
   }
 }
 
-/* Espaço para o header fixo: bem compacto no celular, maior no tablet */
+/* Espaço para o header fixo: bem compacto no celular e tablet */
 @media (max-width: 639px) {
   .app-header-spacer {
-    height: var(--app-header-height, 4rem);
-    min-height: 3.75rem;
+    height: var(--app-header-height, 3rem);
+    min-height: 2.75rem;
   }
 }
 @media (min-width: 640px) and (max-width: 1023px) {
   .app-header-spacer {
-    height: var(--app-header-height, 7.5rem);
-    min-height: 7rem;
+    height: var(--app-header-height, 3.5rem);
+    min-height: 3.25rem;
   }
 }
 
@@ -156,12 +156,61 @@
 }
 
 @layer utilities {
+  /* KPI cards — visual premium dashboard */
   .kpi-card {
-    @apply bg-card/80 backdrop-blur-sm rounded-xl border border-border/50 p-4 shadow-[0_4px_16px_rgba(0,0,0,0.08)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)] hover:scale-[1.02] hover:border-primary/20;
+    @apply relative overflow-hidden rounded-2xl border border-border/60 p-5 transition-all duration-300;
+    background: linear-gradient(145deg, hsl(var(--card) / 0.98) 0%, hsl(var(--card) / 0.92) 50%, hsl(var(--muted) / 0.4) 100%);
+    box-shadow:
+      0 1px 0 0 hsl(var(--border) / 0.5) inset,
+      0 2px 8px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.06);
   }
-  
+  .kpi-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.6), hsl(var(--primary) / 0.25));
+    border-radius: 2px 2px 0 0;
+  }
+  .kpi-card:hover {
+    border-color: hsl(var(--primary) / 0.25);
+    box-shadow:
+      0 1px 0 0 hsl(var(--primary) / 0.15) inset,
+      0 4px 16px rgba(0, 0, 0, 0.06),
+      0 12px 40px rgba(0, 0, 0, 0.08),
+      0 0 0 1px hsl(var(--primary) / 0.08);
+    transform: translateY(-2px);
+  }
+
+  /* Chart cards — visual premium dashboard */
   .chart-card {
-    @apply bg-card/80 backdrop-blur-sm rounded-xl border border-border/50 p-4 sm:p-6 shadow-[0_4px_16px_rgba(0,0,0,0.08)] transition-all duration-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)];
+    @apply relative overflow-hidden rounded-2xl border border-border/60 transition-all duration-300;
+    background: linear-gradient(160deg, hsl(var(--card) / 0.99) 0%, hsl(var(--card) / 0.95) 40%, hsl(var(--muted) / 0.25) 100%);
+    box-shadow:
+      0 1px 0 0 hsl(var(--border) / 0.4) inset,
+      0 2px 8px rgba(0, 0, 0, 0.04),
+      0 12px 32px rgba(0, 0, 0, 0.06);
+  }
+  .chart-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, hsl(var(--primary) / 0.4), hsl(var(--primary) / 0.12), transparent);
+    border-radius: 2px 2px 0 0;
+    pointer-events: none;
+  }
+  .chart-card:hover {
+    border-color: hsl(var(--border));
+    box-shadow:
+      0 1px 0 0 hsl(var(--border) / 0.5) inset,
+      0 8px 24px rgba(0, 0, 0, 0.06),
+      0 20px 48px rgba(0, 0, 0, 0.08);
   }
 
   @keyframes fadeIn {
@@ -279,14 +328,9 @@
     stroke-width: 1.5px !important;
   }
 
-  /* Cards de gráficos — melhor leitura no desktop */
+  /* Cards de gráficos — transição suave (hover já definido acima) */
   .chart-card {
-    transition: box-shadow 0.2s ease, border-color 0.2s ease;
-  }
-  @media (min-width: 1024px) {
-    .chart-card:hover {
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
-    }
+    transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
   }
 
   /* Gráfico de barras dashboard — visual premium */

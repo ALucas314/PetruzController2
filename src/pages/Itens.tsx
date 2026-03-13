@@ -168,7 +168,7 @@ export default function Itens() {
                               <TableHead className="font-bold text-primary min-w-[120px]">
                                 Nº do Item
                               </TableHead>
-                              <TableHead className="font-bold text-primary min-w-[300px]">
+                              <TableHead className="font-bold text-primary min-w-[480px] sm:min-w-[520px]">
                                 Descrição do Item
                               </TableHead>
                               <TableHead className="font-bold text-primary min-w-[150px]">
@@ -188,8 +188,8 @@ export default function Itens() {
                                 <TableCell className="font-medium font-mono text-sm">
                                   {item["Nº do item"] || "-"}
                                 </TableCell>
-                                <TableCell className="max-w-md">
-                                  <div className="truncate" title={item["Descrição do item"]}>
+                                <TableCell className="min-w-[480px] sm:min-w-[520px] max-w-[min(800px,95vw)]">
+                                  <div className="break-words" title={item["Descrição do item"] || undefined}>
                                     {item["Descrição do item"] || "-"}
                                   </div>
                                 </TableCell>

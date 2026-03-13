@@ -230,9 +230,9 @@ const Index = () => {
 
   return (
     <AppLayout>
-      {/* Header: título em cima, filtros em baixo */}
-      <div className="mb-6 sm:mb-8 space-y-5">
-        <div className="space-y-1">
+      {/* Header: título em cima, filtros em baixo — menos margem superior no mobile/tablet */}
+      <div className="mb-6 sm:mb-8 space-y-5 -mt-2 sm:-mt-1 lg:mt-0">
+        <div className="space-y-1 text-center sm:text-left">
           <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
             Painel de Controle
           </h1>
@@ -285,7 +285,7 @@ const Index = () => {
           {/* Seção: Análise Gráfica — otimizada para desktop */}
           <div className="space-y-6 lg:space-y-8">
             {/* Gráfico único: Planejado vs Realizado vs Diferença por período */}
-            <div ref={chartPlanejadoRealizadoRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
+            <div ref={chartPlanejadoRealizadoRef} className="chart-card pl-3 pr-4 py-5 sm:p-6 lg:p-8 overflow-hidden">
               <div className="mb-5 lg:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
@@ -380,7 +380,7 @@ const Index = () => {
             {/* Status de Produção e Produção por Linha — lado a lado no PC */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
             {/* Gráfico: Status de Produção — mesmo percentual do quadro Percentual Meta */}
-            <div ref={chartStatusProducaoRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
+            <div ref={chartStatusProducaoRef} className="chart-card p-5 sm:p-6 lg:p-8 overflow-hidden">
                 <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-success/25 via-success/15 to-success/10 border border-success/25 shadow-lg shadow-success/10">
@@ -477,7 +477,7 @@ const Index = () => {
               const linhaBarHeight = linhaBarSize * 2 + 28;
               const chartHeight = Math.min(560, Math.max(200, sorted.length * linhaBarHeight));
               return (
-                <div ref={chartProducaoLinhaRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 p-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden">
+                <div ref={chartProducaoLinhaRef} className="chart-card p-5 sm:p-6 lg:p-8 overflow-hidden">
                   <div className="mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10 text-primary">
