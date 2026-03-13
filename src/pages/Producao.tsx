@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, MouseEvent, useCallback, useRef, RefObjec
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -317,7 +318,6 @@ function Producao() {
     return () => window.removeEventListener("resize", update);
   }, []);
   const openedFromStateRef = useRef(false);
-  const dataInputRef = useRef<HTMLInputElement>(null);
   const isNewDocumentRef = useRef(false); // true após "Novo documento" para não recarregar do DB e manter setas habilitadas
   const justLoadedByIndexRef = useRef(false); // true após carregar doc pela seta, para o useEffect não sobrescrever com load sem filial
   const skipNextDataLoadRef = useRef(false); // true após restaurar rascunho, para não sobrescrever com loadFromDatabase
@@ -2442,38 +2442,16 @@ function Producao() {
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        {/* Input de data com navegação */}
-                        <div className="flex items-center gap-2">
-                          <Calendar
-                            className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground/70 cursor-pointer hover:text-primary transition-colors"
-                            onClick={() => {
-                              if (dataInputRef.current) {
-                                if (typeof dataInputRef.current.showPicker === 'function') {
-                                  dataInputRef.current.showPicker();
-                                } else {
-                                  dataInputRef.current.click();
-                                }
-                              }
-                            }}
-                          />
-                          <div className="relative group">
-                            <Input
-                              ref={dataInputRef}
-                              type="date"
-                              className="hidden"
-                              value={dataCabecalhoSelecionada}
-                              onChange={(e) => {
-                                setDataCabecalhoSelecionada(e.target.value);
-                                setShowDocumentGridForDate(true);
-                              }}
-                            />
-                            <div className="flex items-center gap-2 px-2 py-1 rounded-md border border-transparent group-hover:border-primary/30 group-hover:bg-muted/60 transition-all">
-                              <span className="text-sm sm:text-base text-muted-foreground/90 font-medium capitalize select-none pointer-events-none">
-                                {formatDate(dataCabecalhoSelecionada ? parseDateString(dataCabecalhoSelecionada) : currentTime)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                        <DatePicker
+                          value={dataCabecalhoSelecionada}
+                          onChange={(v) => {
+                            setDataCabecalhoSelecionada(v);
+                            setShowDocumentGridForDate(true);
+                          }}
+                          placeholder="Data"
+                          triggerClassName="border-transparent group-hover:border-primary/30 bg-transparent hover:bg-muted/60 px-2 py-1 min-h-0 h-auto text-sm sm:text-base text-muted-foreground/90 font-medium"
+                          className="min-w-[140px]"
+                        />
                       </div>
                     </div>
 
@@ -2783,7 +2761,7 @@ function Producao() {
                           <TableHead className="min-w-[120px] sm:min-w-[140px] text-xs sm:text-sm">Data</TableHead>
                           <TableHead className="min-w-[100px] sm:min-w-[120px] text-xs sm:text-sm">OP</TableHead>
                           <TableHead className="min-w-[120px] sm:min-w-[140px] text-xs sm:text-sm">Código</TableHead>
-                          <TableHead className="min-w-[150px] sm:min-w-[200px] text-xs sm:text-sm">Descrição</TableHead>
+                          <TableHead className="min-w-[480px] sm:min-w-[520px] text-xs sm:text-sm">Descrição</TableHead>
                           <TableHead className="min-w-[120px] sm:min-w-[140px] text-xs sm:text-sm">Linha</TableHead>
                           <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Qtd. Planejada</TableHead>
                           <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Qtd. Realizada</TableHead>
@@ -2797,11 +2775,11 @@ function Producao() {
                           <TableRow key={item.id}>
                             <TableCell className="text-center font-medium text-xs sm:text-sm">{item.numero}</TableCell>
                             <TableCell className="p-2 sm:p-4">
-                              <Input
-                                type="date"
+                              <DatePicker
                                 value={item.dataDia || new Date().toISOString().split("T")[0]}
-                                onChange={(e) => updateItem(item.id, "dataDia", e.target.value)}
-                                className="h-8 sm:h-9 text-xs sm:text-sm"
+                                onChange={(v) => updateItem(item.id, "dataDia", v)}
+                                size="sm"
+                                triggerClassName="h-8 sm:h-9 text-xs sm:text-sm"
                               />
                             </TableCell>
                             <TableCell className="p-2 sm:p-4">
@@ -2820,12 +2798,13 @@ function Producao() {
                                 placeholder="Código"
                               />
                             </TableCell>
-                            <TableCell className="p-2 sm:p-4">
+                            <TableCell className="p-2 sm:p-4 min-w-[480px] sm:min-w-[520px]">
                               <Input
                                 value={item.descricaoItem}
                                 onChange={(e) => updateItem(item.id, "descricaoItem", e.target.value)}
-                                className="h-8 sm:h-9 text-xs sm:text-sm"
+                                className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0"
                                 placeholder="Descrição"
+                                title={item.descricaoItem || undefined}
                               />
                             </TableCell>
                             <TableCell className="p-2 sm:p-4">
@@ -3203,35 +3182,51 @@ function Producao() {
                         <Plus className="h-4 w-4 shrink-0" />
                         <span className="truncate">Adicionar Reprocesso</span>
                       </Button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          exportAllProducaoAsPNG();
+                      <ExportToPng
+                        targetRef={reprocessoCardRef}
+                        filenamePrefix="reprocesso"
+                        expandScrollable={true}
+                        onBeforeCapture={() => {
+                          const card = reprocessoCardRef.current;
+                          if (!card) return;
+                          reprocessoExportRestoreRef.current = [];
+                          const cells = card.querySelectorAll("table tbody tr td:nth-child(5)");
+                          cells.forEach((cell) => {
+                            const input = cell.querySelector("input");
+                            if (!input) return;
+                            const el = input as HTMLInputElement;
+                            const value = el.value ?? "";
+                            const wrapper = document.createElement("div");
+                            wrapper.setAttribute("data-export-descricao", "true");
+                            wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[200px]";
+                            wrapper.textContent = value || "—";
+                            el.style.display = "none";
+                            cell.appendChild(wrapper);
+                            reprocessoExportRestoreRef.current.push({ input: el, wrapper });
+                          });
                         }}
-                        disabled={exportingAllPng}
-                        title="Exportar os 4 blocos (Status, Planejado vs Realizado, Reprocesso, Histórico) como PNG e compartilhar"
-                        className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 w-full sm:w-auto shrink-0 border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-                      >
-                        {exportingAllPng ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4 shrink-0" />
-                        )}
-                        <span className="hidden min-[791px]:inline">{exportingAllPng ? "Exportando…" : "Exportar PNG"}</span>
-                      </button>
+                        onAfterCapture={() => {
+                          reprocessoExportRestoreRef.current.forEach(({ input, wrapper }) => {
+                            wrapper.remove();
+                            input.style.display = "";
+                          });
+                          reprocessoExportRestoreRef.current = [];
+                        }}
+                        className="inline-flex h-9 rounded-md px-3 w-full sm:w-auto shrink-0"
+                        label="Exportar PNG"
+                        title="Baixar apenas o card de Reprocesso como PNG"
+                      />
                     </div>
                     </div>
-                    <div className="flex flex-col gap-2 pt-1 border-t border-border/40">
-                      <span className="text-xs text-muted-foreground font-medium">Filtros:</span>
-                      <div className="flex items-center gap-2 w-full">
+                    <div className="flex flex-col gap-2 pt-1 border-t border-border/40 min-[748px]:flex-row min-[748px]:flex-wrap min-[748px]:items-center min-[748px]:gap-3">
+                      <span className="text-xs text-muted-foreground font-medium shrink-0">Filtros:</span>
+                      <div className="flex items-center gap-2 w-full min-h-[44px] min-[748px]:min-h-0 rounded-lg border border-input bg-background px-4 py-2 min-[748px]:border-0 min-[748px]:bg-transparent min-[748px]:p-0 min-[748px]:w-auto min-[748px]:flex-none">
                         <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Tipo</span>
                         <Select
                           value={reprocessoFiltroTipo || "todos"}
                           onValueChange={(v) => setReprocessoFiltroTipo(v === "todos" ? "" : (v as "Cortado" | "Usado"))}
                         >
-                          <SelectTrigger className="h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-xs">
+                          <SelectTrigger className="min-h-[44px] min-[748px]:min-h-0 min-[748px]:h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-sm min-[748px]:text-xs rounded-lg">
                             <SelectValue placeholder="Todos" />
                           </SelectTrigger>
                           <SelectContent>
@@ -3241,13 +3236,13 @@ function Producao() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="flex items-center gap-2 w-full">
+                      <div className="flex items-center gap-2 w-full min-h-[44px] min-[748px]:min-h-0 rounded-lg border border-input bg-background px-4 py-2 min-[748px]:border-0 min-[748px]:bg-transparent min-[748px]:p-0 min-[748px]:w-auto min-[748px]:flex-none">
                         <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Linha</span>
                         <Select
                           value={reprocessoFiltroLinha || "todas"}
                           onValueChange={(v) => setReprocessoFiltroLinha(v === "todas" ? "" : v)}
                         >
-                          <SelectTrigger className="h-8 flex-1 min-w-0 sm:flex-none sm:min-w-[140px] text-xs">
+                          <SelectTrigger className="min-h-[44px] min-[748px]:min-h-0 min-[748px]:h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-sm min-[748px]:text-xs rounded-lg">
                             <SelectValue placeholder="Todas" />
                           </SelectTrigger>
                           <SelectContent>
@@ -3260,8 +3255,7 @@ function Producao() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="flex items-center gap-2 w-full sm:justify-center">
-                        <span className="w-12 shrink-0 sm:hidden" aria-hidden />
+                      <div className="flex justify-center w-full min-[748px]:w-auto min-[748px]:flex-none min-[748px]:justify-start min-[748px]:contents">
                         <Button
                           type="button"
                           variant="outline"
@@ -3269,10 +3263,10 @@ function Producao() {
                             setReprocessoAppliedTipo(reprocessoFiltroTipo);
                             setReprocessoAppliedLinha(reprocessoFiltroLinha);
                           }}
-                          className="h-8 flex-1 min-w-0 sm:flex-none sm:min-w-[160px] flex items-center justify-center gap-2 px-5 py-2 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg text-xs font-semibold text-foreground hover:from-primary/20 hover:to-primary/10 hover:border-primary/40"
+                          className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 w-full min-[748px]:min-h-0 min-[748px]:h-8 min-[748px]:w-auto min-[748px]:min-w-[160px] min-[748px]:px-5 min-[748px]:py-2 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-foreground min-[748px]:text-xs"
                           title="Filtrar por tipo e linha"
                         >
-                          <Database className="h-3.5 w-3.5 shrink-0" />
+                          <Database className="h-4 w-4 min-[748px]:h-3.5 min-[748px]:w-3.5 shrink-0" />
                           <span>Filtrar</span>
                         </Button>
                       </div>
@@ -3288,7 +3282,7 @@ function Producao() {
                             <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Tipo do Reprocesso</TableHead>
                             <TableHead className="min-w-[120px] sm:min-w-[160px] text-xs sm:text-sm">Linha</TableHead>
                             <TableHead className="min-w-[120px] sm:min-w-[140px] text-xs sm:text-sm">Código do reprocesso</TableHead>
-                            <TableHead className="min-w-[150px] sm:min-w-[200px] text-xs sm:text-sm">Descrição do reprocesso</TableHead>
+                            <TableHead className="min-w-[480px] sm:min-w-[520px] text-xs sm:text-sm">Descrição do reprocesso</TableHead>
                             <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Quantidade</TableHead>
                             <TableHead className="w-12 sm:w-16"></TableHead>
                           </TableRow>
@@ -3355,12 +3349,13 @@ function Producao() {
                                     placeholder="Código"
                                   />
                                 </TableCell>
-                                <TableCell className="p-2 sm:p-4">
+                                <TableCell className="p-2 sm:p-4 min-w-[480px] sm:min-w-[520px]">
                                   <Input
                                     value={reprocesso.descricao}
                                     onChange={(e) => updateReprocesso(reprocesso.id, "descricao", e.target.value)}
-                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                    className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0"
                                     placeholder="Descrição"
+                                    title={reprocesso.descricao || undefined}
                                   />
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
@@ -3601,11 +3596,11 @@ function Producao() {
                                   />
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
-                                  <Input
-                                    type="date"
+                                  <DatePicker
                                     value={item.inicio}
-                                    onChange={(e) => updateOCTPItem(item.id, "inicio", e.target.value)}
-                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                    onChange={(v) => updateOCTPItem(item.id, "inicio", v)}
+                                    size="sm"
+                                    triggerClassName="h-8 sm:h-9 text-xs sm:text-sm"
                                   />
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
@@ -4307,13 +4302,13 @@ function Producao() {
                       <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
                     </span>
                     <Label htmlFor="history-data-inicio" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">De</Label>
-                    <Input
+                    <DatePicker
                       id="history-data-inicio"
-                      type="date"
                       value={historyDataInicio}
-                      onChange={(e) => setHistoryDataInicio(e.target.value)}
+                      onChange={setHistoryDataInicio}
+                      placeholder="Data inicial"
                       className="h-9 flex-1 min-w-[120px] w-full lg:w-[130px] text-sm overflow-visible"
-                      title="Data inicial do intervalo"
+                      triggerClassName="h-9 text-sm"
                     />
                   </div>
                   <div className="flex items-center gap-2 w-full min-w-0 lg:flex-1 lg:min-w-[150px] overflow-visible">
@@ -4321,13 +4316,13 @@ function Producao() {
                       <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
                     </span>
                     <Label htmlFor="history-data-fim" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Até</Label>
-                    <Input
+                    <DatePicker
                       id="history-data-fim"
-                      type="date"
                       value={historyDataFim}
-                      onChange={(e) => setHistoryDataFim(e.target.value)}
+                      onChange={setHistoryDataFim}
+                      placeholder="Data final"
                       className="h-9 flex-1 min-w-[120px] w-full lg:w-[130px] text-sm overflow-visible"
-                      title="Data final do intervalo"
+                      triggerClassName="h-9 text-sm"
                     />
                   </div>
                   <div className="flex items-center gap-2 w-full min-w-0 lg:w-auto">
@@ -4423,7 +4418,7 @@ function Producao() {
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Hora</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">OP</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Código</TableHead>
-                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Descrição</TableHead>
+                          <TableHead className="text-xs sm:text-sm min-w-[480px] sm:min-w-[520px]">Descrição</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Linha</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Planejada</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Realizada</TableHead>
@@ -4475,7 +4470,7 @@ function Producao() {
                               <TableCell className="text-xs sm:text-sm font-mono">{horaFormatada}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-semibold">{record.op || "-"}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono font-semibold">{record.codigo_item || "-"}</TableCell>
-                              <TableCell className="text-xs sm:text-sm font-semibold break-words">{record.descricao_item || "-"}</TableCell>
+                              <TableCell className="text-xs sm:text-sm font-semibold break-words min-w-[480px] sm:min-w-[520px] max-w-[min(720px,95vw)]" title={record.descricao_item || undefined}>{record.descricao_item || "-"}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-semibold">{linhaNome}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_planejada) || 0)}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_realizada) || 0)}</TableCell>

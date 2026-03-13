@@ -4,7 +4,7 @@ import { FileText, ClipboardList, CheckCircle2, ArrowRightLeft, Percent, Loader2
 import { AppLayout } from "@/components/AppLayout";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -358,21 +358,21 @@ export default function Relatorios() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 overflow-visible">
             <div className="space-y-2 overflow-visible min-w-0">
               <Label htmlFor="date-de">De</Label>
-              <Input
+              <DatePicker
                 id="date-de"
-                type="date"
                 value={dateDe}
-                onChange={(e) => setDateDe(e.target.value)}
+                onChange={setDateDe}
+                placeholder="Data inicial"
                 className="w-full overflow-visible min-w-[120px]"
               />
             </div>
             <div className="space-y-2 overflow-visible min-w-0">
               <Label htmlFor="date-ate">Até</Label>
-              <Input
+              <DatePicker
                 id="date-ate"
-                type="date"
                 value={dateAte}
-                onChange={(e) => setDateAte(e.target.value)}
+                onChange={setDateAte}
+                placeholder="Data final"
                 className="w-full overflow-visible min-w-[120px]"
               />
             </div>
@@ -440,7 +440,7 @@ export default function Relatorios() {
                     <TableHead className="text-xs sm:text-sm whitespace-nowrap">Hora</TableHead>
                     <TableHead className="text-xs sm:text-sm whitespace-nowrap">OP</TableHead>
                     <TableHead className="text-xs sm:text-sm whitespace-nowrap">Código</TableHead>
-                    <TableHead className="text-xs sm:text-sm min-w-[140px]">Descrição</TableHead>
+                    <TableHead className="text-xs sm:text-sm min-w-[480px] sm:min-w-[520px]">Descrição</TableHead>
                     <TableHead className="text-xs sm:text-sm whitespace-nowrap">Linha</TableHead>
                     <TableHead className="text-xs sm:text-sm text-right whitespace-nowrap">Qtd. Planejada</TableHead>
                     <TableHead className="text-xs sm:text-sm text-right whitespace-nowrap">Qtd. Realizada</TableHead>
@@ -467,7 +467,7 @@ export default function Relatorios() {
                       <TableCell className="text-xs sm:text-sm whitespace-nowrap font-mono">
                         {r.codigo_item ?? "—"}
                       </TableCell>
-                      <TableCell className="text-xs sm:text-sm max-w-[180px] truncate" title={r.descricao_item ?? ""}>
+                      <TableCell className="text-xs sm:text-sm break-words min-w-[480px] sm:min-w-[520px] max-w-[min(720px,95vw)]" title={r.descricao_item ?? undefined}>
                         {r.descricao_item ?? "—"}
                       </TableCell>
                       <TableCell className="text-xs sm:text-sm whitespace-nowrap">

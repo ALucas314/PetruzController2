@@ -1,6 +1,6 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Calendar, Database, Loader2 } from "lucide-react";
 
 interface DashboardFiltersProps {
@@ -27,12 +27,12 @@ export function DashboardFilters({
             <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
               <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
             </span>
-            <Input
-              type="date"
+            <DatePicker
               value={dataInicio}
-              onChange={(e) => setDataInicio(e.target.value)}
-              className="flex-1 min-w-[120px] w-[120px] shrink-0 bg-card/80 backdrop-blur-sm border-border/50 shadow-sm sm:w-[140px] overflow-visible"
+              onChange={(v) => setDataInicio(v)}
               placeholder="Data inicial"
+              className="flex-1 min-w-[120px] w-[120px] shrink-0 bg-card/80 backdrop-blur-sm border-border/50 shadow-sm sm:w-[140px] overflow-visible"
+              triggerClassName="bg-card/80 border-border/50"
             />
           </div>
           <span className="text-muted-foreground text-sm hidden sm:inline shrink-0">até</span>
@@ -40,12 +40,12 @@ export function DashboardFilters({
             <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
               <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
             </span>
-            <Input
-              type="date"
+            <DatePicker
               value={dataFim}
-              onChange={(e) => setDataFim(e.target.value)}
-              className="flex-1 min-w-[120px] w-[120px] shrink-0 bg-card/80 backdrop-blur-sm border-border/50 shadow-sm sm:w-[140px] overflow-visible"
+              onChange={(v) => setDataFim(v)}
               placeholder="Data final"
+              className="flex-1 min-w-[120px] w-[120px] shrink-0 bg-card/80 backdrop-blur-sm border-border/50 shadow-sm sm:w-[140px] overflow-visible"
+              triggerClassName="bg-card/80 border-border/50"
             />
           </div>
         </>
