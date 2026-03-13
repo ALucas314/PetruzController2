@@ -67,10 +67,10 @@ export function SiteHeader() {
         "w-full max-w-full border-b border-border/60 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
         "shadow-sm overflow-hidden",
         "fixed top-0 left-0 right-0 z-50 pt-[env(safe-area-inset-top)] lg:sticky lg:top-0 lg:z-40",
-        "min-h-14 sm:min-h-[5.25rem] lg:h-16 lg:min-h-0"
+        "min-h-14 sm:min-h-16 lg:h-16 lg:min-h-0"
       )}
     >
-      <div className="flex flex-nowrap min-h-14 sm:min-h-[5.25rem] lg:min-h-0 lg:h-16 items-center gap-x-1.5 sm:gap-x-3 px-2 sm:px-4 lg:px-8 min-w-0 max-w-full py-1.5 sm:py-1 lg:py-0">
+      <div className="flex flex-nowrap min-h-14 sm:min-h-16 lg:min-h-0 lg:h-16 items-center gap-x-1.5 sm:gap-x-3 px-2 sm:px-4 lg:px-8 min-w-0 max-w-full py-1.5 sm:py-1 lg:py-0">
         {/* Botão menu (hambúrguer) — uma linha no mobile */}
         <Button
           variant="ghost"

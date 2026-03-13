@@ -26,7 +26,7 @@ export const AppLayout = memo(({ children }: { children: ReactNode }) => {
         <SiteHeader />
         {/* Reserva espaço quando o header é fixed (viewport < 1024px); em lg+ o header é sticky e este spacer some */}
         <div className="shrink-0 w-full lg:hidden app-header-spacer" aria-hidden />
-        <main className="app-layout-main flex-1 min-h-0 p-3 sm:p-6 lg:p-8 pb-[max(1rem,env(safe-area-inset-bottom))] max-w-[1920px] mx-auto w-full max-w-full overflow-x-hidden">
+        <main className="app-layout-main flex-1 min-h-0 pt-2 px-3 sm:pt-4 sm:px-6 lg:p-8 pb-[max(1rem,env(safe-area-inset-bottom))] max-w-[1920px] mx-auto w-full max-w-full overflow-x-hidden">
           {children}
         </main>
       </div>

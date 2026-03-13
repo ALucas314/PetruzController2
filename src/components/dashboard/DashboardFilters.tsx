@@ -1,7 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
-import { Calendar, Database, Loader2 } from "lucide-react";
+import { Database, Loader2 } from "lucide-react";
 
 interface DashboardFiltersProps {
   dataInicio?: string;
@@ -24,9 +24,6 @@ export function DashboardFilters({
       {setDataInicio && setDataFim && (
         <>
           <div className="flex items-center gap-2 min-w-[152px] w-full sm:w-[172px] sm:min-w-0 flex-shrink-0 overflow-visible">
-            <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
-              <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
-            </span>
             <DatePicker
               value={dataInicio}
               onChange={(v) => setDataInicio(v)}
@@ -37,9 +34,6 @@ export function DashboardFilters({
           </div>
           <span className="text-muted-foreground text-sm hidden sm:inline shrink-0">até</span>
           <div className="flex items-center gap-2 min-w-[152px] w-full sm:w-[172px] sm:min-w-0 flex-shrink-0 overflow-visible">
-            <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
-              <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
-            </span>
             <DatePicker
               value={dataFim}
               onChange={(v) => setDataFim(v)}

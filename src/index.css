@@ -7,7 +7,7 @@
 @layer base {
   :root {
     /* Altura do header (fixo em viewports < 1024px); atualizado via JS no SiteHeader */
-    --app-header-height: 8rem;
+    --app-header-height: 3.5rem;
     --background: 216 20% 95%;
     --foreground: 220 30% 15%;
 
@@ -94,17 +94,17 @@
   }
 }
 
-/* Espaço para o header fixo: bem compacto no celular, maior no tablet */
+/* Espaço para o header fixo: compacto no celular e tablet */
 @media (max-width: 639px) {
   .app-header-spacer {
-    height: var(--app-header-height, 4rem);
-    min-height: 3.75rem;
+    height: var(--app-header-height, 3.5rem);
+    min-height: 3rem;
   }
 }
 @media (min-width: 640px) and (max-width: 1023px) {
   .app-header-spacer {
-    height: var(--app-header-height, 7.5rem);
-    min-height: 7rem;
+    height: var(--app-header-height, 4rem);
+    min-height: 3.5rem;
   }
 }
 

@@ -4298,9 +4298,6 @@ function Producao() {
               <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between w-full p-4 lg:p-8 lg:pb-5 lg:pt-6 transition-all duration-500 bg-gradient-to-r from-card via-card to-card rounded-t-2xl overflow-visible">
                 <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 overflow-visible">
                   <div className="flex items-center gap-2 w-full min-w-0 lg:flex-1 lg:min-w-[150px] overflow-visible">
-                    <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
-                      <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
-                    </span>
                     <Label htmlFor="history-data-inicio" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">De</Label>
                     <DatePicker
                       id="history-data-inicio"
@@ -4312,9 +4309,6 @@ function Producao() {
                     />
                   </div>
                   <div className="flex items-center gap-2 w-full min-w-0 lg:flex-1 lg:min-w-[150px] overflow-visible">
-                    <span className="flex shrink-0 w-6 h-6 items-center justify-center text-muted-foreground" aria-hidden>
-                      <Calendar className="h-4 w-4 min-w-[16px] min-h-[16px]" />
-                    </span>
                     <Label htmlFor="history-data-fim" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Até</Label>
                     <DatePicker
                       id="history-data-fim"
