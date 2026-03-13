@@ -226,11 +226,13 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
       });
     }
   } else if (first && (first.reprocesso_numero != null || first.reprocesso_codigo != null || first.reprocesso_descricao != null)) {
+    // Grupo só vem do JSONB "reprocessos"; coluna reprocesso_grupo não existe
+    const legacyGrupo = first.reprocessos && Array.isArray(first.reprocessos) && (first.reprocessos as Record<string, unknown>[])[0]?.grupo;
     reprocessos.push({
       numero: Number(first.reprocesso_numero ?? 1),
       tipo: String(first.reprocesso_tipo ?? "Cortado"),
       linha: (first.reprocesso_linha != null ? String(first.reprocesso_linha).trim() : "") as string,
-      grupo: parseGrupo(first.reprocesso_grupo) ?? defaultGrupo,
+      grupo: parseGrupo(legacyGrupo) ?? defaultGrupo,
       codigo: (first.reprocesso_codigo as string) ?? null,
       descricao: (first.reprocesso_descricao as string) ?? null,
       quantidade: parseFloat(String(first.reprocesso_quantidade ?? 0)),
@@ -345,7 +347,6 @@ export async function saveProducao(payload: {
     reprocesso_numero: index === 0 && firstRep ? Number(firstRep.numero) : null,
     reprocesso_tipo: index === 0 && firstRep ? String(firstRep.tipo ?? "") : null,
     reprocesso_linha: index === 0 && firstRep && firstRep.linha != null && String(firstRep.linha).trim() !== "" ? String(firstRep.linha).trim() : null,
-    reprocesso_grupo: index === 0 && firstRep && firstRep.grupo != null && ["Reprocesso", "Matéria Prima Açaí", "Matéria Prima Fruto"].includes(String(firstRep.grupo)) ? String(firstRep.grupo) : null,
     reprocesso_codigo: index === 0 && firstRep ? (firstRep.codigo != null ? String(firstRep.codigo) : null) : null,
     reprocesso_descricao: index === 0 && firstRep ? (firstRep.descricao != null ? String(firstRep.descricao) : null) : null,
     reprocesso_quantidade: index === 0 && firstRep ? parseFloat(String(firstRep.quantidade ?? 0).replace(",", ".")) : 0,

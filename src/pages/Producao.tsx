@@ -1535,12 +1535,13 @@ function Producao() {
         } else if (result.data && result.data.length > 0) {
           const firstRecord = result.data[0];
           if (firstRecord.reprocesso_numero || firstRecord.reprocesso_codigo || firstRecord.reprocesso_descricao) {
+            const grupoFromJson = (firstRecord as any).reprocessos?.[0]?.grupo;
             loadedReprocessos.push({
               id: Date.now(),
               numero: firstRecord.reprocesso_numero || 1,
               tipo: (firstRecord.reprocesso_tipo as "Cortado" | "Usado") || "Cortado",
               linha: (firstRecord as any).reprocesso_linha || "",
-              grupo: parseGrupo((firstRecord as any).reprocesso_grupo) || grupoPadrao,
+              grupo: parseGrupo(grupoFromJson) || grupoPadrao,
               codigo: firstRecord.reprocesso_codigo || "",
               descricao: firstRecord.reprocesso_descricao || "",
               quantidade: firstRecord.reprocesso_quantidade ? firstRecord.reprocesso_quantidade.toString().replace(".", ",") : "",

@@ -1,20 +1,14 @@
 -- ============================================================================
--- Migração: adicionar coluna Grupo nos reprocessos (OCPD e OCPR)
--- Opções fixas: Reprocesso | Matéria Prima Açaí | Matéria Prima Fruto
--- Não é necessário criar tabela OCPR: o grupo já é salvo no JSONB "reprocessos"
--- da OCPD (cada elemento do array pode ter "grupo"). Esta migração adiciona a
--- coluna reprocesso_grupo (espelho do 1º) e, se existir a tabela OCPR, a coluna grupo.
+-- Migração: Grupo nos reprocessos — apenas OCPR; OCPD não tem coluna reprocesso_grupo
+-- O grupo fica somente no JSONB "reprocessos" da OCPD (cada elemento pode ter "grupo").
 -- Execute no SQL Editor do Supabase (PostgreSQL).
 -- ============================================================================
 
--- 1) OCPD: coluna reprocesso_grupo (espelho do 1º reprocesso, para consultas/legado)
+-- Remover coluna reprocesso_grupo da OCPD se existir (não deve ser usada)
 ALTER TABLE "OCPD"
-  ADD COLUMN IF NOT EXISTS reprocesso_grupo VARCHAR(100);
+  DROP COLUMN IF EXISTS reprocesso_grupo;
 
-COMMENT ON COLUMN "OCPD".reprocesso_grupo IS 'Grupo do reprocesso: Reprocesso, Matéria Prima Açaí ou Matéria Prima Fruto';
-
-
--- 2) OCPR: coluna grupo (só executa se a tabela OCPR existir)
+-- OCPR: coluna grupo (só executa se a tabela OCPR existir)
 DO $$
 BEGIN
   IF EXISTS (
@@ -22,7 +16,7 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'OCPR'
   ) THEN
     ALTER TABLE "OCPR" ADD COLUMN IF NOT EXISTS grupo VARCHAR(100);
-    COMMENT ON COLUMN "OCPR".grupo IS 'Grupo do reprocesso: Reprocesso, Matéria Prima Açaí ou Matéria Prima Fruto';
+    EXECUTE 'COMMENT ON COLUMN "OCPR".grupo IS ''Grupo do reprocesso: Reprocesso, Matéria Prima Açaí ou Matéria Prima Fruto''';
   END IF;
 END $$;
 

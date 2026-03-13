@@ -1270,7 +1270,6 @@ router.post("/producao/save", async (req, res) => {
         reprocesso_numero: isFirstItem && reprocessos && reprocessos.length > 0 ? reprocessos[0].numero : null,
         reprocesso_tipo: isFirstItem && reprocessos && reprocessos.length > 0 ? reprocessos[0].tipo : null,
         reprocesso_linha: isFirstItem && reprocessos && reprocessos.length > 0 ? (reprocessos[0].linha || null) : null,
-        reprocesso_grupo: isFirstItem && reprocessos && reprocessos.length > 0 ? (reprocessos[0].grupo || null) : null,
         reprocesso_codigo: isFirstItem && reprocessos && reprocessos.length > 0 ? reprocessos[0].codigo : null,
         reprocesso_descricao: isFirstItem && reprocessos && reprocessos.length > 0 ? reprocessos[0].descricao : null,
         reprocesso_quantidade: isFirstItem && reprocessos && reprocessos.length > 0 ? parseFloat(reprocessos[0].quantidade) || 0 : 0,
