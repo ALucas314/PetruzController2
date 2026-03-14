@@ -37,6 +37,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { useToast } from "@/hooks/use-toast";
 import { getExistingOCTIPairs, insertOCTIItems, type NewItemForInsert } from "@/services/supabaseData";
 
 interface ExcelData {
@@ -63,6 +64,7 @@ interface ComparisonResult {
 }
 
 export default function ImportarExcel() {
+  const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [selectedSheet, setSelectedSheet] = useState<string>("");
   const [availableSheets, setAvailableSheets] = useState<string[]>([]);
@@ -187,7 +189,13 @@ export default function ImportarExcel() {
     const codigo =
       (row.codigo as string)?.toString().trim() ||
       (row["Nº do item"] as string)?.toString().trim() ||
-      (row.codigo_item as string)?.toString().trim();
+      (row.codigo_item as string)?.toString().trim() ||
+      (row.Codg as string)?.toString().trim() ||
+      (row["Codg"] as string)?.toString().trim() ||
+      (row.Código as string)?.toString().trim() ||
+      (row["Código"] as string)?.toString().trim() ||
+      (row.Cod as string)?.toString().trim() ||
+      (row.Code as string)?.toString().trim();
     const nome =
       (row.nome as string)?.toString().trim() ||
       (row["Descrição do item"] as string)?.toString().trim() ||
@@ -202,6 +210,8 @@ export default function ImportarExcel() {
         (row.unidade as string)?.trim() ||
         (row["Unidade de medida de compra"] as string)?.trim() ||
         (row.unidade_medida as string)?.trim() ||
+        (row.Unid as string)?.trim() ||
+        (row["Unid"] as string)?.trim() ||
         "",
       grupo_itens:
         (row.grupo as string)?.trim() ||
@@ -251,16 +261,41 @@ export default function ImportarExcel() {
 
     try {
       const payload: NewItemForInsert[] = comparisonResult.newItemsData.map((i) => ({
-        codigo_item: i.codigo_item,
-        nome_item: i.nome_item,
-        unidade_medida: i.unidade_medida,
-        grupo_itens: i.grupo_itens,
+        codigo_item: String(i.codigo_item ?? "").trim(),
+        nome_item: String(i.nome_item ?? "").trim(),
+        unidade_medida: String(i.unidade_medida ?? "").trim(),
+        grupo_itens: String(i.grupo_itens ?? "").trim(),
       }));
       const result = await insertOCTIItems(payload);
       setInsertResult({ inserted: result.inserted, total: result.total });
       if (excelData) await compareWithDatabase(excelData.data);
+      if (result.inserted > 0) {
+        toast({
+          title: "Itens inseridos",
+          description: `${result.inserted} de ${result.total} item(ns) foram inseridos na tabela OCTI.`,
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "Nenhum item inserido",
+          description: "Nenhum registro foi gravado. Pode ser restrição de banco (código duplicado) ou política RLS. Veja a mensagem de erro abaixo.",
+          variant: "destructive",
+        });
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Erro ao inserir itens no banco");
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object" && err !== null && "message" in err
+            ? String((err as { message: unknown }).message)
+            : "Erro ao inserir itens no banco";
+      setError(msg);
+      toast({
+        title: "Erro ao inserir no banco",
+        description: msg,
+        variant: "destructive",
+      });
+      console.error("Erro insertOCTIItems:", err);
     } finally {
       setInserting(false);
     }

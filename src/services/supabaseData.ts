@@ -483,7 +483,9 @@ export interface NewItemForInsert {
   grupo_itens: string;
 }
 
-/** Insere itens na OCTI (Code, Name, U_Uom, U_ItemGroup). Retorna inserted e total. */
+const OCTI_INSERT_BATCH = 50;
+
+/** Insere itens na OCTI (Code, Name, U_Uom, U_ItemGroup) em lotes. Retorna inserted e total. */
 export async function insertOCTIItems(
   items: NewItemForInsert[]
 ): Promise<{ success: true; inserted: number; total: number; skipped: number }> {
@@ -502,25 +504,36 @@ export async function insertOCTIItems(
   if (toInsert.length === 0) {
     return { success: true, inserted: 0, total: valid.length, skipped: valid.length };
   }
-  const rows = toInsert.map((i) => ({
-    Code: i.codigo_item,
-    Name: i.nome_item,
-    U_Uom: i.unidade_medida || null,
-    U_ItemGroup: i.grupo_itens || null,
-  }));
-  const { data, error } = await supabase.from("OCTI").insert(rows).select();
-  if (error) {
-    if ((error as { code?: string }).code === "23505") {
-      return { success: true, inserted: 0, total: valid.length, skipped: valid.length };
+  let totalInserted = 0;
+  for (let i = 0; i < toInsert.length; i += OCTI_INSERT_BATCH) {
+    const batch = toInsert.slice(i, i + OCTI_INSERT_BATCH);
+    const rows = batch.map((it) => ({
+      Code: it.codigo_item,
+      Name: it.nome_item,
+      U_Uom: it.unidade_medida || null,
+      U_ItemGroup: it.grupo_itens || null,
+    }));
+    const { data, error } = await supabase.from("OCTI").insert(rows).select();
+    if (error) {
+      const err = error as { code?: string; message?: string; details?: string };
+      if (err.code === "23505") {
+        for (const row of rows) {
+          const { error: singleError } = await supabase.from("OCTI").insert(row).select();
+          if (!singleError) totalInserted += 1;
+        }
+      } else {
+        const msg = err.message || err.details || `Erro Supabase (${err.code || "unknown"}). Verifique RLS e permissões na tabela OCTI.`;
+        throw new Error(msg);
+      }
+    } else {
+      totalInserted += data?.length ?? 0;
     }
-    throw error;
   }
-  const inserted = data?.length ?? 0;
   return {
     success: true,
-    inserted,
+    inserted: totalInserted,
     total: valid.length,
-    skipped: valid.length - inserted,
+    skipped: valid.length - totalInserted,
   };
 }
 
