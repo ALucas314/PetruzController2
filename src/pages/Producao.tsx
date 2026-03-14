@@ -365,6 +365,15 @@ function Producao() {
   /** Filtro do grid por número de documento: valor digitado e valor aplicado ao clicar em Filtrar */
   const [gridFilterNumeroDoc, setGridFilterNumeroDoc] = useState("");
   const [gridFilterNumeroDocApplied, setGridFilterNumeroDocApplied] = useState("");
+  /** Intervalo de datas no grid de documentos (De / Até); valores dos inputs */
+  const [gridDataDe, setGridDataDe] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [gridDataAte, setGridDataAte] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  /** Intervalo aplicado ao clicar em Filtrar (usa esses valores para filtrar a lista) */
+  const [gridDataDeApplied, setGridDataDeApplied] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [gridDataAteApplied, setGridDataAteApplied] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  /** Filtro por filial no grid (valor do select); aplicado ao clicar em Filtrar */
+  const [gridFilialFilter, setGridFilialFilter] = useState<string>("");
+  const [gridFilialFilterApplied, setGridFilialFilterApplied] = useState<string>("");
 
   // Catálogo de itens vindo da OCTI (mapeado por código)
   const [itemCatalog, setItemCatalog] = useState<Record<string, { nome_item: string }>>({});
@@ -403,33 +412,48 @@ function Producao() {
     if (typeof dateValue === "string") return dateValue.split("T")[0];
     return new Date(dateValue).toISOString().split("T")[0];
   };
-  // Documentos da data selecionada (para grid na sub-aba Acompanhamento diário)
+  // Documentos no intervalo aplicado (De/Até) — só atualiza ao clicar em Filtrar
   const documentsForSelectedDate = useMemo(() => {
-    if (!dataCabecalhoSelecionada || !allRecords.length) return [];
-    const dataNorm = dataCabecalhoSelecionada.split("T")[0];
+    if (!gridDataDeApplied || !gridDataAteApplied || !allRecords.length) return [];
+    const de = gridDataDeApplied.split("T")[0];
+    const ate = gridDataAteApplied.split("T")[0];
     return allRecords.filter((r) => {
       const dateStr = normalizeDataDia(r.data_dia || r.data_cabecalho || r.data);
-      return dateStr === dataNorm;
+      if (!dateStr) return false;
+      return dateStr >= de && dateStr <= ate;
     });
-  }, [allRecords, dataCabecalhoSelecionada]);
+  }, [allRecords, gridDataDeApplied, gridDataAteApplied]);
 
-  // Grid: documentos da data filtrados por número de documento (quando filtro aplicado)
+  // Grid: documentos no período, opcionalmente filtrados por filial e por número de documento
   const gridFilteredDocuments = useMemo(() => {
-    if (!gridFilterNumeroDocApplied.trim()) return documentsForSelectedDate;
+    let list = documentsForSelectedDate;
+    if (gridFilialFilterApplied.trim()) {
+      const filialNorm = gridFilialFilterApplied.trim();
+      list = list.filter((r) => (r.filial_nome || "").trim() === filialNorm);
+    }
+    if (!gridFilterNumeroDocApplied.trim()) return list;
     const num = parseInt(gridFilterNumeroDocApplied.trim(), 10);
-    if (Number.isNaN(num) || num < 1) return documentsForSelectedDate;
-    return documentsForSelectedDate.filter((record) => {
+    if (Number.isNaN(num) || num < 1) return list;
+    return list.filter((record) => {
       const globalIndex = allRecords.findIndex(
         (r) => (r.recordKey && record.recordKey && r.recordKey === record.recordKey) || (r.id === record.id && (r.doc_id ?? null) === (record.doc_id ?? null))
       );
       const numeroRegistro = globalIndex >= 0 ? globalIndex + 1 : 0;
       return numeroRegistro === num;
     });
-  }, [documentsForSelectedDate, gridFilterNumeroDocApplied, allRecords]);
+  }, [documentsForSelectedDate, gridFilialFilterApplied, gridFilterNumeroDocApplied, allRecords]);
 
   // OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status)
   const [octpInicio, setOctpInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
+  /** Quando o usuário altera a hora final manualmente, guardamos o timestamp para contar a partir da hora selecionada até status Concluída */
+  const [horaFinalBaseSetAt, setHoraFinalBaseSetAt] = useState<Record<number, number>>({});
+  /** Ao editar a hora final (campo digitável), guardamos id e valor temporário para não sobrescrever com o contador */
+  const [editingHoraFinalId, setEditingHoraFinalId] = useState<number | null>(null);
+  const [editingHoraFinalValue, setEditingHoraFinalValue] = useState("");
+  /** Ao editar a hora inicial (campo digitável), guardamos id e valor temporário */
+  const [editingHoraInicioId, setEditingHoraInicioId] = useState<number | null>(null);
+  const [editingHoraInicioValue, setEditingHoraInicioValue] = useState("");
   const [octpLoading, setOctpLoading] = useState(false);
   // Filiais (OCTF)
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string; endereco: string }>>([]);
@@ -617,13 +641,13 @@ function Producao() {
       });
   }, [toast]);
 
-  // Atualizar horas restantes e hora final para cada item quando necessário
+  // Atualizar horas restantes e hora final para cada item quando necessário (só preenche hora final se o usuário não tiver definido)
   useEffect(() => {
     setItems((prevItems) =>
       prevItems.map((item) => {
         const restanteHoras = calculateRestanteHorasForItem(item);
-        const horaFinal = calculateHoraFinalForItem({ ...item, restanteHoras });
-        // Só atualiza se os valores mudaram para evitar loops
+        const horaFinalCalculada = calculateHoraFinalForItem({ ...item, restanteHoras });
+        const horaFinal = (item.horaFinal != null && String(item.horaFinal).trim() !== "") ? item.horaFinal : horaFinalCalculada;
         if (item.restanteHoras !== restanteHoras || item.horaFinal !== horaFinal) {
           return {
             ...item,
@@ -643,6 +667,49 @@ function Producao() {
       minute: "2-digit",
       second: "2-digit",
     });
+  };
+
+  /** Hora final OCTP: se Concluída mostra valor fixo; senão, se o usuário definiu uma base, conta a partir dela; senão mostra hora atual (contando). Exibição em HH:MM:SS. */
+  const getDisplayHoraFinalOCTP = useCallback((item: OCTPItem): string => {
+    if (item.descricao_status === "Concluída") {
+      const h = (item.horaFinal ?? "").trim();
+      if (!h) return "—";
+      return h.length <= 5 ? `${h}:00` : h; // "10:00" → "10:00:00"
+    }
+    if ((item.horaFinal ?? "").trim() !== "" && horaFinalBaseSetAt[item.id]) {
+      const [hh, mm] = [item.horaFinal!.slice(0, 2), item.horaFinal!.slice(3, 5)];
+      const base = new Date();
+      base.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+      const elapsed = Date.now() - horaFinalBaseSetAt[item.id];
+      return formatTime(new Date(base.getTime() + elapsed));
+    }
+    return formatTime(currentTime);
+  }, [currentTime, horaFinalBaseSetAt]);
+
+  /** Parseia "10" → "10:00", "1030" → "10:30", "9:30"/"09:30" etc e retorna "HH:MM" (armazenado); exibição usa HH:MM:SS */
+  const parseHoraFinalInput = (s: string): string | null => {
+    const t = (s ?? "").trim();
+    if (!t) return null;
+    const parts = t.split(/[:\s]/).map((x) => parseInt(x, 10));
+    if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1]) && parts[0] >= 0 && parts[0] <= 23 && parts[1] >= 0 && parts[1] <= 59) {
+      return `${String(parts[0]).padStart(2, "0")}:${String(parts[1]).padStart(2, "0")}`;
+    }
+    if (parts.length === 1 && !Number.isNaN(parts[0])) {
+      const n = parts[0];
+      if (n >= 0 && n <= 23) return `${String(n).padStart(2, "0")}:00`; // "10" → "10:00", "9" → "09:00"
+      const str = String(parts[0]);
+      if (str.length === 3) {
+        const h = Math.floor(n / 100);
+        const m = n % 100;
+        if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`; // "930" → "09:30"
+      }
+      if (str.length === 4) {
+        const h = Math.floor(n / 100);
+        const m = n % 100;
+        if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`; // "1030" → "10:30"
+      }
+    }
+    return null;
   };
 
   // Formatar data atual
@@ -990,7 +1057,14 @@ function Producao() {
     if (currentView === "cadastro") loadOCTP();
   }, [currentView, loadOCTP]);
 
-  /** Calcula o intervalo entre hora inicial e hora final (HH:MM ou HH:MM:SS) e retorna "Xh Ym" ou "—" */
+  /** Formata minutos totais como "HH:MM" (ex.: 90 → "01:30") */
+  const formatMinutosToHHMM = (totalMinutos: number) => {
+    const h = Math.floor(totalMinutos / 60);
+    const m = Math.round(totalMinutos % 60);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  };
+
+  /** Calcula o intervalo entre hora inicial e hora final e retorna "HH:MM" ou "—" */
   const formatOCTPIntervalo = (horaInicio: string, horaFinal: string) => {
     const parse = (s: string) => {
       if (!s || !s.trim()) return null;
@@ -1005,19 +1079,58 @@ function Producao() {
     if (minIni == null || minFim == null) return "—";
     let diff = minFim - minIni;
     if (diff < 0) diff += 24 * 60; // passa da meia-noite
-    const h = Math.floor(diff / 60);
-    const m = Math.round(diff % 60);
-    if (h === 0) return m ? `${m}m` : "0m";
-    return m ? `${h}h ${m}m` : `${h}h`;
+    return formatMinutosToHHMM(diff);
   };
 
   const formatDuracaoMinutos = (min: number | null | undefined) => {
     if (min == null || min < 0) return "—";
-    const h = Math.floor(min / 60);
-    const m = Math.round(min % 60);
-    if (h === 0) return m ? `${m}m` : "0m";
-    return m ? `${h}h ${m}m` : `${h}h`;
+    return formatMinutosToHHMM(min);
   };
+
+  /** Retorna a duração em minutos de um item OCTP (para soma do total). Usa a mesma hora final exibida (contagem ao vivo ou base definida pelo usuário). */
+  const getOCTPItemMinutos = useCallback(
+    (item: OCTPItem): number => {
+      const parse = (s: string) => {
+        if (!s || !s.trim()) return null;
+        const parts = s.trim().split(/[:\s]/).map(Number);
+        if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+          return parts[0] * 60 + parts[1] + (parts[2] != null && !Number.isNaN(parts[2]) ? parts[2] / 60 : 0);
+        }
+        return null;
+      };
+      if (item.descricao_status === "Concluída") {
+        if (item.horaInicio && item.horaFinal) {
+          const minIni = parse(item.horaInicio);
+          const minFim = parse(item.horaFinal);
+          if (minIni != null && minFim != null) {
+            let diff = minFim - minIni;
+            if (diff < 0) diff += 24 * 60;
+            return diff;
+          }
+        }
+        if (item.duracaoMinutos != null && item.duracaoMinutos >= 0) return item.duracaoMinutos;
+        return 0;
+      }
+      if (item.horaInicio) {
+        const minIni = parse(item.horaInicio);
+        const horaFimDisplay = getDisplayHoraFinalOCTP(item);
+        const minFim = parse(horaFimDisplay);
+        if (minIni != null && minFim != null) {
+          let diff = minFim - minIni;
+          if (diff < 0) diff += 24 * 60;
+          return diff;
+        }
+      }
+      return 0;
+    },
+    [getDisplayHoraFinalOCTP]
+  );
+
+  /** Total de minutos de intervalo (soma de todos os itens OCTP). */
+  const octpTotalIntervaloMinutos = useMemo(
+    () => octpItems.reduce((acc, item) => acc + getOCTPItemMinutos(item), 0),
+    [octpItems, getOCTPItemMinutos]
+  );
 
   const addOCTPItem = async () => {
     const dataDocumento = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
@@ -1060,7 +1173,12 @@ function Producao() {
   const updateOCTPItem = (id: number, field: keyof OCTPItem, value: string | number) => {
     const item = octpItems.find((o) => o.id === id);
     if (!item) return;
-    const updated = { ...item, [field]: value };
+    let updated = { ...item, [field]: value };
+    // Ao marcar status como "Concluída", congela a hora final no valor que estava sendo exibido (contando)
+    if (field === "descricao_status" && value === "Concluída") {
+      const horaFinalCongelada = getDisplayHoraFinalOCTP(item).slice(0, 8); // HH:MM:SS (ou HH:MM se menor)
+      updated = { ...updated, horaFinal: horaFinalCongelada.length >= 8 ? horaFinalCongelada : horaFinalCongelada + ":00" };
+    }
     setOctpItems(octpItems.map((o) => (o.id === id ? updated : o)));
     const payload: Record<string, unknown> = {
       dataDia: dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
@@ -1073,8 +1191,11 @@ function Producao() {
     else if (field === "inicio") payload.inicio = value as string;
     else if (field === "horaInicio") payload.hora_inicio = value as string;
     else if (field === "horaFinal") payload.hora_final = value as string;
-    else if (field === "descricao_status") payload.descricao_status = value as string;
-    if (field === "horaInicio" || field === "horaFinal") {
+    else if (field === "descricao_status") {
+      payload.descricao_status = value as string;
+      if (value === "Concluída") payload.hora_final = updated.horaFinal;
+    }
+    if (field === "horaInicio" || field === "horaFinal" || (field === "descricao_status" && value === "Concluída")) {
       const mins = computeDuracaoMinutos(updated.horaInicio, updated.horaFinal);
       if (mins !== null) payload.duracao_minutos = mins;
     }
@@ -1729,6 +1850,61 @@ function Producao() {
     }
   }, []);
 
+  // Busca documentos de um intervalo (De/Até) e mescla em allRecords (para grid com filtro por período)
+  const loadDocumentsForDateRange = useCallback(async (de: string, ate: string) => {
+    const deNorm = de?.split("T")[0];
+    const ateNorm = ate?.split("T")[0];
+    if (!deNorm || !ateNorm || !/^\d{4}-\d{2}-\d{2}$/.test(deNorm) || !/^\d{4}-\d{2}-\d{2}$/.test(ateNorm)) return;
+    if (deNorm > ateNorm) return;
+    try {
+      const result = await getProducaoHistory({
+        dataInicio: deNorm,
+        dataFim: ateNorm,
+        limit: 2000,
+      });
+      if (!Array.isArray(result) || result.length === 0) return;
+      setAllRecords((prev) => {
+        const recordsMap = new Map<string, any>();
+        prev.forEach((r) => {
+          const key = r.recordKey ?? `${normalizeDataDia(r.data_dia || r.data_cabecalho)}_${(r.filial_nome || "").trim()}_${r.doc_id ?? "legacy"}`;
+          recordsMap.set(key, { ...r, recordKey: key });
+        });
+        result.forEach((item: any) => {
+          const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+          if (!dateStr) return;
+          const filialNome = (item.filial_nome || "").trim();
+          const docId = item.doc_id ?? null;
+          const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}`;
+          if (!recordsMap.has(recordKey)) {
+            recordsMap.set(recordKey, {
+              ...item,
+              doc_id: docId,
+              recordDate: dateStr,
+              recordKey,
+            });
+          }
+        });
+        const merged = Array.from(recordsMap.values()).sort((a, b) => {
+          const dateA = parseDateString(a.recordDate || "");
+          const dateB = parseDateString(b.recordDate || "");
+          if (dateA.getTime() !== dateB.getTime()) return dateA.getTime() - dateB.getTime();
+          const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "");
+          if (cmpFilial !== 0) return cmpFilial;
+          return (a.id || 0) - (b.id || 0);
+        });
+        return merged;
+      });
+      const newDates = new Set<string>();
+      result.forEach((item: any) => {
+        const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+        if (dateStr) newDates.add(dateStr);
+      });
+      if (newDates.size > 0) setAvailableDates((prev) => new Set([...prev, ...newDates]));
+    } catch (e) {
+      console.error("Erro ao carregar documentos do período:", e);
+    }
+  }, []);
+
   // Função para carregar todos os registros ordenados (um registro = um documento: data_dia + filial + doc_id)
   // Sem filtro de filial para o grid mostrar todos os documentos da data (BELA, Petruz, etc.)
   const loadAllRecords = async (): Promise<any[]> => {
@@ -1957,6 +2133,12 @@ function Producao() {
     loadDocumentsForDate(date);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataCabecalhoSelecionada, availableDates]);
+
+  // Quando o grid está visível e o usuário clicou em Filtrar (intervalo aplicado), carregar documentos do período
+  useEffect(() => {
+    if (!showDocumentGridForDate || !gridDataDeApplied || !gridDataAteApplied) return;
+    loadDocumentsForDateRange(gridDataDeApplied, gridDataAteApplied);
+  }, [showDocumentGridForDate, gridDataDeApplied, gridDataAteApplied, loadDocumentsForDateRange]);
 
   // Sincronizar data e filial com o Painel de Controle (dashboard) para acompanhar o diário
   useEffect(() => {
@@ -2495,6 +2677,13 @@ function Producao() {
                           onChange={(v) => {
                             setDataCabecalhoSelecionada(v);
                             setShowDocumentGridForDate(true);
+                            const dataNorm = (v || "").split("T")[0];
+                            if (dataNorm) {
+                              setGridDataDe(dataNorm);
+                              setGridDataAte(dataNorm);
+                              setGridDataDeApplied(dataNorm);
+                              setGridDataAteApplied(dataNorm);
+                            }
                           }}
                           placeholder="Data"
                           triggerClassName="border-transparent group-hover:border-primary/30 bg-transparent hover:bg-muted/60 px-2 py-1 min-h-0 h-auto text-sm sm:text-base text-muted-foreground/90 font-medium"
@@ -2619,10 +2808,47 @@ function Producao() {
               {showDocumentGridForDate ? (
                 <div className="space-y-4">
                   <p className="text-sm font-medium text-muted-foreground">
-                    Documentos cadastrados em {formatDate(dataCabecalhoSelecionada ? parseDateString(dataCabecalhoSelecionada) : new Date())}
+                    Documentos no período: {formatDateShort(gridDataDeApplied)} até {formatDateShort(gridDataAteApplied)}
                   </p>
-                  <div className="flex flex-wrap items-end gap-2 sm:gap-3">
-                    <div className="flex flex-col gap-1.5 min-w-[120px]">
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 sm:gap-3">
+                    <div className="flex flex-col gap-1.5 w-full sm:min-w-[120px] sm:w-auto">
+                      <Label className="text-xs font-medium text-muted-foreground">De</Label>
+                      <DatePicker
+                        value={gridDataDe}
+                        onChange={(v) => v && setGridDataDe(v)}
+                        size="sm"
+                        triggerClassName="h-9 w-full min-w-0 text-sm"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5 w-full sm:min-w-[120px] sm:w-auto">
+                      <Label className="text-xs font-medium text-muted-foreground">Até</Label>
+                      <DatePicker
+                        value={gridDataAte}
+                        onChange={(v) => v && setGridDataAte(v)}
+                        size="sm"
+                        triggerClassName="h-9 w-full min-w-0 text-sm"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5 w-full sm:min-w-[140px] sm:max-w-[180px]">
+                      <Label className="text-xs font-medium text-muted-foreground">Filial</Label>
+                      <Select
+                        value={gridFilialFilter || "__todos__"}
+                        onValueChange={(v) => setGridFilialFilter(v === "__todos__" ? "" : v)}
+                      >
+                        <SelectTrigger className="h-9 w-full text-sm">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {filiais.map((f) => (
+                            <SelectItem key={f.id} value={(f.nome || "").trim()}>
+                              {(f.nome || "").trim()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1.5 w-full sm:min-w-[120px] sm:w-auto">
                       <Label htmlFor="grid-filter-numero" className="text-xs font-medium text-muted-foreground">
                         N° documento
                       </Label>
@@ -2637,30 +2863,39 @@ function Producao() {
                         className="h-9 w-full sm:w-[100px] text-sm tabular-nums"
                       />
                     </div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="h-9 gap-2 shrink-0"
-                      onClick={() => setGridFilterNumeroDocApplied(gridFilterNumeroDoc.trim())}
-                    >
-                      <Filter className="h-4 w-4" />
-                      Filtrar
-                    </Button>
-                    {gridFilterNumeroDocApplied && (
+                    <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:shrink-0">
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="secondary"
                         size="sm"
-                        className="h-9 text-muted-foreground hover:text-foreground"
+                        className="h-9 gap-2 w-full sm:w-auto"
                         onClick={() => {
-                          setGridFilterNumeroDoc("");
-                          setGridFilterNumeroDocApplied("");
+                          setGridDataDeApplied(gridDataDe);
+                          setGridDataAteApplied(gridDataAte);
+                          setGridFilialFilterApplied(gridFilialFilter);
+                          setGridFilterNumeroDocApplied(gridFilterNumeroDoc.trim());
                         }}
                       >
-                        Limpar
+                        <Filter className="h-4 w-4" />
+                        Filtrar
                       </Button>
-                    )}
+                      {(gridFilterNumeroDocApplied || gridFilialFilterApplied) && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 w-full sm:w-auto text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            setGridFilterNumeroDoc("");
+                            setGridFilterNumeroDocApplied("");
+                            setGridFilialFilter("");
+                            setGridFilialFilterApplied("");
+                          }}
+                        >
+                          Limpar
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {gridFilteredDocuments.map((record, index) => {
@@ -2720,9 +2955,9 @@ function Producao() {
                       Nenhum documento nesta data. Clique em &quot;Novo documento&quot; para criar.
                     </p>
                   )}
-                  {documentsForSelectedDate.length > 0 && gridFilterNumeroDocApplied && gridFilteredDocuments.length === 0 && (
+                  {documentsForSelectedDate.length > 0 && (gridFilterNumeroDocApplied || gridFilialFilterApplied) && gridFilteredDocuments.length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-4">
-                      Nenhum documento com o número {gridFilterNumeroDocApplied}. Use &quot;Limpar&quot; para ver todos.
+                      Nenhum documento encontrado com os filtros aplicados. Use &quot;Limpar&quot; para ver todos.
                     </p>
                   )}
                 </div>
@@ -3100,10 +3335,17 @@ function Producao() {
 
                       <div className="space-y-1.5 sm:space-y-2">
                         <Label htmlFor={`horaFinal - ${item.id} `} className="text-xs sm:text-sm">Hora Final (Previsão)</Label>
-                        <div className="flex h-9 sm:h-10 items-center rounded-md border border-input bg-primary/10 px-2 sm:px-3 text-xs sm:text-sm font-mono font-semibold text-primary">
-                          <span className="truncate">{item.horaFinal || "---"}</span>
-                        </div>
-                        <p className="text-[10px] sm:text-xs text-muted-foreground">Cálculo automático em tempo real</p>
+                        <Input
+                          id={`horaFinal - ${item.id} `}
+                          type="time"
+                          value={(item.horaFinal != null && String(item.horaFinal).trim() !== "")
+                            ? String(item.horaFinal).slice(0, 5)
+                            : calculateHoraFinalForItem(item).slice(0, 5)}
+                          onChange={(e) => updateItem(item.id, "horaFinal", e.target.value)}
+                          className="h-9 sm:h-10 text-xs sm:text-sm font-mono font-semibold bg-primary/10 border-input text-primary"
+                          title="Hora atual em tempo real quando vazio; altere se quiser definir outra hora"
+                        />
+                        <p className="text-[10px] sm:text-xs text-muted-foreground">Hora atual em tempo real; pode alterar se quiser</p>
                       </div>
                     </div>
                   </div>
@@ -3614,7 +3856,7 @@ function Producao() {
                             <TableHead className="min-w-[100px] sm:min-w-[120px] text-xs sm:text-sm">Início</TableHead>
                             <TableHead className="min-w-[90px] sm:min-w-[100px] text-xs sm:text-sm">Hora inicial</TableHead>
                             <TableHead className="min-w-[90px] sm:min-w-[100px] text-xs sm:text-sm">Hora final</TableHead>
-                            <TableHead className="min-w-[80px] sm:min-w-[90px] text-xs sm:text-sm">Intervalo</TableHead>
+                            <TableHead className="min-w-[80px] sm:min-w-[90px] text-xs sm:text-sm text-right">Intervalo</TableHead>
                             <TableHead className="min-w-[150px] sm:min-w-[200px] text-xs sm:text-sm">Descrição do Status</TableHead>
                             <TableHead className="w-12 sm:w-16"></TableHead>
                           </TableRow>
@@ -3670,24 +3912,82 @@ function Producao() {
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
                                   <Input
-                                    type="time"
-                                    value={item.horaInicio}
-                                    onChange={(e) => updateOCTPItem(item.id, "horaInicio", e.target.value)}
-                                    className="h-8 sm:h-9 text-xs sm:text-sm"
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="HH:MM"
+                                    value={editingHoraInicioId === item.id ? editingHoraInicioValue : item.horaInicio}
+                                    onFocus={() => {
+                                      setEditingHoraInicioId(item.id);
+                                      setEditingHoraInicioValue(item.horaInicio || "");
+                                    }}
+                                    onChange={(e) => setEditingHoraInicioValue(e.target.value)}
+                                    onBlur={(e) => {
+                                      const raw = (e.target as HTMLInputElement).value.trim();
+                                      const parsed = parseHoraFinalInput(raw);
+                                      if (parsed != null) {
+                                        updateOCTPItem(item.id, "horaInicio", parsed);
+                                      }
+                                      setEditingHoraInicioId(null);
+                                    }}
+                                    className="h-8 sm:h-9 text-xs sm:text-sm font-mono"
+                                    title="Digite a hora (ex: 10 ou 0930 para 09:30)"
                                   />
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
-                                  <Input
-                                    type="time"
-                                    value={item.horaFinal}
-                                    onChange={(e) => updateOCTPItem(item.id, "horaFinal", e.target.value)}
-                                    className="h-8 sm:h-9 text-xs sm:text-sm"
-                                  />
+                                  {item.descricao_status === "Concluída" ? (
+                                    <div className="flex h-8 sm:h-9 items-center rounded-md border border-input bg-primary/10 px-2 sm:px-3 text-xs sm:text-sm font-mono font-semibold text-primary min-w-[4.5rem]">
+                                      {getDisplayHoraFinalOCTP(item)}
+                                    </div>
+                                  ) : editingHoraFinalId === item.id ? (
+                                    <Input
+                                      type="text"
+                                      inputMode="numeric"
+                                      placeholder="HH:MM:SS"
+                                      value={editingHoraFinalValue}
+                                      autoFocus
+                                      onChange={(e) => setEditingHoraFinalValue(e.target.value)}
+                                      onBlur={(e) => {
+                                        const raw = (e.target as HTMLInputElement).value.trim();
+                                        const parsed = parseHoraFinalInput(raw);
+                                        if (parsed != null) {
+                                          updateOCTPItem(item.id, "horaFinal", parsed);
+                                          setHoraFinalBaseSetAt((prev) => ({ ...prev, [item.id]: Date.now() }));
+                                        }
+                                        setEditingHoraFinalId(null);
+                                      }}
+                                      className="h-8 sm:h-9 w-full min-w-[5.5rem] text-xs sm:text-sm font-mono font-semibold bg-primary/10 border-input text-primary"
+                                      title="Digite a hora (ex: 10 ou 10:00:00) e clique fora para salvar"
+                                    />
+                                  ) : (
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => {
+                                        setEditingHoraFinalId(item.id);
+                                        setEditingHoraFinalValue(getDisplayHoraFinalOCTP(item));
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                          e.preventDefault();
+                                          setEditingHoraFinalId(item.id);
+                                          setEditingHoraFinalValue(getDisplayHoraFinalOCTP(item));
+                                        }
+                                      }}
+                                      className="flex h-8 sm:h-9 w-full min-w-[5.5rem] cursor-text items-center rounded-md border border-input bg-primary/10 px-3 py-2 text-xs sm:text-sm font-mono font-semibold text-primary ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:border-primary/50"
+                                      title="Hora final: contando em tempo real; clique para alterar (ex: 09:00)"
+                                    >
+                                      {getDisplayHoraFinalOCTP(item)}
+                                    </div>
+                                  )}
                                 </TableCell>
-                                <TableCell className="p-2 sm:p-4 text-xs sm:text-sm text-muted-foreground">
-                                  {item.horaInicio || item.horaFinal
-                                    ? formatOCTPIntervalo(item.horaInicio, item.horaFinal)
-                                    : formatDuracaoMinutos(item.duracaoMinutos)}
+                                <TableCell className="p-2 sm:p-4 text-xs sm:text-sm text-muted-foreground font-mono text-right min-w-[80px] sm:min-w-[90px]">
+                                  {item.descricao_status === "Concluída"
+                                    ? (item.horaInicio || item.horaFinal
+                                        ? formatOCTPIntervalo(item.horaInicio, item.horaFinal)
+                                        : formatDuracaoMinutos(item.duracaoMinutos))
+                                    : item.horaInicio
+                                      ? formatOCTPIntervalo(item.horaInicio, getDisplayHoraFinalOCTP(item))
+                                      : formatDuracaoMinutos(item.duracaoMinutos)}
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
                                   <Select
@@ -3727,6 +4027,17 @@ function Producao() {
                                 </TableCell>
                               </TableRow>
                             ))
+                          )}
+                          {octpItems.length > 0 && (
+                            <TableRow className="bg-muted/50 hover:bg-muted/50 border-t-2 border-border font-semibold">
+                              <TableCell colSpan={7} className="p-2 sm:p-4 text-xs sm:text-sm text-right">
+                                Total (intervalo)
+                              </TableCell>
+                              <TableCell className="p-2 sm:p-4 text-xs sm:text-sm font-mono font-semibold text-foreground text-right min-w-[80px] sm:min-w-[90px]">
+                                {formatMinutosToHHMM(octpTotalIntervaloMinutos)}
+                              </TableCell>
+                              <TableCell colSpan={2} className="p-2 sm:p-4" />
+                            </TableRow>
                           )}
                         </TableBody>
                       </Table>

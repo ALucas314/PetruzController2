@@ -10,6 +10,7 @@ import {
   ChevronDown,
   CalendarCheck,
   FileSpreadsheet,
+  FileText,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -47,6 +48,7 @@ const menuItems: MenuItem[] = [
       { title: "Cadastro de Linhas", url: "/cadastro-linhas", icon: Factory }
     ]
   },
+  { title: "Relatórios", url: "/relatorios", icon: FileText },
   { title: "Importar Excel", url: "/importar-excel", icon: FileSpreadsheet },
 ];
 
