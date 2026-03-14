@@ -52,7 +52,6 @@ export default function Relatorios() {
   const hojeStrDoc = hoje.toISOString().split("T")[0];
 
   // Documentos no período (grid com filtros De/Até, Filial, N° documento)
-  const hojeStrDoc = hoje.toISOString().split("T")[0];
   const [docGridDataDe, setDocGridDataDe] = useState(primeiroDiaMes);
   const [docGridDataAte, setDocGridDataAte] = useState(hojeStrDoc);
   const [docGridDataDeApplied, setDocGridDataDeApplied] = useState(primeiroDiaMes);
