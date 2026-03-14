@@ -265,6 +265,7 @@ export default function Relatorios() {
                           state: {
                             loadData: record.data_dia,
                             loadFilialNome: record.filial_nome || "",
+                            loadDocId: record.doc_id ?? undefined,
                           },
                         })
                       }
@@ -275,6 +276,7 @@ export default function Relatorios() {
                             state: {
                               loadData: record.data_dia,
                               loadFilialNome: record.filial_nome || "",
+                              loadDocId: record.doc_id ?? undefined,
                             },
                           });
                         }

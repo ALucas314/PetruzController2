@@ -321,6 +321,8 @@ function Producao() {
     return () => window.removeEventListener("resize", update);
   }, []);
   const openedFromStateRef = useRef(false);
+  /** true depois que o documento aberto pelo Relatório terminou de carregar (evita flicker loading/documento) */
+  const reportDocumentLoadedRef = useRef(false);
   const isNewDocumentRef = useRef(false); // true após "Novo documento" para não recarregar do DB e manter setas habilitadas
   const justLoadedByIndexRef = useRef(false); // true após carregar doc pela seta, para o useEffect não sobrescrever com load sem filial
   const skipNextDataLoadRef = useRef(false); // true após restaurar rascunho, para não sobrescrever com loadFromDatabase
@@ -353,7 +355,10 @@ function Producao() {
   const [saveStatus, setSaveStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyData, setHistoryData] = useState<any[]>([]);
-  const [currentView, setCurrentView] = useState<"menu" | "cadastro" | "historico">("menu");
+  const [currentView, setCurrentView] = useState<"menu" | "cadastro" | "historico">(() => {
+    const s = location.state as { loadData?: string; loadFilialNome?: string } | null;
+    return s?.loadData && s?.loadFilialNome ? "cadastro" : "menu";
+  });
   const [availableDates, setAvailableDates] = useState<Set<string>>(new Set());
   const [allRecords, setAllRecords] = useState<any[]>([]); // Todos os registros ordenados
   const [currentRecordIndex, setCurrentRecordIndex] = useState<number>(-1); // Índice do registro atual
@@ -1678,15 +1683,6 @@ function Producao() {
           description: `${result.count} item(ns) carregado(s) do banco!`,
           variant: "default",
         });
-      } else {
-        // Não exibir toast quando o usuário só selecionou a data para ver o grid (lista de documentos da data)
-        if (!showDocumentGridForDate) {
-          toast({
-            title: "Nenhum dado encontrado",
-            description: `Nenhum dado para ${formatDateShort(dataToLoad)}`,
-            variant: "destructive",
-          });
-        }
       }
     } catch (error: any) {
       console.error("Erro ao carregar produção:", error);
@@ -2150,16 +2146,19 @@ function Producao() {
     } catch {}
   }, [dataCabecalhoSelecionada, filialSelecionada, filiais]);
 
-  // Abrir documento vindo de Relatórios (navigate com state: loadData, loadFilialNome)
+  // Abrir documento vindo de Relatórios (navigate com state: loadData, loadFilialNome, loadDocId?)
   useEffect(() => {
-    const state = location.state as { loadData?: string; loadFilialNome?: string } | null;
+    const state = location.state as { loadData?: string; loadFilialNome?: string; loadDocId?: string | null } | null;
     if (!state?.loadData || !state?.loadFilialNome || openedFromStateRef.current || filiais.length === 0) return;
     openedFromStateRef.current = true;
+    reportDocumentLoadedRef.current = false;
     setDataCabecalhoSelecionada(state.loadData);
     const filial = filiais.find((f) => (f.nome || "").trim() === (state.loadFilialNome || "").trim());
     if (filial) setFilialSelecionada(filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`);
     setCurrentView("cadastro");
-    loadFromDatabase(state.loadData, state.loadFilialNome);
+    loadFromDatabase(state.loadData, state.loadFilialNome, state.loadDocId ?? undefined).finally(() => {
+      reportDocumentLoadedRef.current = true;
+    });
   }, [location.state, filiais]);
 
   // Carregar dados quando a data mudar (apenas na view de cadastro)
@@ -2593,6 +2592,33 @@ function Producao() {
 
     // Conteúdo do cadastro (key evita reconciliação com a view histórico = sem animações estranhas na troca de aba)
     if (currentView === "cadastro") {
+      const stateFromReport = location.state as { loadData?: string; loadFilialNome?: string } | null;
+      const openingFromReport = Boolean(stateFromReport?.loadData && stateFromReport?.loadFilialNome);
+      const waitingForReportDocument = openingFromReport && !reportDocumentLoadedRef.current;
+
+      if (waitingForReportDocument) {
+        return (
+          <div key="cadastro" className="space-y-6 min-w-0">
+            <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setCurrentView("menu")}
+                className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
+                aria-label="Voltar ao menu"
+                title="Voltar ao menu"
+              >
+                <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
+              </Button>
+            </div>
+            <div className="flex flex-col items-center justify-center min-h-[50vh] py-12 gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Carregando documento...</p>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div key="cadastro" className="space-y-6 min-w-0">
           {/* Voltar — mesma estrutura que na view Histórico para altura consistente */}
