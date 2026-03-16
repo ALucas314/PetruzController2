@@ -78,7 +78,9 @@ export default function Relatorios() {
         setDocGridRecords([]);
         return;
       }
-      const result = await getProducaoHistory({ dataInicio: de, dataFim: ate, limit: 2000 });
+      const [y, m] = de.split("-").map(Number);
+      const primeiroDiaMes = `${y}-${String(m).padStart(2, "0")}-01`;
+      const result = await getProducaoHistory({ dataInicio: primeiroDiaMes, dataFim: ate, limit: 2000 });
       const recordsMap = new Map<string, DocRecord>();
       (result as any[]).forEach((item: any) => {
         const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
@@ -122,13 +124,20 @@ export default function Relatorios() {
     return list;
   }, [docGridRecords, docGridFilialFilterApplied]);
 
+  const docGridListAfterDate = useMemo(() => {
+    const de = docGridDataDeApplied.split("T")[0];
+    const ate = docGridDataAteApplied.split("T")[0];
+    if (!de || !ate) return docGridListAfterFilial;
+    return docGridListAfterFilial.filter((r) => r.data_dia >= de && r.data_dia <= ate);
+  }, [docGridListAfterFilial, docGridDataDeApplied, docGridDataAteApplied]);
+
   const docGridFiltered = useMemo(() => {
-    if (!docGridNumeroFilterApplied.trim()) return docGridListAfterFilial;
+    if (!docGridNumeroFilterApplied.trim()) return docGridListAfterDate;
     const num = parseInt(docGridNumeroFilterApplied.trim(), 10);
-    if (Number.isNaN(num) || num < 1) return docGridListAfterFilial;
-    const item = docGridListAfterFilial[num - 1];
+    if (Number.isNaN(num) || num < 1) return docGridListAfterDate;
+    const item = docGridListAfterDate[num - 1];
     return item ? [item] : [];
-  }, [docGridListAfterFilial, docGridNumeroFilterApplied]);
+  }, [docGridListAfterDate, docGridNumeroFilterApplied]);
 
   useEffect(() => {
     loadDocGrid();
