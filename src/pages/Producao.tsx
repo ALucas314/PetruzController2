@@ -110,12 +110,20 @@ interface OCTPItem {
   descricao_status: string;
 }
 
+/** Status que param o relógio (hora final fixa). */
+const OCTP_STATUS_RELOGIO_PARADO = ["Concluída", "Concluída com atraso", "Não Concluída"] as const;
+
+function isOCTPStatusRelogioParado(status: string | null | undefined): boolean {
+  return status != null && (OCTP_STATUS_RELOGIO_PARADO as readonly string[]).includes(status);
+}
+
 /** Opções de status do OCTP com cor da bolinha */
 const OCTP_STATUS_OPTIONS = [
   { id: "Cancelada", label: "Cancelada", color: "#6b7280" },           // Cinza
   { id: "Atrasada", label: "Atrasada", color: "#ef4444" },             // Vermelha
   { id: "Concluída", label: "Concluída", color: "#22c55e" },           // Verde
   { id: "Concluída com atraso", label: "Concluída com atraso", color: "#f97316" }, // Laranja
+  { id: "Não Concluída", label: "Não Concluída", color: "#dc2626" },   // Vermelho escuro
   { id: "Em andamento", label: "Em andamento", color: "#eab308" },     // Amarelo
   { id: "A iniciar", label: "A iniciar", color: "#3b82f6" },           // Azul
 ] as const;
@@ -126,6 +134,7 @@ const OCTP_PIE_GRADIENTS: Record<string, { light: string; dark: string }> = {
   "#22c55e": { light: "#4ade80", dark: "#15803d" },
   "#eab308": { light: "#facc15", dark: "#a16207" },
   "#f97316": { light: "#fb923c", dark: "#c2410c" },
+  "#dc2626": { light: "#f87171", dark: "#991b1b" },
   "#3b82f6": { light: "#60a5fa", dark: "#1d4ed8" },
   "#6b7280": { light: "#9ca3af", dark: "#4b5563" },
 };
@@ -674,9 +683,9 @@ function Producao() {
     });
   };
 
-  /** Hora final OCTP: se Concluída mostra valor fixo; senão, se o usuário definiu uma base, conta a partir dela; senão mostra hora atual (contando). Exibição em HH:MM:SS. */
+  /** Hora final OCTP: se status conclui (Concluída / Concluída com atraso / Não Concluída) mostra valor fixo; senão, se o usuário definiu uma base, conta a partir dela; senão mostra hora atual (contando). Exibição em HH:MM:SS. */
   const getDisplayHoraFinalOCTP = useCallback((item: OCTPItem): string => {
-    if (item.descricao_status === "Concluída") {
+    if (isOCTPStatusRelogioParado(item.descricao_status)) {
       const h = (item.horaFinal ?? "").trim();
       if (!h) return "—";
       return h.length <= 5 ? `${h}:00` : h; // "10:00" → "10:00:00"
@@ -1103,7 +1112,7 @@ function Producao() {
         }
         return null;
       };
-      if (item.descricao_status === "Concluída") {
+      if (isOCTPStatusRelogioParado(item.descricao_status)) {
         if (item.horaInicio && item.horaFinal) {
           const minIni = parse(item.horaInicio);
           const minFim = parse(item.horaFinal);
@@ -1179,8 +1188,8 @@ function Producao() {
     const item = octpItems.find((o) => o.id === id);
     if (!item) return;
     let updated = { ...item, [field]: value };
-    // Ao marcar status como "Concluída", congela a hora final no valor que estava sendo exibido (contando)
-    if (field === "descricao_status" && value === "Concluída") {
+    // Ao marcar status como Concluída / Concluída com atraso / Não Concluída, congela a hora final no valor que estava sendo exibido (contando)
+    if (field === "descricao_status" && isOCTPStatusRelogioParado(value as string)) {
       const horaFinalCongelada = getDisplayHoraFinalOCTP(item).slice(0, 8); // HH:MM:SS (ou HH:MM se menor)
       updated = { ...updated, horaFinal: horaFinalCongelada.length >= 8 ? horaFinalCongelada : horaFinalCongelada + ":00" };
     }
@@ -1198,9 +1207,9 @@ function Producao() {
     else if (field === "horaFinal") payload.hora_final = value as string;
     else if (field === "descricao_status") {
       payload.descricao_status = value as string;
-      if (value === "Concluída") payload.hora_final = updated.horaFinal;
+      if (isOCTPStatusRelogioParado(value as string)) payload.hora_final = updated.horaFinal;
     }
-    if (field === "horaInicio" || field === "horaFinal" || (field === "descricao_status" && value === "Concluída")) {
+    if (field === "horaInicio" || field === "horaFinal" || (field === "descricao_status" && isOCTPStatusRelogioParado(value as string))) {
       const mins = computeDuracaoMinutos(updated.horaInicio, updated.horaFinal);
       if (mins !== null) payload.duracao_minutos = mins;
     }
@@ -3960,7 +3969,7 @@ function Producao() {
                                   />
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4">
-                                  {item.descricao_status === "Concluída" ? (
+                                  {isOCTPStatusRelogioParado(item.descricao_status) ? (
                                     <div className="flex h-8 sm:h-9 items-center rounded-md border border-input bg-primary/10 px-2 sm:px-3 text-xs sm:text-sm font-mono font-semibold text-primary min-w-[4.5rem]">
                                       {getDisplayHoraFinalOCTP(item)}
                                     </div>
@@ -4007,7 +4016,7 @@ function Producao() {
                                   )}
                                 </TableCell>
                                 <TableCell className="p-2 sm:p-4 text-xs sm:text-sm text-muted-foreground font-mono text-right min-w-[80px] sm:min-w-[90px]">
-                                  {item.descricao_status === "Concluída"
+                                  {isOCTPStatusRelogioParado(item.descricao_status)
                                     ? (item.horaInicio || item.horaFinal
                                         ? formatOCTPIntervalo(item.horaInicio, item.horaFinal)
                                         : formatDuracaoMinutos(item.duracaoMinutos))

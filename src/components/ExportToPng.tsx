@@ -22,6 +22,8 @@ export interface ExportToPngProps {
   onBeforeCapture?: () => void | Promise<void>;
   /** Chamado depois da captura (ex.: restaurar DOM) */
   onAfterCapture?: () => void | Promise<void>;
+  /** Atributo title do botão (tooltip) */
+  title?: string;
 }
 
 type RestoreStyle = { el: HTMLElement; styles: Record<string, string> };
@@ -241,6 +243,7 @@ export function ExportToPng({
   watermark,
   onBeforeCapture,
   onAfterCapture,
+  title,
 }: ExportToPngProps) {
   const [exporting, setExporting] = useState(false);
 
@@ -348,7 +351,7 @@ export function ExportToPng({
       onClick={handleExport}
       disabled={disabled || exporting}
       className={`gap-2 ${className ?? ""}`}
-      title="Baixar histórico como imagem PNG"
+      title={title ?? "Baixar histórico como imagem PNG"}
     >
       {exporting ? (
         <Loader2 className="h-4 w-4 animate-spin" />
