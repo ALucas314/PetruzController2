@@ -3530,7 +3530,6 @@ function Producao() {
                         }}
                         className="inline-flex h-9 rounded-md px-3 w-full sm:w-auto shrink-0"
                         label="Exportar PNG"
-                        title="Baixar apenas o card de Reprocesso como PNG"
                       />
                     </div>
                     </div>

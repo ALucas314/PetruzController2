@@ -18,6 +18,16 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Factory, Plus, Edit, Trash2, Loader2, CheckCircle2, AlertCircle, Save } from "lucide-react";
 import { getLines, createLine, updateLine, deleteLine } from "@/services/supabaseData";
@@ -37,6 +47,7 @@ export default function CadastroLinhas() {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [editingLinha, setEditingLinha] = useState<Linha | null>(null);
     const [formData, setFormData] = useState({ code: "", name: "" });
+    const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
     const { toast } = useToast();
 
     // Carregar linhas
@@ -154,12 +165,9 @@ export default function CadastroLinhas() {
     };
 
     const handleDelete = async (id: number) => {
-        if (!confirm("Tem certeza que deseja excluir esta linha?")) {
-            return;
-        }
-
         try {
             await deleteLine(id);
+            setDeleteConfirmId(null);
             toast({
                 title: "Sucesso",
                 description: "Linha excluída com sucesso",
@@ -264,7 +272,7 @@ export default function CadastroLinhas() {
                                                             <Button
                                                                 variant="outline"
                                                                 size="sm"
-                                                                onClick={() => handleDelete(linha.id)}
+                                                                onClick={() => setDeleteConfirmId(linha.id)}
                                                                 className="h-9 w-9 min-h-[44px] min-w-[44px] sm:h-8 sm:w-8 sm:min-h-0 sm:min-w-0 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                                                                 aria-label="Excluir linha"
                                                             >
