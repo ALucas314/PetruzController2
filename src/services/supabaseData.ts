@@ -66,6 +66,259 @@ export async function deleteLine(id: number) {
   if (error) throw error;
 }
 
+// --- OCPP (Planejamento de Produção) ---
+// Schema real no Supabase: code (minúsculo), "Previsão_Latas" (com acento), filial_nome, doc_ordem_global, doc_numero
+const OCPP_SELECT_BASE =
+  'id, data, op, filial_nome, doc_ordem_global, doc_numero, code, descricao, unidade, grupo, quantidade, quantidade_latas, "Previsão_Latas", quantidade_kg, tipo_fruto, tipo_linha, unidade_base, unidade_chapa, solidos, solid, quantidade_kg_tuneo, quantidade_liquida_prevista, cort_solid, t_cort, quantidade_basqueta, quantidade_chapa, latas, estrutura, basqueta, chapa, tuneo, qual_maquina, mao_de_obra, utilidade, estoque, timbragem, corte_reprocesso, observacao';
+
+export interface OCPPRow {
+  id: number;
+  data: string;
+  op: string | null;
+  filial_nome: string | null;
+  doc_ordem_global: number | null;
+  doc_numero: number | null;
+  Code: number | string | null;
+  descricao: string | null;
+  unidade: string | null;
+  grupo: string | null;
+  quantidade: number;
+  quantidade_latas: number;
+  previsao_latas: number;
+  quantidade_kg: number;
+  tipo_fruto: string | null;
+  tipo_linha: string | null;
+  unidade_base: string | null;
+  unidade_chapa: string | null;
+  solidos: number | null;
+  solid: number | null;
+  quantidade_kg_tuneo: number;
+  quantidade_liquida_prevista: number;
+  cort_solid: string | null;
+  t_cort: string | null;
+  quantidade_basqueta: number;
+  quantidade_chapa: number;
+  latas: number;
+  estrutura: string | null;
+  basqueta: string | null;
+  chapa: string | null;
+  tuneo: string | null;
+  qual_maquina: string | null;
+  mao_de_obra: string | null;
+  utilidade: string | null;
+  estoque: string | null;
+  timbragem: string | null;
+  corte_reprocesso: string | null;
+  observacao: string | null;
+}
+
+/** Lê valor numérico de r com fallback para nomes alternativos (ex.: Previsão_Latas) */
+function num(r: Record<string, unknown>, ...keys: string[]): number {
+  for (const k of keys) {
+    const v = r[k];
+    if (v != null && v !== "") return Number(v) || 0;
+  }
+  return 0;
+}
+/** Lê string de r com fallback para nomes alternativos */
+function str(r: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const k of keys) {
+    const v = r[k];
+    if (v != null && v !== "") return String(v);
+  }
+  return null;
+}
+
+function mapOcppRow(r: Record<string, unknown>): OCPPRow {
+  return {
+    id: Number(r.id),
+    data: r.data ? String(r.data).split("T")[0] : "",
+    op: str(r, "op") ?? null,
+    filial_nome: str(r, "filial_nome") ?? null,
+    doc_ordem_global: r.doc_ordem_global != null ? Number(r.doc_ordem_global) : null,
+    doc_numero: r.doc_numero != null ? Number(r.doc_numero) : null,
+    Code: (r.Code ?? r.code ?? null) as number | string | null,
+    descricao: str(r, "descricao") ?? null,
+    unidade: str(r, "unidade") ?? null,
+    grupo: str(r, "grupo") ?? null,
+    quantidade: num(r, "quantidade"),
+    quantidade_latas: num(r, "quantidade_latas", "Quantidade_Latas"),
+    previsao_latas: num(r, "previsao_latas", "Previsão_Latas", "Previsao_Latas"),
+    quantidade_kg: num(r, "quantidade_kg", "Quantidade_Kg"),
+    tipo_fruto: str(r, "tipo_fruto", "Tipo_Fruto") ?? null,
+    tipo_linha: str(r, "tipo_linha", "Tipo_Linha") ?? null,
+    unidade_base: str(r, "unidade_base", "Unidade_Base") ?? null,
+    unidade_chapa: str(r, "unidade_chapa", "Unidade_Chapa") ?? null,
+    solidos: r.solidos != null ? Number(r.solidos) : null,
+    solid: r.solid != null ? Number(r.solid) : null,
+    quantidade_kg_tuneo: num(r, "quantidade_kg_tuneo", "Quantidade_Kg_Tuneo"),
+    quantidade_liquida_prevista: num(r, "quantidade_liquida_prevista", "Quantidade_Liquida_Prevista"),
+    cort_solid: str(r, "cort_solid", "Cort_Solid") ?? null,
+    t_cort: str(r, "t_cort", "T_Cort") ?? null,
+    quantidade_basqueta: num(r, "quantidade_basqueta", "Quantidade_Basqueta"),
+    quantidade_chapa: num(r, "quantidade_chapa", "Quantidade_Chapa"),
+    latas: num(r, "latas"),
+    estrutura: str(r, "estrutura") ?? null,
+    basqueta: str(r, "basqueta") ?? null,
+    chapa: str(r, "chapa") ?? null,
+    tuneo: str(r, "tuneo") ?? null,
+    qual_maquina: str(r, "qual_maquina", "Qual_Maquina") ?? null,
+    mao_de_obra: str(r, "mao_de_obra", "Mao_De_Obra") ?? null,
+    utilidade: str(r, "utilidade") ?? null,
+    estoque: str(r, "estoque") ?? null,
+    timbragem: str(r, "timbragem") ?? null,
+    corte_reprocesso: str(r, "corte_reprocesso", "Corte_Reprocesso") ?? null,
+    observacao: str(r, "observacao", "Observacao") ?? null,
+  };
+}
+
+export async function getOcppByDateRange(
+  dataInicio: string,
+  dataFim: string,
+  filialNome?: string | null
+): Promise<OCPPRow[]> {
+  const de = dataInicio.split("T")[0];
+  const ate = dataFim.split("T")[0];
+  const filialTrim = filialNome != null && String(filialNome).trim() !== "" ? String(filialNome).trim() : null;
+
+  let query = supabase
+    .from("OCPP")
+    .select(OCPP_SELECT_BASE)
+    .gte("data", de)
+    .lte("data", ate)
+    .order("data", { ascending: true })
+    .order("id", { ascending: true });
+  if (filialTrim) query = query.eq("filial_nome", filialTrim);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  const rows = (data || []) as Record<string, unknown>[];
+  return rows.map((r) => mapOcppRow(r));
+}
+
+export type OCPPInsertPayload = {
+  data: string;
+  op?: string | null;
+  filial_nome?: string | null;
+  Code?: number | string | null;
+  descricao?: string | null;
+  unidade?: string | null;
+  grupo?: string | null;
+  quantidade?: number;
+  quantidade_latas?: number;
+  previsao_latas?: number;
+  quantidade_kg?: number;
+  tipo_fruto?: string | null;
+  tipo_linha?: string | null;
+  unidade_base?: string | null;
+  unidade_chapa?: string | null;
+  solidos?: number | null;
+  solid?: number | null;
+  quantidade_kg_tuneo?: number;
+  quantidade_liquida_prevista?: number;
+  cort_solid?: string | null;
+  t_cort?: string | null;
+  quantidade_basqueta?: number;
+  quantidade_chapa?: number;
+  latas?: number;
+  estrutura?: string | null;
+  basqueta?: string | null;
+  chapa?: string | null;
+  tuneo?: string | null;
+  qual_maquina?: string | null;
+  mao_de_obra?: string | null;
+  utilidade?: string | null;
+  estoque?: string | null;
+  timbragem?: string | null;
+  corte_reprocesso?: string | null;
+  observacao?: string | null;
+};
+
+/** Row para insert/update conforme schema real no Supabase: code (minúsculo), "Previsão_Latas" (com acento), filial_nome, doc_* */
+function ocppPayloadToBaseRow(payload: OCPPInsertPayload): Record<string, unknown> {
+  return {
+    data: payload.data.split("T")[0],
+    op: payload.op ?? null,
+    filial_nome: payload.filial_nome ?? null,
+    code: payload.Code != null ? String(payload.Code) : null,
+    descricao: payload.descricao ?? null,
+    unidade: payload.unidade ?? null,
+    grupo: payload.grupo ?? null,
+    quantidade: payload.quantidade ?? 0,
+    quantidade_latas: payload.quantidade_latas ?? 0,
+    "Previsão_Latas": payload.previsao_latas ?? 0,
+    quantidade_kg: payload.quantidade_kg ?? 0,
+    tipo_fruto: payload.tipo_fruto ?? null,
+    tipo_linha: payload.tipo_linha ?? null,
+    unidade_base: payload.unidade_base ?? null,
+    unidade_chapa: payload.unidade_chapa ?? null,
+    solidos: payload.solidos ?? null,
+    solid: payload.solid ?? null,
+    quantidade_kg_tuneo: payload.quantidade_kg_tuneo ?? 0,
+    quantidade_liquida_prevista: payload.quantidade_liquida_prevista ?? 0,
+    cort_solid: payload.cort_solid ?? null,
+    t_cort: payload.t_cort ?? null,
+    quantidade_basqueta: payload.quantidade_basqueta ?? 0,
+    quantidade_chapa: payload.quantidade_chapa ?? 0,
+    latas: payload.latas ?? 0,
+    estrutura: payload.estrutura ?? null,
+    basqueta: payload.basqueta ?? null,
+    chapa: payload.chapa ?? null,
+    tuneo: payload.tuneo ?? null,
+    qual_maquina: payload.qual_maquina ?? null,
+    mao_de_obra: payload.mao_de_obra ?? null,
+    utilidade: payload.utilidade ?? null,
+    estoque: payload.estoque ?? null,
+    timbragem: payload.timbragem ?? null,
+    corte_reprocesso: payload.corte_reprocesso ?? null,
+    observacao: payload.observacao ?? null,
+  };
+}
+
+export async function createOcpp(payload: OCPPInsertPayload): Promise<OCPPRow> {
+  const row = ocppPayloadToBaseRow(payload);
+  const { data, error } = await supabase.from("OCPP").insert(row).select(OCPP_SELECT_BASE).single();
+  if (error) throw error;
+  return mapOcppRow(data as Record<string, unknown>);
+}
+
+/** Converte campo do payload para nome da coluna no Supabase: code, "Previsão_Latas" */
+function ocppUpdateFieldToDb(key: keyof OCPPInsertPayload, value: unknown): [string, unknown] {
+  if (key === "data") return ["data", value != null ? String(value).split("T")[0] : null];
+  if (key === "Code") return ["code", value != null ? String(value) : null];
+  if (key === "previsao_latas") return ["Previsão_Latas", value != null ? Number(value) : 0];
+  return [key, value];
+}
+
+export async function updateOcpp(id: number, payload: Partial<OCPPInsertPayload>): Promise<OCPPRow> {
+  const body: Record<string, unknown> = {};
+  const keys: (keyof OCPPInsertPayload)[] = [
+    "data", "op", "Code", "descricao", "unidade", "grupo", "quantidade", "quantidade_latas", "previsao_latas", "quantidade_kg",
+    "tipo_fruto", "tipo_linha", "unidade_base", "unidade_chapa", "solidos", "solid", "quantidade_kg_tuneo", "quantidade_liquida_prevista",
+    "cort_solid", "t_cort", "quantidade_basqueta", "quantidade_chapa", "latas", "estrutura", "basqueta", "chapa", "tuneo",
+    "qual_maquina", "mao_de_obra", "utilidade", "estoque", "timbragem", "corte_reprocesso", "observacao",
+  ];
+  for (const k of keys) {
+    const v = payload[k];
+    if (v === undefined) continue;
+    const [dbKey, dbVal] = ocppUpdateFieldToDb(k, v);
+    body[dbKey] = dbVal;
+  }
+  if (Object.keys(body).length === 0) {
+    const { data, error: err } = await supabase.from("OCPP").select(OCPP_SELECT_BASE).eq("id", id).single();
+    if (err || !data) throw err || new Error("Registro não encontrado");
+    return mapOcppRow(data as Record<string, unknown>);
+  }
+  const { data, error } = await supabase.from("OCPP").update(body).eq("id", id).select(OCPP_SELECT_BASE).single();
+  if (error) throw error;
+  return mapOcppRow(data as Record<string, unknown>);
+}
+
+export async function deleteOcpp(id: number): Promise<void> {
+  const { error } = await supabase.from("OCPP").delete().eq("id", id);
+  if (error) throw error;
+}
+
 // --- Itens (OCTI) ---
 function octiRowToItem(item: Record<string, unknown>) {
   const code = item.Code ?? item.code;
@@ -90,20 +343,35 @@ export async function getItems() {
   return (data || []).map((item: Record<string, unknown>) => octiRowToItem(item));
 }
 
+/** Busca item na OCTI por código. Tenta "Code"/code (string e número) para compatibilidade com qualquer schema. */
 export async function getItemByCode(code: string) {
   const rawCode = (code || "").trim();
   if (!rawCode) return null;
-  const normalized = rawCode.replace(/^0+/, "") || rawCode;
-  const codes = Array.from(new Set([rawCode, normalized]));
-  const { data, error } = await supabase
-    .from("OCTI")
-    .select('id, line_id, "Code", "Name", "U_Uom", "U_ItemGroup"')
-    .in("Code", codes)
-    .order("Code")
-    .limit(1);
-  if (error) throw error;
-  if (!data || data.length === 0) return null;
-  return octiRowToItem(data[0] as Record<string, unknown>);
+
+  const tryFetch = async (col: "Code" | "code", val: string | number) => {
+    const r = await supabase.from("OCTI").select("*").eq(col, val).limit(1).maybeSingle();
+    return r.error ? null : r.data;
+  };
+
+  // 1) Busca exata com "Code" (PascalCase)
+  let row = await tryFetch("Code", rawCode);
+  if (!row) row = await tryFetch("code", rawCode);
+  // 2) Se código parece número, tentar como número (coluna pode ser numeric)
+  if (!row && /^\d+$/.test(rawCode)) {
+    const asNum = Number(rawCode);
+    row = await tryFetch("Code", asNum) ?? await tryFetch("code", asNum);
+  }
+  // 3) Sem zeros à esquerda (ex.: "013787" -> "13787")
+  if (!row) {
+    const semZeros = rawCode.replace(/^0+/, "") || rawCode;
+    if (semZeros !== rawCode) {
+      row = await tryFetch("Code", semZeros) ?? await tryFetch("code", semZeros);
+      if (!row && /^\d+$/.test(semZeros))
+        row = await tryFetch("Code", Number(semZeros)) ?? await tryFetch("code", Number(semZeros));
+    }
+  }
+  if (!row) return null;
+  return octiRowToItem(row as Record<string, unknown>);
 }
 
 // --- Dashboard ---
@@ -313,7 +581,7 @@ export async function saveProducao(payload: {
     const lineId = lineIdByCode[linhaCode] ?? (item.line_id != null ? Number(item.line_id) : 0);
     const dataDiaItem = (item.dataDia as string) || dataDia;
     const horaFinalRaw = item.horaFinal ?? item.hora_final ?? null;
-    const horaFinalTimestamp = toTimestamp(dataDiaItem, horaFinalRaw);
+    const horaFinalTimestamp = toTimestamp(dataDiaItem, horaFinalRaw as string | null | undefined);
     const row: Record<string, unknown> = {
     data_dia: dataDiaItem,
     filial_nome: filialNome || null,
@@ -361,6 +629,50 @@ export async function saveProducao(payload: {
 
   // Só atualizar/excluir linhas que JÁ são desta filial no banco (evita juntar documentos de BELA e PETRUZ)
   const filialFilter = filialNome && String(filialNome).trim() !== "" ? String(filialNome).trim() : null;
+  const dataDay = dataDia.split("T")[0];
+
+  // Para documento com doc_id: em inserções, preencher doc_numero (novo doc = próximo número; doc existente = mesmo número)
+  const hasInsert = items.some((_, idx) => {
+    const id = existingIds[idx];
+    return id == null || id === "" || !Number.isInteger(Number(id));
+  });
+  const hasUpdate = items.some((_, idx) => {
+    const id = existingIds[idx];
+    return id != null && id !== "" && Number.isInteger(Number(id));
+  });
+  let nextDocNumero: number | null = null;
+  let nextDocOrdemGlobal: number | null = null;
+  if (docId && docId.trim() !== "" && hasInsert) {
+    const firstExistingId = existingIds.find((id) => id != null && id !== "" && Number.isInteger(Number(id)));
+    if (hasUpdate && firstExistingId != null) {
+      const { data: existingRow } = await supabase.from("OCPD").select("doc_numero, doc_ordem_global").eq("id", Number(firstExistingId)).single();
+      const er = existingRow as { doc_numero?: number; doc_ordem_global?: number } | null;
+      nextDocNumero = er?.doc_numero ?? null;
+      nextDocOrdemGlobal = er?.doc_ordem_global ?? null;
+    }
+    if (nextDocNumero == null) {
+      let maxQuery = supabase
+        .from("OCPD")
+        .select("doc_numero")
+        .not("doc_numero", "is", null)
+        .order("doc_numero", { ascending: false })
+        .limit(1);
+      if (filialFilter) maxQuery = maxQuery.eq("filial_nome", filialFilter);
+      else maxQuery = maxQuery.is("filial_nome", null);
+      const { data: maxRow } = await maxQuery.maybeSingle();
+      nextDocNumero = ((maxRow as { doc_numero?: number } | null)?.doc_numero ?? 0) + 1;
+    }
+    if (nextDocOrdemGlobal == null) {
+      const { data: maxOrd } = await supabase
+        .from("OCPD")
+        .select("doc_ordem_global")
+        .not("doc_ordem_global", "is", null)
+        .order("doc_ordem_global", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      nextDocOrdemGlobal = ((maxOrd as { doc_ordem_global?: number } | null)?.doc_ordem_global ?? 0) + 1;
+    }
+  }
 
   let updated = 0;
   let inserted = 0;
@@ -375,6 +687,8 @@ export async function saveProducao(payload: {
       if (upErr) throw upErr;
       updated++;
     } else {
+      if (nextDocNumero != null) (row as Record<string, unknown>).doc_numero = nextDocNumero;
+      if (nextDocOrdemGlobal != null) (row as Record<string, unknown>).doc_ordem_global = nextDocOrdemGlobal;
       const { data: insertedData, error: inErr } = await supabase.from("OCPD").insert(row).select("id").single();
       if (inErr) throw inErr;
       inserted++;

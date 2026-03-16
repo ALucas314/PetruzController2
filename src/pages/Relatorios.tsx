@@ -39,6 +39,7 @@ interface DocRecord {
   data_dia: string;
   filial_nome: string;
   doc_id?: string | null;
+  doc_numero?: number | null;
   id?: number;
   data_cabecalho?: string;
   data?: string;
@@ -94,6 +95,7 @@ export default function Relatorios() {
             data_dia: dateStr,
             filial_nome: filialNome,
             doc_id: docId,
+            doc_numero: item.doc_numero != null ? Number(item.doc_numero) : undefined,
             id: item.id,
             data_cabecalho: item.data_cabecalho,
             data: item.data,
@@ -305,9 +307,9 @@ export default function Relatorios() {
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {formatDateLong(record.data_dia)}
                           </p>
-                          {record.doc_id && (
+                          {(record.doc_numero != null || record.doc_id) && (
                             <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono truncate">
-                              Doc. {String(record.doc_id).slice(0, 8)}…
+                              Doc. {record.doc_numero != null ? record.doc_numero : String(record.doc_id).slice(0, 8) + "…"}
                             </p>
                           )}
                         </div>
