@@ -38,6 +38,12 @@ DROP POLICY IF EXISTS "octp_authenticated_all" ON "OCTP";
 CREATE POLICY "octp_authenticated_all" ON "OCTP"
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- OCPP (planejamento de produção / PCP)
+ALTER TABLE "OCPP" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ocpp_authenticated_all" ON "OCPP";
+CREATE POLICY "ocpp_authenticated_all" ON "OCPP"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- OCTU_DRAFT_AUTH (rascunho por usuário logado)
 ALTER TABLE "OCTU_DRAFT_AUTH" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "octu_draft_auth_own" ON "OCTU_DRAFT_AUTH";

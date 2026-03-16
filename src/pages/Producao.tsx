@@ -2954,9 +2954,9 @@ function Producao() {
                               <p className="text-xs text-muted-foreground mt-0.5">
                                 {dateStr ? formatDate(parseDateString(dateStr)) : ""}
                               </p>
-                              {record.doc_id && (
+                              {(record.doc_numero != null || record.doc_id) && (
                                 <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono truncate">
-                                  Doc. {String(record.doc_id).slice(0, 8)}…
+                                  Doc. {record.doc_numero != null ? record.doc_numero : String(record.doc_id).slice(0, 8) + "…"}
                                 </p>
                               )}
                             </div>
