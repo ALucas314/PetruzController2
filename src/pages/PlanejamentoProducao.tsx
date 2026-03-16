@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Table,
@@ -33,6 +34,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 function formatDateBr(str: string): string {
   if (!str) return "—";
@@ -75,6 +86,13 @@ const SOLIDOS_PERFIS = [
   { value: 4, label: "Frutas" },
 ] as const;
 
+/** Opções para colunas de status (Estrutura, Basqueta, Chapa, etc.): —, PEND, OK. OK exibe verde. */
+const PEND_OK_OPCOES = [
+  { value: "__vazio__", label: "—" },
+  { value: "PEND", label: "PEND" },
+  { value: "OK", label: "OK" },
+] as const;
+
 /** Calcula Qtd. Liq. Prev. = Qtd. Latas × Solid (arredondado 2 decimais). */
 function calcQtdLiqPrev(qtdLatas: number, solid: number | null): number {
   const s = solid ?? 0;
@@ -87,11 +105,73 @@ function calcCortSolid(previsaoLatas: number, solid: number | null): number {
   return Math.round((previsaoLatas * s) * 100) / 100;
 }
 
+/** Calcula Previsão Latas a partir de Qtd. Kg e Tipo fruto: Açaí = Qtd. Kg / 14, Fruto = Qtd. Kg / 1. */
+function calcPrevisaoLatasFromTipoFruto(quantidadeKg: number, tipoFruto: string): number {
+  const kg = quantidadeKg ?? 0;
+  if (!kg) return 0;
+  const t = (tipoFruto ?? "").trim();
+  if (t === "Açaí") return Math.floor((kg / 14) * 100) / 100;
+  if (t === "Fruto") return Math.floor((kg / 1) * 100) / 100;
+  return 0;
+}
+
+/** Converte valor de Cort Solid (string "385,6" ou "385.6") em número. */
+function parseCortSolidValue(stored: string | null | undefined): number {
+  const s = (stored ?? "").trim();
+  if (!s) return 0;
+  return s.includes(",") ? parseFormattedNumber(s) : parseFloat(s) || 0;
+}
+
+/** Calcula T. Cort = Cort Solid - Qtd. Liq. Prev. (arredondado 2 decimais). */
+function calcTCort(cortSolid: number, qtdLiqPrev: number): number {
+  return Math.round((cortSolid - qtdLiqPrev) * 100) / 100;
+}
+
+/** Calcula Qtd. Basqueta = Qtd. Kg Túneo / Uni. Basqueta (arredondado 2 decimais). Uni. Basqueta é string (ex.: "9"). */
+function calcQtdBasqueta(quantidadeKgTuneo: number, unidadeBase: string | null | undefined): number {
+  const uni = parseFormattedNumber(unidadeBase ?? "");
+  if (uni === 0) return 0;
+  return Math.round((quantidadeKgTuneo / uni) * 100) / 100;
+}
+
+/** Calcula Qtd. Chapa = Qtd. Basqueta × Uni. Chapa (arredondado 2 decimais). Uni. Chapa é string (ex.: "8"). */
+function calcQtdChapa(quantidadeBasqueta: number, unidadeChapa: string | null | undefined): number {
+  const uni = parseFormattedNumber(unidadeChapa ?? "");
+  return Math.round((quantidadeBasqueta * uni) * 100) / 100;
+}
+
 /** Verifica se o tipo de linha indica 100 gramas (ex.: "100G", "100G Simples", "100gramas"). */
 function is100Gramas(tipoLinha: string): boolean {
   const s = (tipoLinha ?? "").trim().toLowerCase();
   if (!s) return false;
   return /100\s*g(\s|ramas|$)/.test(s) || s.includes("100g") || (s.includes("100") && s.includes("gramas"));
+}
+
+/** Verifica se o tipo de linha indica 1Kg (Uni. Basqueta 12, Uni. Chapa 2). */
+function is1Kg(tipoLinha: string): boolean {
+  const s = (tipoLinha ?? "").trim().toLowerCase();
+  if (!s) return false;
+  return s === "1kg" || s.includes("1kg") || /^1\s*kg$/i.test(s);
+}
+
+/** Verifica se o tipo de linha indica 5 Kg (Uni. Basqueta 10, sem Uni. Chapa). */
+function is5Kg(tipoLinha: string): boolean {
+  const s = (tipoLinha ?? "").trim().toLowerCase();
+  if (!s) return false;
+  return s === "5kg" || s.includes("5kg") || /\b5\s*kg\b/i.test(tipoLinha.trim());
+}
+
+/** Verifica se o tipo de linha indica Cubos (Uni. Basqueta 22, sem Uni. Chapa). */
+function isCubos(tipoLinha: string): boolean {
+  const s = (tipoLinha ?? "").trim().toLowerCase();
+  return s.includes("cubos");
+}
+
+/** Verifica se o tipo de linha indica Sticker (Uni. Basqueta 10, Uni. Chapa 3). */
+function isSticker(tipoLinha: string): boolean {
+  const s = (tipoLinha ?? "").trim().toLowerCase();
+  if (!s) return false;
+  return s === "sticker" || s.includes("sticker");
 }
 
 const parseFormattedNumber = (value: string | number | null | undefined): number => {
@@ -165,6 +245,7 @@ export default function PlanejamentoProducao() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [savingAll, setSavingAll] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -359,10 +440,14 @@ export default function PlanejamentoProducao() {
     solid: row.solid ?? null,
     quantidade_kg_tuneo: row.quantidade_kg_tuneo ?? 0,
     quantidade_liquida_prevista: (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null),
-    cort_solid: (row.cort_solid ?? "").trim() !== "" ? row.cort_solid : String(calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null)) || null,
-    t_cort: row.t_cort ?? null,
-    quantidade_basqueta: row.quantidade_basqueta ?? 0,
-    quantidade_chapa: row.quantidade_chapa ?? 0,
+    cort_solid: (row.cort_solid ?? "").trim() !== "" ? row.cort_solid : (formatNumber(calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null)) || null),
+    t_cort: (() => {
+      const cortNum = (row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null);
+      const liqPrev = (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+      return formatNumber(calcTCort(cortNum, liqPrev)) || null;
+    })(),
+    quantidade_basqueta: calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, row.unidade_base ?? ""),
+    quantidade_chapa: calcQtdChapa(calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, row.unidade_base ?? ""), row.unidade_chapa ?? ""),
     latas: row.latas ?? 0,
     estrutura: row.estrutura ?? null,
     basqueta: row.basqueta ?? null,
@@ -435,10 +520,10 @@ export default function PlanejamentoProducao() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Excluir este registro do planejamento?")) return;
     try {
       await deleteOcpp(id);
       setRegistros((prev) => prev.filter((r) => r.id !== id));
+      setDeleteConfirmId(null);
       toast({ title: "Excluído", description: "Registro removido." });
     } catch (e) {
       toast({
@@ -452,13 +537,33 @@ export default function PlanejamentoProducao() {
   const calcularTotais = () => {
     const totalQuantidade = registrosExibidos.reduce((sum, r) => sum + (r.quantidade ?? 0), 0);
     const totalLatas = registrosExibidos.reduce((sum, r) => sum + (r.quantidade_latas ?? 0), 0);
-    const totalPrevisaoLatas = registrosExibidos.reduce((sum, r) => sum + (r.previsao_latas ?? 0), 0);
+    const totalPrevisaoLatas = registrosExibidos.reduce((sum, r) => {
+      const tf = (r.tipo_fruto ?? "").trim();
+      const previsao = (tf === "Açaí" || tf === "Fruto") && (r.quantidade_kg != null && r.quantidade_kg !== 0)
+        ? calcPrevisaoLatasFromTipoFruto(r.quantidade_kg, r.tipo_fruto ?? "")
+        : (r.previsao_latas ?? 0);
+      return sum + previsao;
+    }, 0);
     const totalKg = registrosExibidos.reduce((sum, r) => sum + (r.quantidade_kg ?? 0), 0);
     return { totalQuantidade, totalLatas, totalPrevisaoLatas, totalKg };
   };
 
   return (
     <AppLayout>
+      <AlertDialog open={deleteConfirmId !== null} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir registro</AlertDialogTitle>
+            <AlertDialogDescription>Excluir este registro do planejamento? Esta ação não pode ser desfeita.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => deleteConfirmId !== null && handleDelete(deleteConfirmId)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="space-y-6 min-w-0 pt-4 sm:pt-6">
         {/* Voltar — mesma estrutura do Acompanhamento diário */}
         <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
@@ -618,7 +723,7 @@ export default function PlanejamentoProducao() {
                       <TableHead className="min-w-[80px] text-xs sm:text-sm">Estoque</TableHead>
                       <TableHead className="min-w-[80px] text-xs sm:text-sm">Timbragem</TableHead>
                       <TableHead className="min-w-[100px] text-xs sm:text-sm">Corte Reprocesso</TableHead>
-                      <TableHead className="min-w-[140px] text-xs sm:text-sm">Observação</TableHead>
+                      <TableHead className="min-w-[320px] sm:min-w-[420px] text-xs sm:text-sm">Observação</TableHead>
                       <TableHead className="w-12 sm:w-16"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -709,14 +814,18 @@ export default function PlanejamentoProducao() {
                                 const v = e.target.value;
                                 if (v === "" || /^[\d.,]*$/.test(v)) {
                                   const latasVal = parseFormattedNumber(v) || 0;
+                                  const liqPrev = calcQtdLiqPrev(latasVal, row.solid ?? null);
                                   setRowField(row.id, "quantidade_latas", latasVal);
-                                  setRowField(row.id, "quantidade_liquida_prevista", calcQtdLiqPrev(latasVal, row.solid ?? null));
+                                  setRowField(row.id, "quantidade_liquida_prevista", liqPrev);
+                                  const cortNum = parseCortSolidValue(row.cort_solid ?? "");
+                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortNum, liqPrev)) || "");
                                 }
                               }}
                               onBlur={(e) => {
                                 const latasVal = parseFormattedNumber(e.target.value) || 0;
-                                const payload: Partial<OCPPInsertPayload> = { quantidade_latas: latasVal };
-                                payload.quantidade_liquida_prevista = calcQtdLiqPrev(latasVal, row.solid ?? null);
+                                const liqPrev = calcQtdLiqPrev(latasVal, row.solid ?? null);
+                                const cortNum = parseCortSolidValue(row.cort_solid ?? "");
+                                const payload: Partial<OCPPInsertPayload> = { quantidade_latas: latasVal, quantidade_liquida_prevista: liqPrev, t_cort: formatNumber(calcTCort(cortNum, liqPrev)) || "" };
                                 updateRow(row.id, payload);
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
@@ -726,19 +835,30 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
                               type="text"
-                              value={row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : ""}
+                              value={(() => {
+                                const tf = (row.tipo_fruto ?? "").trim();
+                                if ((tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)) {
+                                  const calc = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? "");
+                                  return calc !== 0 ? formatNumber(calc) : "";
+                                }
+                                return row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "";
+                              })()}
                               onChange={(e) => {
                                 const v = e.target.value;
                                 if (v === "" || /^[\d.,]*$/.test(v)) {
                                   const prevLatas = parseFormattedNumber(v) || 0;
+                                  const cortSolid = calcCortSolid(prevLatas, row.solid ?? null);
+                                  const liqPrev = row.quantidade_liquida_prevista ?? 0;
                                   setRowField(row.id, "previsao_latas", prevLatas);
-                                  setRowField(row.id, "cort_solid", String(calcCortSolid(prevLatas, row.solid ?? null)));
+                                  setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
+                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
                                 }
                               }}
                               onBlur={(e) => {
                                 const prevLatas = parseFormattedNumber(e.target.value) || 0;
-                                const payload: Partial<OCPPInsertPayload> = { previsao_latas: prevLatas };
-                                payload.cort_solid = String(calcCortSolid(prevLatas, row.solid ?? null));
+                                const cortSolid = calcCortSolid(prevLatas, row.solid ?? null);
+                                const liqPrev = row.quantidade_liquida_prevista ?? 0;
+                                const payload: Partial<OCPPInsertPayload> = { previsao_latas: prevLatas, cort_solid: formatNumber(cortSolid) || "", t_cort: formatNumber(calcTCort(cortSolid, liqPrev)) || "" };
                                 updateRow(row.id, payload);
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
@@ -751,9 +871,36 @@ export default function PlanejamentoProducao() {
                               value={row.quantidade_kg != null && row.quantidade_kg !== 0 ? formatNumber(row.quantidade_kg) : ""}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) setRowField(row.id, "quantidade_kg", parseFormattedNumber(v) || 0);
+                                if (v === "" || /^[\d.,]*$/.test(v)) {
+                                  const kg = parseFormattedNumber(v) || 0;
+                                  setRowField(row.id, "quantidade_kg", kg);
+                                  const previsaoLatas = calcPrevisaoLatasFromTipoFruto(kg, row.tipo_fruto ?? "");
+                                  if ((row.tipo_fruto ?? "").trim() === "Açaí" || (row.tipo_fruto ?? "").trim() === "Fruto") {
+                                    setRowField(row.id, "previsao_latas", previsaoLatas);
+                                    if (previsaoLatas !== 0) {
+                                      const cortSolid = calcCortSolid(previsaoLatas, row.solid ?? null);
+                                      const liqPrev = (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+                                      setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
+                                      setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
+                                    }
+                                  }
+                                }
                               }}
-                              onBlur={(e) => updateRow(row.id, { quantidade_kg: parseFormattedNumber(e.target.value) || 0 })}
+                              onBlur={(e) => {
+                                const kg = parseFormattedNumber(e.target.value) || 0;
+                                const previsaoLatas = calcPrevisaoLatasFromTipoFruto(kg, row.tipo_fruto ?? "");
+                                const payload: Partial<OCPPInsertPayload> = { quantidade_kg: kg };
+                                if ((row.tipo_fruto ?? "").trim() === "Açaí" || (row.tipo_fruto ?? "").trim() === "Fruto") {
+                                  payload.previsao_latas = previsaoLatas;
+                                  if (previsaoLatas !== 0) {
+                                    const cortSolid = calcCortSolid(previsaoLatas, row.solid ?? null);
+                                    const liqPrev = (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+                                    payload.cort_solid = formatNumber(cortSolid) || "";
+                                    payload.t_cort = formatNumber(calcTCort(cortSolid, liqPrev)) || "";
+                                  }
+                                }
+                                updateRow(row.id, payload);
+                              }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
                               placeholder="0"
                             />
@@ -767,9 +914,55 @@ export default function PlanejamentoProducao() {
                                 const tipoLinhaVal = (row.tipo_linha ?? "").trim();
                                 const lineByName = productionLines.find((l) => (l.code?.trim() || l.name?.trim() || `line-${l.id}`) === tipoLinhaVal);
                                 const nomeLinhaParaRegra = lineByName?.name ?? tipoLinhaVal;
-                                if (newVal === "Açaí" && is100Gramas(nomeLinhaParaRegra)) {
-                                  payload.unidade_base = "9";
-                                  payload.unidade_chapa = "8";
+                                if (is100Gramas(nomeLinhaParaRegra)) {
+                                  payload.unidade_base = "6";
+                                  payload.unidade_chapa = "4";
+                                  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
+                                  payload.quantidade_basqueta = qtdBasqueta;
+                                  payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "4");
+                                } else if (is1Kg(nomeLinhaParaRegra)) {
+                                  payload.unidade_base = "12";
+                                  payload.unidade_chapa = "2";
+                                  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "12");
+                                  payload.quantidade_basqueta = qtdBasqueta;
+                                  payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "2");
+                                } else if (is5Kg(nomeLinhaParaRegra)) {
+                                  payload.unidade_base = "10";
+                                  payload.unidade_chapa = "0";
+                                  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
+                                  payload.quantidade_basqueta = qtdBasqueta;
+                                  payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
+                                } else if (isCubos(nomeLinhaParaRegra)) {
+                                  payload.unidade_base = "22";
+                                  payload.unidade_chapa = "0";
+                                  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "22");
+                                  payload.quantidade_basqueta = qtdBasqueta;
+                                  payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
+                                } else if (isSticker(nomeLinhaParaRegra)) {
+                                  payload.unidade_base = "10";
+                                  payload.unidade_chapa = "3";
+                                  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
+                                  payload.quantidade_basqueta = qtdBasqueta;
+                                  payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "3");
+                                } else {
+                                  payload.unidade_base = "0";
+                                  payload.unidade_chapa = "0";
+                                  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "0");
+                                  payload.quantidade_basqueta = qtdBasqueta;
+                                  payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
+                                }
+                                const previsaoLatas = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg ?? 0, newVal);
+                                payload.previsao_latas = previsaoLatas;
+                                if (previsaoLatas !== 0) {
+                                  const cortSolid = calcCortSolid(previsaoLatas, row.solid ?? null);
+                                  const liqPrev = (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+                                  payload.cort_solid = formatNumber(cortSolid) || "";
+                                  payload.t_cort = formatNumber(calcTCort(cortSolid, liqPrev)) || "";
+                                  setRowField(row.id, "previsao_latas", previsaoLatas);
+                                  setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
+                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
+                                } else {
+                                  setRowField(row.id, "previsao_latas", 0);
                                 }
                                 updateRow(row.id, payload);
                               }}
@@ -795,9 +988,42 @@ export default function PlanejamentoProducao() {
                                     const payload: Partial<OCPPInsertPayload> = { tipo_linha: newVal };
                                     const lineByName = productionLines.find((l) => (l.code?.trim() || l.name?.trim() || `line-${l.id}`) === newVal);
                                     const nomeLinhaParaRegra = lineByName?.name ?? newVal;
-                                    if ((row.tipo_fruto ?? "").trim() === "Açaí" && is100Gramas(nomeLinhaParaRegra)) {
-                                      payload.unidade_base = "9";
-                                      payload.unidade_chapa = "8";
+                                    if (is100Gramas(nomeLinhaParaRegra)) {
+                                      payload.unidade_base = "6";
+                                      payload.unidade_chapa = "4";
+                                      const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
+                                      payload.quantidade_basqueta = qtdBasqueta;
+                                      payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "4");
+                                    } else if (is1Kg(nomeLinhaParaRegra)) {
+                                      payload.unidade_base = "12";
+                                      payload.unidade_chapa = "2";
+                                      const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "12");
+                                      payload.quantidade_basqueta = qtdBasqueta;
+                                      payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "2");
+                                    } else if (is5Kg(nomeLinhaParaRegra)) {
+                                      payload.unidade_base = "10";
+                                      payload.unidade_chapa = "0";
+                                      const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
+                                      payload.quantidade_basqueta = qtdBasqueta;
+                                      payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
+                                    } else if (isCubos(nomeLinhaParaRegra)) {
+                                      payload.unidade_base = "22";
+                                      payload.unidade_chapa = "0";
+                                      const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "22");
+                                      payload.quantidade_basqueta = qtdBasqueta;
+                                      payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
+                                    } else if (isSticker(nomeLinhaParaRegra)) {
+                                      payload.unidade_base = "10";
+                                      payload.unidade_chapa = "3";
+                                      const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
+                                      payload.quantidade_basqueta = qtdBasqueta;
+                                      payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "3");
+                                    } else {
+                                      payload.unidade_base = "0";
+                                      payload.unidade_chapa = "0";
+                                      const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "0");
+                                      payload.quantidade_basqueta = qtdBasqueta;
+                                      payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
                                     }
                                     updateRow(row.id, payload);
                                   }}
@@ -822,9 +1048,42 @@ export default function PlanejamentoProducao() {
                                 onBlur={(e) => {
                                   const newVal = e.target.value.trim();
                                   const payload: Partial<OCPPInsertPayload> = { tipo_linha: newVal };
-                                  if ((row.tipo_fruto ?? "").trim() === "Açaí" && is100Gramas(newVal)) {
-                                    payload.unidade_base = "9";
-                                    payload.unidade_chapa = "8";
+                                  if (is100Gramas(newVal)) {
+                                    payload.unidade_base = "6";
+                                    payload.unidade_chapa = "4";
+                                    const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
+                                    payload.quantidade_basqueta = qtdBasqueta;
+                                    payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "4");
+                                  } else if (is1Kg(newVal)) {
+                                    payload.unidade_base = "12";
+                                    payload.unidade_chapa = "2";
+                                    const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "12");
+                                    payload.quantidade_basqueta = qtdBasqueta;
+                                    payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "2");
+                                  } else if (is5Kg(newVal)) {
+                                    payload.unidade_base = "10";
+                                    payload.unidade_chapa = "0";
+                                    const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
+                                    payload.quantidade_basqueta = qtdBasqueta;
+                                    payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
+                                  } else if (isCubos(newVal)) {
+                                    payload.unidade_base = "22";
+                                    payload.unidade_chapa = "0";
+                                    const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "22");
+                                    payload.quantidade_basqueta = qtdBasqueta;
+                                    payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
+                                  } else if (isSticker(newVal)) {
+                                    payload.unidade_base = "10";
+                                    payload.unidade_chapa = "3";
+                                    const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
+                                    payload.quantidade_basqueta = qtdBasqueta;
+                                    payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "3");
+                                  } else {
+                                    payload.unidade_base = "0";
+                                    payload.unidade_chapa = "0";
+                                    const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "0");
+                                    payload.quantidade_basqueta = qtdBasqueta;
+                                    payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
                                   }
                                   updateRow(row.id, payload);
                                 }}
@@ -836,8 +1095,20 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4">
                             <Input
                               value={row.unidade_base ?? ""}
-                              onChange={(e) => setRowField(row.id, "unidade_base", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { unidade_base: e.target.value })}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setRowField(row.id, "unidade_base", v);
+                                const kgTuneo = row.quantidade_kg_tuneo ?? 0;
+                                const qtdBasqueta = calcQtdBasqueta(kgTuneo, v);
+                                setRowField(row.id, "quantidade_basqueta", qtdBasqueta);
+                                setRowField(row.id, "quantidade_chapa", calcQtdChapa(qtdBasqueta, row.unidade_chapa ?? ""));
+                              }}
+                              onBlur={(e) => {
+                                const v = e.target.value;
+                                const kgTuneo = row.quantidade_kg_tuneo ?? 0;
+                                const qtdBasqueta = calcQtdBasqueta(kgTuneo, v);
+                                updateRow(row.id, { unidade_base: v, quantidade_basqueta: qtdBasqueta, quantidade_chapa: calcQtdChapa(qtdBasqueta, row.unidade_chapa ?? "") });
+                              }}
                               className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0"
                               placeholder="Uni. Basqueta"
                             />
@@ -845,8 +1116,17 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4">
                             <Input
                               value={row.unidade_chapa ?? ""}
-                              onChange={(e) => setRowField(row.id, "unidade_chapa", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { unidade_chapa: e.target.value })}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setRowField(row.id, "unidade_chapa", v);
+                                const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, row.unidade_base ?? "");
+                                setRowField(row.id, "quantidade_chapa", calcQtdChapa(qtdBasqueta, v));
+                              }}
+                              onBlur={(e) => {
+                                const v = e.target.value;
+                                const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, row.unidade_base ?? "");
+                                updateRow(row.id, { unidade_chapa: v, quantidade_chapa: calcQtdChapa(qtdBasqueta, v) });
+                              }}
                               className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0"
                               placeholder="Uni. Chapa"
                             />
@@ -857,15 +1137,17 @@ export default function PlanejamentoProducao() {
                               onValueChange={(v) => {
                                 const solidosVal = v === "__vazio__" ? null : Number(v);
                                 const payload: Partial<OCPPInsertPayload> = { solidos: solidosVal };
-                                const solidVal = solidosVal === 1 ? 9.64 : 0;
+                                const solidVal = solidosVal === 1 ? 9.64 : solidosVal === 2 ? 6.5 : solidosVal === 3 ? 5.15 : solidosVal === 4 ? 1 : 0;
                                 const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal === 0 ? null : solidVal);
                                 const cortSolid = calcCortSolid(row.previsao_latas ?? 0, solidVal === 0 ? null : solidVal);
                                 payload.solid = solidVal;
                                 payload.quantidade_liquida_prevista = liqPrev;
-                                payload.cort_solid = String(cortSolid);
+                                payload.cort_solid = formatNumber(cortSolid) || "";
+                                payload.t_cort = formatNumber(calcTCort(cortSolid, liqPrev)) || "";
                                 setRowField(row.id, "solid", solidVal);
                                 setRowField(row.id, "quantidade_liquida_prevista", liqPrev);
-                                setRowField(row.id, "cort_solid", String(cortSolid));
+                                setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
+                                setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
                                 updateRow(row.id, payload);
                               }}
                             >
@@ -888,16 +1170,19 @@ export default function PlanejamentoProducao() {
                                 const v = e.target.value;
                                 if (v === "" || /^[\d.,]*$/.test(v)) {
                                   const solidVal = v === "" ? null : parseFormattedNumber(v);
+                                  const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal);
+                                  const cortSolid = calcCortSolid(row.previsao_latas ?? 0, solidVal);
                                   setRowField(row.id, "solid", solidVal);
-                                  setRowField(row.id, "quantidade_liquida_prevista", calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal));
-                                  setRowField(row.id, "cort_solid", String(calcCortSolid(row.previsao_latas ?? 0, solidVal)));
+                                  setRowField(row.id, "quantidade_liquida_prevista", liqPrev);
+                                  setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
+                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
                                 }
                               }}
                               onBlur={(e) => {
                                 const solidVal = e.target.value === "" ? null : parseFormattedNumber(e.target.value);
-                                const payload: Partial<OCPPInsertPayload> = { solid: solidVal };
-                                payload.quantidade_liquida_prevista = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal);
-                                payload.cort_solid = String(calcCortSolid(row.previsao_latas ?? 0, solidVal));
+                                const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal);
+                                const cortSolid = calcCortSolid(row.previsao_latas ?? 0, solidVal);
+                                const payload: Partial<OCPPInsertPayload> = { solid: solidVal, quantidade_liquida_prevista: liqPrev, cort_solid: formatNumber(cortSolid) || "", t_cort: formatNumber(calcTCort(cortSolid, liqPrev)) || "" };
                                 updateRow(row.id, payload);
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[7rem]"
@@ -910,9 +1195,19 @@ export default function PlanejamentoProducao() {
                               value={row.quantidade_kg_tuneo != null && row.quantidade_kg_tuneo !== 0 ? formatNumber(row.quantidade_kg_tuneo) : ""}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) setRowField(row.id, "quantidade_kg_tuneo", parseFormattedNumber(v) || 0);
+                                if (v === "" || /^[\d.,]*$/.test(v)) {
+                                  const kgTuneo = parseFormattedNumber(v) || 0;
+                                  const qtdBasqueta = calcQtdBasqueta(kgTuneo, row.unidade_base ?? "");
+                                  setRowField(row.id, "quantidade_kg_tuneo", kgTuneo);
+                                  setRowField(row.id, "quantidade_basqueta", qtdBasqueta);
+                                  setRowField(row.id, "quantidade_chapa", calcQtdChapa(qtdBasqueta, row.unidade_chapa ?? ""));
+                                }
                               }}
-                              onBlur={(e) => updateRow(row.id, { quantidade_kg_tuneo: parseFormattedNumber(e.target.value) || 0 })}
+                              onBlur={(e) => {
+                                const kgTuneo = parseFormattedNumber(e.target.value) || 0;
+                                const qtdBasqueta = calcQtdBasqueta(kgTuneo, row.unidade_base ?? "");
+                                updateRow(row.id, { quantidade_kg_tuneo: kgTuneo, quantidade_basqueta: qtdBasqueta, quantidade_chapa: calcQtdChapa(qtdBasqueta, row.unidade_chapa ?? "") });
+                              }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem]"
                               placeholder="0"
                             />
@@ -928,9 +1223,18 @@ export default function PlanejamentoProducao() {
                               })()}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) setRowField(row.id, "quantidade_liquida_prevista", parseFormattedNumber(v) || 0);
+                                if (v === "" || /^[\d.,]*$/.test(v)) {
+                                  const newVal = parseFormattedNumber(v) || 0;
+                                  const cortNum = parseCortSolidValue(row.cort_solid ?? "");
+                                  setRowField(row.id, "quantidade_liquida_prevista", newVal);
+                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortNum, newVal)) || "");
+                                }
                               }}
-                              onBlur={(e) => updateRow(row.id, { quantidade_liquida_prevista: parseFormattedNumber(e.target.value) || 0 })}
+                              onBlur={(e) => {
+                                const newVal = parseFormattedNumber(e.target.value) || 0;
+                                const cortNum = parseCortSolidValue(row.cort_solid ?? "");
+                                updateRow(row.id, { quantidade_liquida_prevista: newVal, t_cort: formatNumber(calcTCort(cortNum, newVal)) || "" });
+                              }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem]"
                               placeholder="0"
                             />
@@ -940,7 +1244,11 @@ export default function PlanejamentoProducao() {
                               value={(() => {
                                 const stored = row.cort_solid ?? "";
                                 const calculated = calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null);
-                                if (stored.trim() !== "") return formatNumber(parseFormattedNumber(stored));
+                                if (stored.trim() !== "") {
+                                  // Aceita "385,6" (BR) ou "385.6" (ponto decimal) para exibir sempre com vírgula (ex.: 385,6)
+                                  const num = stored.includes(",") ? parseFormattedNumber(stored) : parseFloat(stored);
+                                  return formatNumber(!Number.isNaN(num) ? num : 0);
+                                }
                                 return calculated !== 0 ? formatNumber(calculated) : "";
                               })()}
                               readOnly
@@ -950,156 +1258,246 @@ export default function PlanejamentoProducao() {
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
                             <Input
-                              value={row.t_cort ?? ""}
-                              onChange={(e) => setRowField(row.id, "t_cort", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { t_cort: e.target.value })}
-                              className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-[8rem]"
-                              placeholder="T. Cort"
+                              value={(() => {
+                                const cortNum = parseCortSolidValue(row.cort_solid ?? "");
+                                const liqPrev = row.quantidade_liquida_prevista ?? 0;
+                                const calculated = calcTCort(cortNum, liqPrev);
+                                return calculated !== 0 ? formatNumber(calculated) : "";
+                              })()}
+                              readOnly
+                              className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-[8rem] bg-muted/50"
+                              placeholder="Cort Solid − Qtd. Liq. Prev."
+                              title="T. Cort = Cort Solid − Qtd. Liq. Prev."
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
-                              type="text"
-                              value={row.quantidade_basqueta != null && row.quantidade_basqueta !== 0 ? formatNumber(row.quantidade_basqueta) : ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) setRowField(row.id, "quantidade_basqueta", parseFormattedNumber(v) || 0);
-                              }}
-                              onBlur={(e) => updateRow(row.id, { quantidade_basqueta: parseFormattedNumber(e.target.value) || 0 })}
-                              className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem]"
-                              placeholder="0"
+                              value={(() => {
+                                const kgTuneo = row.quantidade_kg_tuneo ?? 0;
+                                const calculated = calcQtdBasqueta(kgTuneo, row.unidade_base ?? "");
+                                return calculated !== 0 ? formatNumber(calculated) : "";
+                              })()}
+                              readOnly
+                              className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem] bg-muted/50"
+                              placeholder="Qtd. Kg Túneo ÷ Uni. Basqueta"
+                              title="Qtd. Basqueta = Qtd. Kg Túneo ÷ Uni. Basqueta"
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
-                              type="text"
-                              value={row.quantidade_chapa != null && row.quantidade_chapa !== 0 ? formatNumber(row.quantidade_chapa) : ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) setRowField(row.id, "quantidade_chapa", parseFormattedNumber(v) || 0);
-                              }}
-                              onBlur={(e) => updateRow(row.id, { quantidade_chapa: parseFormattedNumber(e.target.value) || 0 })}
-                              className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem]"
-                              placeholder="0"
+                              value={(() => {
+                                const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, row.unidade_base ?? "");
+                                const calculated = calcQtdChapa(qtdBasqueta, row.unidade_chapa ?? "");
+                                return calculated !== 0 ? formatNumber(calculated) : "";
+                              })()}
+                              readOnly
+                              className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem] bg-muted/50"
+                              placeholder="Qtd. Basqueta × Uni. Chapa"
+                              title="Qtd. Chapa = Qtd. Basqueta × Uni. Chapa"
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4 text-center">
-                            <Input
-                              type="text"
-                              value={row.latas != null && row.latas !== 0 ? formatNumber(row.latas) : ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) setRowField(row.id, "latas", parseFormattedNumber(v) || 0);
+                            <Select
+                              value={row.latas === 1 ? "OK" : "__vazio__"}
+                              onValueChange={(v) => {
+                                const numVal = v === "OK" ? 1 : 0;
+                                setRowField(row.id, "latas", numVal);
+                                updateRow(row.id, { latas: numVal });
                               }}
-                              onBlur={(e) => updateRow(row.id, { latas: parseFormattedNumber(e.target.value) || 0 })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-0 ${(row.latas == null || row.latas === 0) ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-0 ${row.latas === 1 ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : "border-destructive/60 bg-destructive/10 text-destructive font-medium"}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.estrutura ?? ""}
-                              onChange={(e) => setRowField(row.id, "estrutura", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { estrutura: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.estrutura ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.estrutura ?? "").trim() && ["PEND", "OK"].includes((row.estrutura ?? "").trim()) ? (row.estrutura ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "estrutura", val);
+                                updateRow(row.id, { estrutura: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.estrutura ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.estrutura ?? "").trim() === "PEND" || !(row.estrutura ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.basqueta ?? ""}
-                              onChange={(e) => setRowField(row.id, "basqueta", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { basqueta: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.basqueta ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.basqueta ?? "").trim() && ["PEND", "OK"].includes((row.basqueta ?? "").trim()) ? (row.basqueta ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "basqueta", val);
+                                updateRow(row.id, { basqueta: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.basqueta ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.basqueta ?? "").trim() === "PEND" || !(row.basqueta ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.chapa ?? ""}
-                              onChange={(e) => setRowField(row.id, "chapa", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { chapa: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.chapa ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.chapa ?? "").trim() && ["PEND", "OK"].includes((row.chapa ?? "").trim()) ? (row.chapa ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "chapa", val);
+                                updateRow(row.id, { chapa: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.chapa ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.chapa ?? "").trim() === "PEND" || !(row.chapa ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.tuneo ?? ""}
-                              onChange={(e) => setRowField(row.id, "tuneo", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { tuneo: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.tuneo ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.tuneo ?? "").trim() && ["PEND", "OK"].includes((row.tuneo ?? "").trim()) ? (row.tuneo ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "tuneo", val);
+                                updateRow(row.id, { tuneo: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.tuneo ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.tuneo ?? "").trim() === "PEND" || !(row.tuneo ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.qual_maquina ?? ""}
-                              onChange={(e) => setRowField(row.id, "qual_maquina", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { qual_maquina: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.qual_maquina ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.qual_maquina ?? "").trim() && ["PEND", "OK"].includes((row.qual_maquina ?? "").trim()) ? (row.qual_maquina ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "qual_maquina", val);
+                                updateRow(row.id, { qual_maquina: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.qual_maquina ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.qual_maquina ?? "").trim() === "PEND" || !(row.qual_maquina ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.mao_de_obra ?? ""}
-                              onChange={(e) => setRowField(row.id, "mao_de_obra", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { mao_de_obra: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.mao_de_obra ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.mao_de_obra ?? "").trim() && ["PEND", "OK"].includes((row.mao_de_obra ?? "").trim()) ? (row.mao_de_obra ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "mao_de_obra", val);
+                                updateRow(row.id, { mao_de_obra: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.mao_de_obra ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.mao_de_obra ?? "").trim() === "PEND" || !(row.mao_de_obra ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.utilidade ?? ""}
-                              onChange={(e) => setRowField(row.id, "utilidade", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { utilidade: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.utilidade ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.utilidade ?? "").trim() && ["PEND", "OK"].includes((row.utilidade ?? "").trim()) ? (row.utilidade ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "utilidade", val);
+                                updateRow(row.id, { utilidade: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.utilidade ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.utilidade ?? "").trim() === "PEND" || !(row.utilidade ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.estoque ?? ""}
-                              onChange={(e) => setRowField(row.id, "estoque", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { estoque: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.estoque ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.estoque ?? "").trim() && ["PEND", "OK"].includes((row.estoque ?? "").trim()) ? (row.estoque ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "estoque", val);
+                                updateRow(row.id, { estoque: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.estoque ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.estoque ?? "").trim() === "PEND" || !(row.estoque ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.timbragem ?? ""}
-                              onChange={(e) => setRowField(row.id, "timbragem", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { timbragem: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.timbragem ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.timbragem ?? "").trim() && ["PEND", "OK"].includes((row.timbragem ?? "").trim()) ? (row.timbragem ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "timbragem", val);
+                                updateRow(row.id, { timbragem: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.timbragem ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.timbragem ?? "").trim() === "PEND" || !(row.timbragem ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
-                            <Input
-                              value={row.corte_reprocesso ?? ""}
-                              onChange={(e) => setRowField(row.id, "corte_reprocesso", e.target.value)}
-                              onBlur={(e) => updateRow(row.id, { corte_reprocesso: e.target.value })}
-                              className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${!(row.corte_reprocesso ?? "").trim() ? "border-destructive/60 bg-destructive/10 placeholder:text-destructive font-medium" : ""}`}
-                              placeholder="PEND"
-                            />
+                            <Select
+                              value={((row.corte_reprocesso ?? "").trim() && ["PEND", "OK"].includes((row.corte_reprocesso ?? "").trim()) ? (row.corte_reprocesso ?? "").trim() : "__vazio__")}
+                              onValueChange={(v) => {
+                                const val = v === "__vazio__" ? "" : v;
+                                setRowField(row.id, "corte_reprocesso", val);
+                                updateRow(row.id, { corte_reprocesso: val });
+                              }}
+                            >
+                              <SelectTrigger className={`h-8 sm:h-9 text-xs sm:text-sm w-full min-w-0 ${(row.corte_reprocesso ?? "").trim() === "OK" ? "border-green-600/60 bg-green-500/10 text-green-700 dark:text-green-400 font-medium" : ((row.corte_reprocesso ?? "").trim() === "PEND" || !(row.corte_reprocesso ?? "").trim() ? "border-destructive/60 bg-destructive/10 text-destructive font-medium" : "")}`}>
+                                <SelectValue placeholder="PEND" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PEND_OK_OPCOES.map((op) => <SelectItem key={op.value} value={op.value}>{op.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
-                          <TableCell className="p-2 sm:p-4">
-                            <Input
+                          <TableCell className="p-2 sm:p-4 align-top">
+                            <Textarea
                               value={row.observacao ?? ""}
                               onChange={(e) => setRowField(row.id, "observacao", e.target.value)}
                               onBlur={(e) => updateRow(row.id, { observacao: e.target.value })}
-                              className="h-8 sm:h-9 text-xs sm:text-sm"
+                              className="min-h-[40px] sm:min-h-[50px] w-full min-w-[280px] sm:min-w-[380px] text-xs sm:text-sm resize-y"
                               placeholder="Observação"
+                              rows={2}
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => handleDelete(row.id)}
+                              onClick={() => setDeleteConfirmId(row.id)}
                               className="h-8 w-8 sm:h-9 sm:w-9 text-destructive hover:text-destructive"
                             >
                               <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
