@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Plus, Trash2, Loader2, Factory, Save, Clock, FilePlus, Filter } from "lucide-react";
+import { ArrowLeft, ArrowRight, Plus, Trash2, Loader2, Factory, Save, Clock, FilePlus, Filter, Target } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   getOcppByDateRange,
@@ -24,6 +24,7 @@ import {
   getFiliais,
   getLines,
   getItemByCode,
+  subscribeOCPPRealtime,
   type OCPPRow,
   type OCPPInsertPayload,
 } from "@/services/supabaseData";
@@ -53,6 +54,17 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  LabelList,
+} from "recharts";
+import { ExportToPng } from "@/components/ExportToPng";
 
 function formatDateBr(str: string): string {
   if (!str) return "—";
@@ -63,6 +75,12 @@ function formatDateBr(str: string): string {
 
 function formatTime(d: Date): string {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function toDateOnly(v: unknown): string {
+  if (typeof v === "string") return v.split("T")[0] ?? "";
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().split("T")[0] ?? "";
+  return "";
 }
 
 const formatNumber = (value: number | string | null | undefined): string => {
@@ -95,6 +113,44 @@ const formatNumberFixed = (value: number | string | null | undefined, fractionDi
     maximumFractionDigits: fractionDigits,
   });
 };
+
+/** Quebra texto em linhas para o eixo Y do gráfico. */
+function wrapTextToLines(text: string, maxCharsPerLine: number, maxLines: number): string[] {
+  if (!text || maxLines < 1) return [""];
+  const lines: string[] = [];
+  let rest = text.trim();
+  while (rest.length > 0 && lines.length < maxLines) {
+    if (rest.length <= maxCharsPerLine) {
+      lines.push(rest);
+      break;
+    }
+    let breakAt = rest.slice(0, maxCharsPerLine).lastIndexOf(" ");
+    if (breakAt <= 0) breakAt = maxCharsPerLine;
+    lines.push(rest.slice(0, breakAt).trim());
+    rest = rest.slice(breakAt).trim();
+  }
+  return lines.length ? lines : [""];
+}
+
+/** Tick do eixo Y com nome em múltiplas linhas. */
+function makeYAxisTickMultiLine(maxCharsPerLine: number, maxLines: number) {
+  return (props: { x?: number; y?: number; payload?: { value?: string } }) => {
+    const { x = 0, y = 0, payload } = props;
+    const label = payload?.value ?? "";
+    const lines = wrapTextToLines(label, maxCharsPerLine, maxLines);
+    const fontSize = maxCharsPerLine <= 10 ? 10 : maxCharsPerLine <= 14 ? 11 : 13;
+    const lineHeight = maxCharsPerLine <= 10 ? "1em" : "1.05em";
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text textAnchor="end" fontSize={fontSize} fontWeight={600} fill="hsl(var(--foreground))">
+          {lines.map((line, i) => (
+            <tspan key={i} x={0} dy={i === 0 ? 0 : lineHeight}>{line}</tspan>
+          ))}
+        </text>
+      </g>
+    );
+  };
+}
 
 /** Opções fixas para o campo Tipo Fruto (sem tabela no Supabase). */
 const TIPO_FRUTO_OPCOES = ["Açaí", "Fruto"] as const;
@@ -265,6 +321,10 @@ type LineOption = { id: number; code: string; name: string };
 export default function PlanejamentoProducao() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  useEffect(() => {
+    toastRef.current = toast;
+  }, [toast]);
   const hoje = new Date().toISOString().split("T")[0];
   const [dataFiltro, setDataFiltro] = useState(hoje);
   const [dataFiltroPara, setDataFiltroPara] = useState(hoje);
@@ -275,6 +335,10 @@ export default function PlanejamentoProducao() {
   const [filtroTipoLinha, setFiltroTipoLinha] = useState("");
   const [filtroSolidos, setFiltroSolidos] = useState<number | "">("");
   const [filtrosCardOpen, setFiltrosCardOpen] = useState(false);
+  /** View do card: grid de documentos (true) ou tabela do documento (false). */
+  const [showDocumentGridForRange, setShowDocumentGridForRange] = useState(true);
+  /** Documento selecionado no grid (chave composta por doc_ordem_global/doc_numero/filial). */
+  const [selectedDocKey, setSelectedDocKey] = useState<string | null>(null);
   /** Valores dos filtros dentro do card (só aplicados ao clicar em "Filtrar"). */
   const [dataFiltroPending, setDataFiltroPending] = useState(hoje);
   const [dataFiltroParaPending, setDataFiltroParaPending] = useState(hoje);
@@ -293,6 +357,9 @@ export default function PlanejamentoProducao() {
   /** Ao clicar em "Novo documento", guarda o próximo número (ex.: 2) para exibir "2 de 2" no header até carregar de novo. */
   const [newDocumentIndex, setNewDocumentIndex] = useState<number | null>(null);
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chartQtdKgRef = useRef<HTMLDivElement>(null);
+  /** Ao entrar na aba PCP, abrir direto o último documento (só uma vez por carga). */
+  const hasAutoOpenedLastDocRef = useRef(false);
   const { setDocumentNav } = useDocumentNav();
 
   // --- Estado do Dashboard PCP (acima do card) ---
@@ -344,7 +411,7 @@ export default function PlanejamentoProducao() {
       setRegistros(list);
     } catch (e) {
       console.error("Erro ao carregar OCPP:", e);
-      toast({
+      toastRef.current({
         title: "Erro",
         description: e instanceof Error ? e.message : "Erro ao carregar planejamento",
         variant: "destructive",
@@ -353,10 +420,18 @@ export default function PlanejamentoProducao() {
     } finally {
       setLoading(false);
     }
-  }, [dataFiltro, dataFiltroPara, filialFiltro, toast]);
+  }, [dataFiltro, dataFiltroPara, filialFiltro]);
 
   useEffect(() => {
     loadRegistros();
+  }, [loadRegistros]);
+
+  /** Sincronização em tempo real: quando outro usuário alterar a OCPP, recarrega para todos verem o mesmo. */
+  useEffect(() => {
+    const unsubscribe = subscribeOCPPRealtime(() => {
+      loadRegistros();
+    });
+    return unsubscribe;
   }, [loadRegistros]);
 
   /** Ao abrir o card de filtros, copia os valores aplicados para os campos pendentes. */
@@ -379,13 +454,15 @@ export default function PlanejamentoProducao() {
     setFiltroTipoLinha(filtroTipoLinhaPending);
     setFiltroSolidos(filtroSolidosPending);
     setFilialFiltro(filialFiltroPending);
+    setSelectedDocKey(null);
+    setShowDocumentGridForRange(true);
     setFiltrosCardOpen(false);
   }, [dataFiltroPending, dataFiltroParaPending, filtroCodigoPending, filtroTipoLinhaPending, filtroSolidosPending, filialFiltroPending]);
 
   /** Carrega dados do dashboard PCP (intervalo de datas). */
   const loadDashboardData = useCallback(async () => {
-    const de = dashboardDateFrom.split("T")[0];
-    const ate = dashboardDateTo.split("T")[0];
+    const de = toDateOnly(dashboardDateFrom);
+    const ate = toDateOnly(dashboardDateTo);
     if (!de) return;
     const [dataInicio, dataFim] = de <= ate ? [de, ate] : [ate, de];
     setDashboardLoading(true);
@@ -394,7 +471,7 @@ export default function PlanejamentoProducao() {
       setDashboardData(list);
     } catch (e) {
       console.error("Erro ao carregar dashboard PCP:", e);
-      toast({
+      toastRef.current({
         title: "Erro",
         description: e instanceof Error ? e.message : "Erro ao carregar dados do dashboard",
         variant: "destructive",
@@ -403,7 +480,7 @@ export default function PlanejamentoProducao() {
     } finally {
       setDashboardLoading(false);
     }
-  }, [dashboardDateFrom, dashboardDateTo, toast]);
+  }, [dashboardDateFrom, dashboardDateTo]);
 
   useEffect(() => {
     loadDashboardData();
@@ -499,6 +576,53 @@ export default function PlanejamentoProducao() {
     ? registros.filter((r) => (r.filial_nome || "").trim() === filialFiltro)
     : registros ?? [];
 
+  const getDocKey = useCallback((r: OCPPRow) => {
+    const ord = r.doc_ordem_global != null ? String(r.doc_ordem_global) : "null";
+    const num = r.doc_numero != null ? String(r.doc_numero) : "null";
+    const filial = (r.filial_nome || "").trim() || "null";
+    return `${ord}|${num}|${filial}`;
+  }, []);
+
+  const documentosDoPeriodo = useMemo(() => {
+    const map = new Map<string, { key: string; doc_numero: number | null; doc_ordem_global: number | null; filial_nome: string | null; rows: OCPPRow[] }>();
+    registrosBaseFilial.forEach((r) => {
+      const key = getDocKey(r);
+      const existing = map.get(key);
+      if (existing) existing.rows.push(r);
+      else {
+        map.set(key, {
+          key,
+          doc_numero: r.doc_numero ?? null,
+          doc_ordem_global: r.doc_ordem_global ?? null,
+          filial_nome: r.filial_nome ?? null,
+          rows: [r],
+        });
+      }
+    });
+
+    const list = Array.from(map.values());
+    list.sort((a, b) => {
+      const an = a.doc_numero ?? 0;
+      const bn = b.doc_numero ?? 0;
+      if (an !== bn) return an - bn;
+      const ao = a.doc_ordem_global ?? 0;
+      const bo = b.doc_ordem_global ?? 0;
+      return ao - bo;
+    });
+    return list;
+  }, [registrosBaseFilial, getDocKey]);
+
+  /** Ao carregar os dados, abrir sempre o último documento (vista tabela) em vez do grid de cards. */
+  useEffect(() => {
+    if (loading || hasAutoOpenedLastDocRef.current) return;
+    if (documentosDoPeriodo.length > 0) {
+      const last = documentosDoPeriodo[documentosDoPeriodo.length - 1];
+      setSelectedDocKey(last.key);
+      setShowDocumentGridForRange(false);
+      hasAutoOpenedLastDocRef.current = true;
+    }
+  }, [loading, documentosDoPeriodo]);
+
   /** Valores únicos de tipo_linha nos registros carregados, para o filtro bater com o que está salvo (ex.: código ou "Balde"). */
   const opcoesTipoLinhaFiltro = useMemo(() => {
     const set = new Set<string>();
@@ -519,6 +643,7 @@ export default function PlanejamentoProducao() {
 
   const registrosExibidos: OCPPRow[] = (() => {
     let list = registrosBaseFilial;
+    if (selectedDocKey) list = list.filter((r) => getDocKey(r) === selectedDocKey);
     const codigoTrim = (filtroCodigo ?? "").trim().toLowerCase();
     if (codigoTrim) list = list.filter((r) => String(r.Code ?? "").toLowerCase().includes(codigoTrim));
     const tipoLinhaTrim = (filtroTipoLinha ?? "").trim();
@@ -526,6 +651,17 @@ export default function PlanejamentoProducao() {
     if (filtroSolidos !== "" && filtroSolidos != null) list = list.filter((r) => r.solidos === filtroSolidos);
     return list;
   })();
+
+  /** Dados para o gráfico de barras horizontais: Qtd. em Kg por item (descrição ou código). */
+  const chartQtdKgData = useMemo(() => {
+    const list = [...registrosExibidos]
+      .filter((r) => (r.quantidade_kg ?? 0) > 0)
+      .sort((a, b) => (b.quantidade_kg ?? 0) - (a.quantidade_kg ?? 0));
+    return list.map((r) => ({
+      name: (r.descricao || r.Code || "").trim() || `Item ${r.id ?? ""}`,
+      qtdKg: r.quantidade_kg ?? 0,
+    }));
+  }, [registrosExibidos]);
 
   /** Atualiza um registro no banco e no estado local (sem recarregar a tabela nem mostrar loading). Preserva zeros à esquerda do código. */
   const updateRow = async (id: number, payload: Partial<OCPPInsertPayload>) => {
@@ -748,6 +884,8 @@ export default function PlanejamentoProducao() {
     const totalAtual = registrosExibidos.length;
     setNewDocumentIndex(totalAtual + 1);
     setRegistros([]);
+    setSelectedDocKey(null);
+    setShowDocumentGridForRange(false);
     toast({ title: "Novo documento", description: "Lista limpa. Adicione linhas e salve." });
   }, [registrosExibidos.length]);
 
@@ -991,8 +1129,8 @@ export default function PlanejamentoProducao() {
                       <TableHead className="whitespace-nowrap text-xs font-medium">Tipo Linha</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium">Tipo Fruto</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">Sólidos</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Previsão Latas</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Latas</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Prev. Latas</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd em Kg</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Basq</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Chapa</TableHead>
@@ -1035,12 +1173,12 @@ export default function PlanejamentoProducao() {
                         <TableCell colSpan={7} className="text-sm">Total</TableCell>
                         <TableCell className="text-xs text-right"></TableCell>
                           <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_latas, 2)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.previsao_latas)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_kg)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_basqueta)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_chapa)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.previsao_latas, 2)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg, 2)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_basqueta, 2)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_chapa, 2)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.t_cort, 3)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_kg_tuneo)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg_tuneo, 2)}</TableCell>
                       </TableRow>
                     </TableFooter>
                   )}
@@ -1264,21 +1402,166 @@ export default function PlanejamentoProducao() {
                   </div>
                 </DialogContent>
               </Dialog>
-              <div className="ml-auto">
-                <button
-                  type="button"
-                  onClick={addLinha}
-                  disabled={savingId === -1}
-                  className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 h-9 rounded-md px-3 w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
-                >
-                  {savingId === -1 ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Plus className="h-4 w-4 shrink-0" />}
-                  <span className="truncate">Adicionar Linha</span>
-                </button>
+              <div className="ml-auto flex items-center gap-2">
+                {!showDocumentGridForRange && documentosDoPeriodo.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDocKey(null);
+                      setShowDocumentGridForRange(true);
+                    }}
+                    className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0"
+                    aria-label="Ver documentos"
+                    title="Ver documentos"
+                  >
+                    <span>Documentos</span>
+                  </button>
+                )}
+
+                {!showDocumentGridForRange && (
+                  <button
+                    type="button"
+                    onClick={addLinha}
+                    disabled={savingId === -1}
+                    className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 h-9 rounded-md px-3 w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
+                  >
+                    {savingId === -1 ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Plus className="h-4 w-4 shrink-0" />}
+                    <span className="truncate">Adicionar Linha</span>
+                  </button>
+                )}
               </div>
             </div>
-            <div className="overflow-x-auto -mx-2 sm:mx-0 rounded-lg border border-border/40 [&::-webkit-scrollbar]:h-2" style={{ WebkitOverflowScrolling: "touch" }}>
-              <div className="inline-block min-w-full align-middle">
-                <Table className="min-w-[2200px] sm:min-w-0">
+            {showDocumentGridForRange ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {documentosDoPeriodo.length === 0 ? (
+                  <div className="col-span-full text-center text-muted-foreground py-10">
+                    Nenhum documento encontrado para os filtros aplicados.
+                  </div>
+                ) : (
+                  documentosDoPeriodo.map((doc, index) => {
+                    const totalLatas = doc.rows.reduce((s, r) => s + (Number(r.quantidade_latas) || 0), 0);
+                    const totalPrev = doc.rows.reduce((s, r) => s + (Number(r.previsao_latas) || 0), 0);
+                    const totalKg = doc.rows.reduce((s, r) => s + (Number(r.quantidade_kg) || 0), 0);
+                    const numeroDoc = doc.doc_numero != null ? String(doc.doc_numero) : (doc.doc_ordem_global != null ? String(doc.doc_ordem_global) : String(index + 1));
+                    const filialNome = (doc.filial_nome || "").trim() ? String(doc.filial_nome).trim() : "Todas as filiais";
+                    const firstRowData = doc.rows[0]?.data;
+                    const dateStr = firstRowData ? (typeof firstRowData === "string" ? firstRowData.split("T")[0] : "") : "";
+                    return (
+                      <div
+                        key={doc.key}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          setSelectedDocKey(doc.key);
+                          setShowDocumentGridForRange(false);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelectedDocKey(doc.key);
+                            setShowDocumentGridForRange(false);
+                          }
+                        }}
+                        className="group relative rounded-xl border border-border/50 bg-card/95 hover:border-primary/40 hover:bg-muted/60 hover:shadow-md transition-all duration-300 p-4 sm:p-5 cursor-pointer"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex min-w-[3.5rem] sm:min-w-[4rem] shrink-0 flex-col items-center justify-center rounded-lg bg-primary/10 border border-primary/20 text-primary py-1.5">
+                            <span className="text-[10px] font-bold leading-tight">N°</span>
+                            <span className="text-sm font-bold tabular-nums">{numeroDoc}</span>
+                            <span className="text-[10px] text-muted-foreground mt-0.5">de {documentosDoPeriodo.length}</span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-foreground truncate" title={filialNome}>
+                              {filialNome}
+                            </p>
+                            {dateStr ? (
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {formatDateBr(dateStr + "T00:00:00")}
+                              </p>
+                            ) : null}
+                            <p className="text-[10px] text-muted-foreground/70 mt-1">
+                              {doc.rows.length} linha(s) · Prev. Latas {formatNumberFixed(totalPrev, 2) || "—"} · Kg {formatNumber(totalKg) || "—"}
+                            </p>
+                          </div>
+                          <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0 mt-1" />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
+              <>
+              {/* Gráfico Qtd. em Kg por item — sempre visível na vista do documento */}
+              <div ref={chartQtdKgRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden min-w-0 mb-6">
+                <div className="mb-5 lg:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
+                      <Target className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Qtd. em Kg por item</h3>
+                      <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Quantidade a ser feita de cada item (Qtd. Kg)</p>
+                    </div>
+                  </div>
+                  <ExportToPng targetRef={chartQtdKgRef} filenamePrefix="pcp-qtd-kg-por-item" expandScrollable={false} className="shrink-0" />
+                </div>
+                <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
+                  {chartQtdKgData.length > 0 ? (
+                    <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5 w-full min-w-0" style={{ height: Math.min(720, Math.max(200, chartQtdKgData.length * 52)) }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          layout="vertical"
+                          data={chartQtdKgData}
+                          margin={{ top: 8, right: 72, left: 8, bottom: 8 }}
+                          barCategoryGap={40}
+                          barGap={22}
+                        >
+                          <defs>
+                            <linearGradient id="pcp-qtdkg-primary" x1="0" y1="0" x2="1" y2="0">
+                              <stop offset="0%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
+                              <stop offset="50%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                              <stop offset="100%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
+                          <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
+                          <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={makeYAxisTickMultiLine(22, 3)} />
+                          <Tooltip
+                            cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }}
+                            contentStyle={{
+                              backgroundColor: "hsl(var(--card) / 0.98)",
+                              backdropFilter: "blur(12px)",
+                              WebkitBackdropFilter: "blur(12px)",
+                              border: "1px solid hsl(var(--border) / 0.8)",
+                              borderRadius: "14px",
+                              padding: "16px 20px",
+                              boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
+                              fontSize: "13px",
+                              fontWeight: 500,
+                            }}
+                            labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 8 }}
+                            formatter={(value: number) => [formatNumber(value), "Qtd. Kg"]}
+                            itemStyle={{ fontWeight: 600 }}
+                          />
+                          <Bar dataKey="qtdKg" fill="url(#pcp-qtdkg-primary)" radius={[0, 8, 8, 0]} name="Qtd. Kg" barSize={20} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                            <LabelList dataKey="qtdKg" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-8 sm:p-12 flex flex-col items-center justify-center min-h-[200px] text-center">
+                      <Target className="h-10 w-10 text-muted-foreground/60 mb-3" />
+                      <p className="text-sm font-medium text-muted-foreground">Nenhum item com Qtd. Kg informada</p>
+                      <p className="text-xs text-muted-foreground/80 mt-1">Preencha a coluna &quot;Qtd. Kg&quot; nas linhas da tabela para visualizar o gráfico.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="overflow-x-auto -mx-2 sm:mx-0 rounded-lg border border-border/40 [&::-webkit-scrollbar]:h-2" style={{ WebkitOverflowScrolling: "touch" }}>
+                <div className="inline-block min-w-full align-middle">
+                  <Table className="min-w-[2200px] sm:min-w-0">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-12 sm:w-16 text-center text-xs sm:text-sm">N°</TableHead>
@@ -1289,8 +1572,8 @@ export default function PlanejamentoProducao() {
                       <TableHead className="min-w-[70px] text-xs sm:text-sm">Unidade</TableHead>
                       <TableHead className="min-w-[220px] text-xs sm:text-sm">Grupo</TableHead>
                       <TableHead className="min-w-[90px] text-xs sm:text-sm text-center">Quantidade</TableHead>
-                      <TableHead className="min-w-[90px] text-xs sm:text-sm text-center">Qtd. Latas</TableHead>
-                      <TableHead className="min-w-[95px] text-xs sm:text-sm text-center">Previsão Latas</TableHead>
+                      <TableHead className="min-w-[90px] text-xs sm:text-sm text-center">Previsão Latas</TableHead>
+                      <TableHead className="min-w-[95px] text-xs sm:text-sm text-center">Qtd. Latas</TableHead>
                       <TableHead className="min-w-[75px] text-xs sm:text-sm text-center">Qtd. Kg</TableHead>
                       <TableHead className="min-w-[90px] text-xs sm:text-sm">Tipo Fruto</TableHead>
                       <TableHead className="min-w-[200px] text-xs sm:text-sm">Tipo Linha</TableHead>
@@ -2129,9 +2412,11 @@ export default function PlanejamentoProducao() {
                       );
                     })()}
                   </TableBody>
-                </Table>
+                  </Table>
+                </div>
               </div>
-            </div>
+            </>
+          )}
             </>
           )}
           </div>

@@ -13,6 +13,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { getFiliais, getProducaoHistory } from "@/services/supabaseData";
 
 function formatDate(str: string): string {
@@ -62,6 +70,7 @@ export default function Relatorios() {
   const [docGridFilialFilterApplied, setDocGridFilialFilterApplied] = useState("");
   const [docGridNumeroFilter, setDocGridNumeroFilter] = useState("");
   const [docGridNumeroFilterApplied, setDocGridNumeroFilterApplied] = useState("");
+  const [filtrosDialogOpen, setFiltrosDialogOpen] = useState(false);
   const [docGridRecords, setDocGridRecords] = useState<DocRecord[]>([]);
   const [docGridLoading, setDocGridLoading] = useState(false);
 
@@ -173,96 +182,138 @@ export default function Relatorios() {
           </p>
         </div>
 
-        {/* Documentos no período — mesma interface do Acompanhamento diário */}
+        {/* Documentos no período — filtros no dialog */}
         <div className="rounded-xl border border-border/60 bg-card/95 backdrop-blur-sm p-4 sm:p-5 lg:p-6 shadow-sm space-y-4">
-          <p className="text-sm font-medium text-muted-foreground">
-            Documentos no período: {formatDate(docGridDataDeApplied)} até {formatDate(docGridDataAteApplied)}
-          </p>
-          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3 sm:gap-3">
-            <div className="flex flex-col gap-1.5 w-full sm:min-w-[120px] sm:w-auto">
-              <Label className="text-xs font-medium text-muted-foreground">De</Label>
-              <DatePicker
-                value={docGridDataDe}
-                onChange={(v) => v && setDocGridDataDe(v)}
-                placeholder="Data inicial"
-                className="w-full overflow-visible min-w-0"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 w-full sm:min-w-[120px] sm:w-auto">
-              <Label className="text-xs font-medium text-muted-foreground">Até</Label>
-              <DatePicker
-                value={docGridDataAte}
-                onChange={(v) => v && setDocGridDataAte(v)}
-                placeholder="Data final"
-                className="w-full overflow-visible min-w-0"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5 w-full sm:min-w-[140px] sm:max-w-[180px]">
-              <Label className="text-xs font-medium text-muted-foreground">Filial</Label>
-              <Select
-                value={docGridFilialFilter || "__todos__"}
-                onValueChange={(v) => setDocGridFilialFilter(v === "__todos__" ? "" : v)}
-              >
-                <SelectTrigger className="h-9 w-full text-sm">
-                  <SelectValue placeholder="Todos" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__todos__">Todos</SelectItem>
-                  {filiais.map((f) => (
-                    <SelectItem key={f.id} value={(f.nome || "").trim()}>
-                      {(f.nome || "").trim()}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5 w-full sm:min-w-[120px] sm:w-auto">
-              <Label htmlFor="doc-grid-numero" className="text-xs font-medium text-muted-foreground">
-                N° documento
-              </Label>
-              <Input
-                id="doc-grid-numero"
-                type="number"
-                min={1}
-                max={docGridListAfterFilial.length || 999}
-                placeholder="Todos"
-                value={docGridNumeroFilter}
-                onChange={(e) => setDocGridNumeroFilter(e.target.value)}
-                className="h-9 w-full sm:w-[100px] text-sm tabular-nums"
-              />
-            </div>
-            <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:shrink-0">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-9 gap-2 w-full sm:w-auto"
-                onClick={() => {
-                  setDocGridDataDeApplied(docGridDataDe);
-                  setDocGridDataAteApplied(docGridDataAte);
-                  setDocGridFilialFilterApplied(docGridFilialFilter);
-                  setDocGridNumeroFilterApplied(docGridNumeroFilter.trim());
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-medium text-muted-foreground">
+              Documentos no período: {formatDate(docGridDataDeApplied)} até {formatDate(docGridDataAteApplied)}
+              {(docGridFilialFilterApplied || docGridNumeroFilterApplied) && (
+                <span className="ml-2 text-xs text-muted-foreground/80">
+                  (filtros ativos)
+                </span>
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              <Dialog
+                open={filtrosDialogOpen}
+                onOpenChange={(open) => {
+                  setFiltrosDialogOpen(open);
+                  if (open) {
+                    setDocGridDataDe(docGridDataDeApplied);
+                    setDocGridDataAte(docGridDataAteApplied);
+                    setDocGridFilialFilter(docGridFilialFilterApplied);
+                    setDocGridNumeroFilter(docGridNumeroFilterApplied);
+                  }
                 }}
               >
-                {docGridLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
-                Filtrar
-              </Button>
-              {(docGridNumeroFilterApplied || docGridFilialFilterApplied) && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 w-full sm:w-auto text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    setDocGridNumeroFilter("");
-                    setDocGridNumeroFilterApplied("");
-                    setDocGridFilialFilter("");
-                    setDocGridFilialFilterApplied("");
-                  }}
-                >
-                  Limpar
-                </Button>
-              )}
+                <DialogTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-9 gap-2"
+                  >
+                    <Filter className="h-4 w-4" />
+                    Filtros
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="w-[340px] sm:w-[380px] max-w-[95vw] p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
+                  <DialogHeader>
+                    <DialogTitle className="text-base">Filtros de relatórios</DialogTitle>
+                    <DialogDescription className="text-sm text-muted-foreground">
+                      Defina o período, filial e número do documento. Ao clicar em Filtrar, a lista será atualizada.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-3 py-2">
+                    <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                      <Label htmlFor="rel-de" className="text-xs text-muted-foreground">De</Label>
+                      <DatePicker
+                        id="rel-de"
+                        value={docGridDataDe}
+                        onChange={(v) => v && setDocGridDataDe(v)}
+                        placeholder="Data inicial"
+                        className="min-w-0"
+                        triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                      />
+                    </div>
+                    <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                      <Label htmlFor="rel-ate" className="text-xs text-muted-foreground">Até</Label>
+                      <DatePicker
+                        id="rel-ate"
+                        value={docGridDataAte}
+                        onChange={(v) => v && setDocGridDataAte(v)}
+                        placeholder="Data final"
+                        className="min-w-0"
+                        triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                      />
+                    </div>
+                    <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                      <Label htmlFor="rel-filial" className="text-xs text-muted-foreground">Filial</Label>
+                      <Select
+                        value={docGridFilialFilter || "__todos__"}
+                        onValueChange={(v) => setDocGridFilialFilter(v === "__todos__" ? "" : v)}
+                      >
+                        <SelectTrigger id="rel-filial" className="h-9 text-sm">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {filiais.map((f) => (
+                            <SelectItem key={f.id} value={(f.nome || "").trim()}>
+                              {(f.nome || "").trim()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                      <Label htmlFor="rel-numero" className="text-xs text-muted-foreground">N° documento</Label>
+                      <Input
+                        id="rel-numero"
+                        type="number"
+                        min={1}
+                        placeholder="Todos"
+                        value={docGridNumeroFilter}
+                        onChange={(e) => setDocGridNumeroFilter(e.target.value)}
+                        className="h-9 text-sm tabular-nums"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                    <Button
+                      type="button"
+                      className="flex-1 h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+                      onClick={() => {
+                        setDocGridDataDeApplied(docGridDataDe);
+                        setDocGridDataAteApplied(docGridDataAte);
+                        setDocGridFilialFilterApplied(docGridFilialFilter);
+                        setDocGridNumeroFilterApplied(docGridNumeroFilter.trim());
+                        setFiltrosDialogOpen(false);
+                      }}
+                    >
+                      {docGridLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
+                      Filtrar
+                    </Button>
+                    {(docGridNumeroFilterApplied || docGridFilialFilterApplied) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-9 text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setDocGridFilialFilter("");
+                          setDocGridFilialFilterApplied("");
+                          setDocGridNumeroFilter("");
+                          setDocGridNumeroFilterApplied("");
+                          setFiltrosDialogOpen(false);
+                        }}
+                      >
+                        Limpar filtros
+                      </Button>
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
 

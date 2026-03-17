@@ -46,6 +46,7 @@ import {
   getDraft,
   saveDraft,
   getProducaoHistory,
+  subscribeOCPDRealtime,
   getOCTPByInicio,
   insertOCTP,
   updateOCTP,
@@ -2258,6 +2259,33 @@ function Producao() {
       gridLinhaFilterApplied || undefined
     );
   }, [showDocumentGridForDate, gridDataDeApplied, gridDataAteApplied, gridCodigoItemApplied, gridLinhaFilterApplied, loadDocumentsForDateRange]);
+
+  // Refs para o callback de realtime usar sempre os valores atuais sem resubscribir a todo render
+  const ocpdRealtimeRef = useRef({ loadRecordByIndex: (_i: number) => {}, currentRecordIndex: -1, showDocumentGridForDate: true });
+  ocpdRealtimeRef.current = { loadRecordByIndex, currentRecordIndex, showDocumentGridForDate };
+
+  // Sincronização em tempo real: quando outro usuário alterar a OCPD, recarrega para todos verem o mesmo
+  useEffect(() => {
+    const unsubscribe = subscribeOCPDRealtime(() => {
+      if (gridDataDeApplied && gridDataAteApplied) {
+        loadDocumentsForDateRange(
+          gridDataDeApplied,
+          gridDataAteApplied,
+          gridCodigoItemApplied || undefined,
+          gridLinhaFilterApplied || undefined
+        );
+      }
+      const { loadRecordByIndex: loadRec, currentRecordIndex: idx, showDocumentGridForDate: showGrid } = ocpdRealtimeRef.current;
+      if (!showGrid && idx >= 0) loadRec(idx);
+    });
+    return unsubscribe;
+  }, [
+    gridDataDeApplied,
+    gridDataAteApplied,
+    gridCodigoItemApplied,
+    gridLinhaFilterApplied,
+    loadDocumentsForDateRange,
+  ]);
 
   // Ao abrir o dialog de filtros do grid, copiar valores aplicados para os campos pendentes
   useEffect(() => {
