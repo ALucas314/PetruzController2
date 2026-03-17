@@ -9,6 +9,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -47,6 +48,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogHeader,
+  DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
@@ -280,6 +283,25 @@ export default function PlanejamentoProducao() {
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { setDocumentNav } = useDocumentNav();
 
+  // --- Estado do Dashboard PCP (acima do card) ---
+  const [dashboardDateFrom, setDashboardDateFrom] = useState(hoje);
+  const [dashboardDateTo, setDashboardDateTo] = useState(hoje);
+  const [dashboardUnidade, setDashboardUnidade] = useState("");
+  const [dashboardGrupo, setDashboardGrupo] = useState("");
+  const [dashboardTipoLinha, setDashboardTipoLinha] = useState("");
+  const [dashboardTipoFruto, setDashboardTipoFruto] = useState("");
+  const [dashboardOpCode, setDashboardOpCode] = useState("");
+  const [dashboardData, setDashboardData] = useState<OCPPRow[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardFiltersOpen, setDashboardFiltersOpen] = useState(false);
+  const [dashboardDateFromPending, setDashboardDateFromPending] = useState(hoje);
+  const [dashboardDateToPending, setDashboardDateToPending] = useState(hoje);
+  const [dashboardUnidadePending, setDashboardUnidadePending] = useState("");
+  const [dashboardGrupoPending, setDashboardGrupoPending] = useState("");
+  const [dashboardTipoLinhaPending, setDashboardTipoLinhaPending] = useState("");
+  const [dashboardTipoFrutoPending, setDashboardTipoFrutoPending] = useState("");
+  const [dashboardOpCodePending, setDashboardOpCodePending] = useState("");
+
   const isEditing = (rowId: number, field: string) =>
     editingNumeric?.rowId === rowId && editingNumeric?.field === field;
   const getNumericDisplay = (row: OCPPRow, field: keyof OCPPRow, fallback: string) => {
@@ -347,6 +369,118 @@ export default function PlanejamentoProducao() {
     setFilialFiltro(filialFiltroPending);
     setFiltrosCardOpen(false);
   }, [dataFiltroPending, dataFiltroParaPending, filtroCodigoPending, filtroTipoLinhaPending, filtroSolidosPending, filialFiltroPending]);
+
+  /** Carrega dados do dashboard PCP (intervalo de datas). */
+  const loadDashboardData = useCallback(async () => {
+    const de = dashboardDateFrom.split("T")[0];
+    const ate = dashboardDateTo.split("T")[0];
+    if (!de) return;
+    const [dataInicio, dataFim] = de <= ate ? [de, ate] : [ate, de];
+    setDashboardLoading(true);
+    try {
+      const list = await getOcppByDateRange(dataInicio, dataFim);
+      setDashboardData(list);
+    } catch (e) {
+      console.error("Erro ao carregar dashboard PCP:", e);
+      toast({
+        title: "Erro",
+        description: e instanceof Error ? e.message : "Erro ao carregar dados do dashboard",
+        variant: "destructive",
+      });
+      setDashboardData([]);
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, [dashboardDateFrom, dashboardDateTo, toast]);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  /** Ao abrir o dialog de filtros do dashboard, sincroniza valores pendentes. */
+  useEffect(() => {
+    if (dashboardFiltersOpen) {
+      setDashboardDateFromPending(dashboardDateFrom);
+      setDashboardDateToPending(dashboardDateTo);
+      setDashboardUnidadePending(dashboardUnidade);
+      setDashboardGrupoPending(dashboardGrupo);
+      setDashboardTipoLinhaPending(dashboardTipoLinha);
+      setDashboardTipoFrutoPending(dashboardTipoFruto);
+      setDashboardOpCodePending(dashboardOpCode);
+    }
+  }, [dashboardFiltersOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Aplica filtros do dashboard e fecha o dialog. */
+  const applyDashboardFilters = useCallback(() => {
+    setDashboardDateFrom(dashboardDateFromPending);
+    setDashboardDateTo(dashboardDateToPending);
+    setDashboardUnidade(dashboardUnidadePending);
+    setDashboardGrupo(dashboardGrupoPending);
+    setDashboardTipoLinha(dashboardTipoLinhaPending);
+    setDashboardTipoFruto(dashboardTipoFrutoPending);
+    setDashboardOpCode(dashboardOpCodePending);
+    setDashboardFiltersOpen(false);
+  }, [dashboardDateFromPending, dashboardDateToPending, dashboardUnidadePending, dashboardGrupoPending, dashboardTipoLinhaPending, dashboardTipoFrutoPending, dashboardOpCodePending]);
+
+  /** Dados do dashboard após filtros (client-side). */
+  const dashboardFiltered: OCPPRow[] = useMemo(() => {
+    let list = dashboardData;
+    const u = (dashboardUnidade ?? "").trim();
+    if (u) list = list.filter((r) => (r.unidade ?? "").trim().toLowerCase() === u.toLowerCase());
+    const g = (dashboardGrupo ?? "").trim();
+    if (g) list = list.filter((r) => (r.grupo ?? "").trim().toLowerCase() === g.toLowerCase());
+    const tl = (dashboardTipoLinha ?? "").trim();
+    if (tl) list = list.filter((r) => (r.tipo_linha ?? "").trim().toLowerCase() === tl.toLowerCase());
+    const tf = (dashboardTipoFruto ?? "").trim();
+    if (tf) list = list.filter((r) => (r.tipo_fruto ?? "").trim().toLowerCase() === tf.toLowerCase());
+    const op = (dashboardOpCode ?? "").trim();
+    if (op) list = list.filter((r) => (r.op ?? "").trim().toLowerCase().includes(op.toLowerCase()));
+    return list;
+  }, [dashboardData, dashboardUnidade, dashboardGrupo, dashboardTipoLinha, dashboardTipoFruto, dashboardOpCode]);
+
+  /** Totais do dashboard (soma dos valores numéricos; t_cort parseado como número). */
+  const dashboardTotals = useMemo(() => {
+    const qtd = dashboardFiltered.length;
+    if (qtd === 0) {
+      return { quantidade_latas: 0, previsao_latas: 0, latas: 0, quantidade_kg: 0, quantidade_basqueta: 0, quantidade_chapa: 0, t_cort: 0, quantidade_kg_tuneo: 0 };
+    }
+    let quantidade_latas = 0, previsao_latas = 0, latas = 0, quantidade_kg = 0, quantidade_basqueta = 0, quantidade_chapa = 0, t_cort = 0, quantidade_kg_tuneo = 0;
+    dashboardFiltered.forEach((r) => {
+      quantidade_latas += r.quantidade_latas ?? 0;
+      previsao_latas += r.previsao_latas ?? 0;
+      latas += r.latas ?? 0;
+      quantidade_kg += r.quantidade_kg ?? 0;
+      quantidade_basqueta += r.quantidade_basqueta ?? 0;
+      quantidade_chapa += r.quantidade_chapa ?? 0;
+      quantidade_kg_tuneo += r.quantidade_kg_tuneo ?? 0;
+      t_cort += parseCortSolidValue(r.t_cort);
+    });
+    return { quantidade_latas, previsao_latas, latas, quantidade_kg, quantidade_basqueta, quantidade_chapa, t_cort, quantidade_kg_tuneo };
+  }, [dashboardFiltered]);
+
+  /** Opções únicas para filtros do dashboard (Unidade, Grupo, Tipo Linha, Tipo Fruto). */
+  const dashboardFilterOptions = useMemo(() => {
+    const unidadeSet = new Set<string>();
+    const grupoSet = new Set<string>();
+    const tipoLinhaSet = new Set<string>();
+    const tipoFrutoSet = new Set<string>();
+    dashboardData.forEach((r) => {
+      const u = (r.unidade ?? "").trim();
+      if (u) unidadeSet.add(u);
+      const g = (r.grupo ?? "").trim();
+      if (g) grupoSet.add(g);
+      const tl = (r.tipo_linha ?? "").trim();
+      if (tl) tipoLinhaSet.add(tl);
+      const tf = (r.tipo_fruto ?? "").trim();
+      if (tf) tipoFrutoSet.add(tf);
+    });
+    return {
+      unidades: Array.from(unidadeSet).sort(),
+      grupos: Array.from(grupoSet).sort(),
+      tipoLinhas: Array.from(tipoLinhaSet).sort(),
+      tipoFrutos: Array.from(tipoFrutoSet).sort(),
+    };
+  }, [dashboardData]);
 
   /** Lista base após filtro de filial (para opções de Tipo Linha e filtros). */
   const registrosBaseFilial: OCPPRow[] = filialFiltro && registros.length > 0
@@ -711,6 +845,197 @@ export default function PlanejamentoProducao() {
             <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
           </Button>
         </div>
+
+        {/* Dashboard PCP — acima do card de planejamento */}
+        <section className="rounded-2xl border border-border/50 bg-card/95 backdrop-blur-sm shadow-md overflow-hidden" aria-label="Dashboard Planejamento de Produção PCP">
+          <div className="border-b border-border/40 bg-muted/30 px-4 py-3 sm:px-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <h2 className="text-lg sm:text-xl font-bold text-foreground">Planejamento de Produção PCP</h2>
+              <Dialog open={dashboardFiltersOpen} onOpenChange={setDashboardFiltersOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2 shrink-0" aria-label="Abrir filtros do dashboard">
+                    <Filter className="h-4 w-4" />
+                    Filtros
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-[95vw] sm:max-w-md rounded-lg">
+                  <DialogHeader>
+                    <DialogTitle>Filtros do dashboard</DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-2">
+                    <div className="grid gap-2">
+                      <Label>Data (intervalo)</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">De</Label>
+                          <DatePicker
+                            value={dashboardDateFromPending}
+                            onChange={(v) => v && setDashboardDateFromPending(v)}
+                            placeholder="Data"
+                            triggerClassName="h-9 border rounded-md w-full text-sm"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Até</Label>
+                          <DatePicker
+                            value={dashboardDateToPending}
+                            onChange={(v) => v && setDashboardDateToPending(v)}
+                            placeholder="Data"
+                            triggerClassName="h-9 border rounded-md w-full text-sm"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-unidade">Unidade</Label>
+                      <Select value={dashboardUnidadePending || "__todos__"} onValueChange={(v) => setDashboardUnidadePending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-unidade" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.unidades.map((u) => (
+                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-grupo">Grupo</Label>
+                      <Select value={dashboardGrupoPending || "__todos__"} onValueChange={(v) => setDashboardGrupoPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-grupo" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.grupos.map((g) => (
+                            <SelectItem key={g} value={g}>{g}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-tipo-linha">Tipo de Linha</Label>
+                      <Select value={dashboardTipoLinhaPending || "__todos__"} onValueChange={(v) => setDashboardTipoLinhaPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-tipo-linha" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.tipoLinhas.map((tl) => (
+                            <SelectItem key={tl} value={tl}>{tl}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-tipo-fruto">Tipo de Fruto</Label>
+                      <Select value={dashboardTipoFrutoPending || "__todos__"} onValueChange={(v) => setDashboardTipoFrutoPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-tipo-fruto" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.tipoFrutos.map((tf) => (
+                            <SelectItem key={tf} value={tf}>{tf}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-op">OP Code</Label>
+                      <Input
+                        id="dashboard-filtro-op"
+                        value={dashboardOpCodePending}
+                        onChange={(e) => setDashboardOpCodePending(e.target.value)}
+                        placeholder="Ex.: OP-001"
+                        className="h-9 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button variant="outline" onClick={() => setDashboardFiltersOpen(false)}>Cancelar</Button>
+                    <Button onClick={applyDashboardFilters}>Aplicar filtros</Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+          <div className="p-4 sm:p-5 overflow-x-auto">
+            {dashboardLoading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border/40 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">OP Code</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Unidade</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Grupo</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo de Linha</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo de Fruto</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Sólidos</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Quant. Latas</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Previsão de Latas</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Real de Latas</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Quantidade em Kg</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Basq</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Q. Chapa</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">T. Cort</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Entrada no Túnel (Kg)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dashboardFiltered.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={14} className="text-center text-muted-foreground py-8">
+                          Nenhum registro encontrado para os filtros aplicados.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      dashboardFiltered.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-mono text-xs">{row.op ?? "—"}</TableCell>
+                          <TableCell className="text-xs">{row.unidade ?? "—"}</TableCell>
+                          <TableCell className="text-xs">{row.grupo ?? "—"}</TableCell>
+                          <TableCell className="text-xs">{row.tipo_linha ?? "—"}</TableCell>
+                          <TableCell className="text-xs">{row.tipo_fruto ?? "—"}</TableCell>
+                          <TableCell className="text-xs text-right">{row.solidos != null ? SOLIDOS_PERFIS.find((p) => p.value === row.solidos)?.label ?? row.solidos : "—"}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_latas)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.previsao_latas)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.latas)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_kg)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_basqueta)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_chapa)}</TableCell>
+                          <TableCell className="text-xs text-right">{row.t_cort ?? "—"}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_kg_tuneo)}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                  {dashboardFiltered.length > 0 && (
+                    <TableFooter>
+                      <TableRow className="bg-primary/10 font-bold border-t-2 border-primary/30">
+                        <TableCell colSpan={5} className="text-sm">Total</TableCell>
+                        <TableCell className="text-xs text-right">—</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_latas)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.previsao_latas)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.latas)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_kg)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_basqueta)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_chapa)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.t_cort)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_kg_tuneo)}</TableCell>
+                      </TableRow>
+                    </TableFooter>
+                  )}
+                </Table>
+              </div>
+            )}
+          </div>
+        </section>
 
         {/* Card principal — mesmo estilo do Acompanhamento diário da produção */}
         <div className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
