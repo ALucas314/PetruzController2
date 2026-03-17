@@ -319,6 +319,29 @@ export async function deleteOcpp(id: number): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Inscreve em alterações em tempo real da tabela OCPP (Planejamento de Produção).
+ * Quando qualquer usuário inserir, atualizar ou excluir um registro, o callback é chamado
+ * para que a lista possa ser recarregada e todos vejam os mesmos dados.
+ * @param onChanges - chamado em INSERT, UPDATE ou DELETE na OCPP
+ * @returns função para cancelar a inscrição (chamar no cleanup do useEffect)
+ */
+export function subscribeOCPPRealtime(onChanges: () => void): () => void {
+  const channel = supabase
+    .channel("ocpp-realtime")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "OCPP" },
+      () => {
+        onChanges();
+      }
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
 // --- Itens (OCTI) ---
 function octiRowToItem(item: Record<string, unknown>) {
   const code = item.Code ?? item.code;
@@ -743,6 +766,28 @@ export async function getProducaoHistory(params: {
   const { data, error } = await query;
   if (error) throw error;
   return data || [];
+}
+
+/**
+ * Inscreve em alterações em tempo real da tabela OCPD (Acompanhamento diário da produção).
+ * Quando qualquer usuário alterar um registro, o callback é chamado para todos verem os mesmos dados.
+ * @param onChanges - chamado em INSERT, UPDATE ou DELETE na OCPD
+ * @returns função para cancelar a inscrição
+ */
+export function subscribeOCPDRealtime(onChanges: () => void): () => void {
+  const channel = supabase
+    .channel("ocpd-realtime")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "OCPD" },
+      () => {
+        onChanges();
+      }
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
 
 // --- Draft (OCTU_DRAFT_AUTH: auth_user_id uuid, screen, data jsonb) ---
