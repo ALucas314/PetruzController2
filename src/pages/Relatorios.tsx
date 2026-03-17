@@ -39,6 +39,7 @@ interface DocRecord {
   data_dia: string;
   filial_nome: string;
   doc_id?: string | null;
+  doc_ordem_global?: number | null;
   doc_numero?: number | null;
   id?: number;
   data_cabecalho?: string;
@@ -88,14 +89,18 @@ export default function Relatorios() {
         if (!dateStr) return;
         const filialNome = (item.filial_nome || "").trim();
         const docId = item.doc_id ?? null;
-        const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}`;
+        const docOrdem = item.doc_ordem_global != null ? Number(item.doc_ordem_global) : null;
+        const docNum = item.doc_numero != null ? Number(item.doc_numero) : null;
+        const legacySuffix = docId == null ? `_${docOrdem ?? docNum ?? item.id ?? ""}` : "";
+        const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}${legacySuffix}`;
         if (!recordsMap.has(recordKey)) {
           recordsMap.set(recordKey, {
             recordKey,
             data_dia: dateStr,
             filial_nome: filialNome,
             doc_id: docId,
-            doc_numero: item.doc_numero != null ? Number(item.doc_numero) : undefined,
+            doc_ordem_global: docOrdem ?? undefined,
+            doc_numero: docNum ?? undefined,
             id: item.id,
             data_cabecalho: item.data_cabecalho,
             data: item.data,
@@ -106,7 +111,12 @@ export default function Relatorios() {
         const tA = new Date(a.data_dia).getTime();
         const tB = new Date(b.data_dia).getTime();
         if (tA !== tB) return tA - tB;
-        return (a.filial_nome || "").localeCompare(b.filial_nome || "");
+        const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "");
+        if (cmpFilial !== 0) return cmpFilial;
+        const ordA = a.doc_ordem_global ?? a.doc_numero ?? 0;
+        const ordB = b.doc_ordem_global ?? b.doc_numero ?? 0;
+        if (ordA !== ordB) return ordA - ordB;
+        return (a.doc_id ?? "").localeCompare(b.doc_id ?? "");
       });
       setDocGridRecords(sorted);
     } catch (e) {
@@ -277,6 +287,8 @@ export default function Relatorios() {
                             loadData: record.data_dia,
                             loadFilialNome: record.filial_nome || "",
                             loadDocId: record.doc_id ?? undefined,
+                            loadDocOrdemGlobal: record.doc_id == null ? (record.doc_ordem_global ?? undefined) : undefined,
+                            returnTo: "/relatorios",
                           },
                         })
                       }
@@ -288,6 +300,8 @@ export default function Relatorios() {
                               loadData: record.data_dia,
                               loadFilialNome: record.filial_nome || "",
                               loadDocId: record.doc_id ?? undefined,
+                              loadDocOrdemGlobal: record.doc_id == null ? (record.doc_ordem_global ?? undefined) : undefined,
+                              returnTo: "/relatorios",
                             },
                           });
                         }

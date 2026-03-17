@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Plus, Trash2, Loader2, Factory, Save, Clock } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, Factory, Save, Clock, FilePlus, Filter } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   getOcppByDateRange,
@@ -44,6 +44,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { useDocumentNav } from "@/contexts/DocumentNavContext";
 
 function formatDateBr(str: string): string {
   if (!str) return "—";
@@ -93,10 +99,10 @@ const PEND_OK_OPCOES = [
   { value: "OK", label: "OK" },
 ] as const;
 
-/** Calcula Qtd. Liq. Prev. = Qtd. Latas × Solid (arredondado 2 decimais). */
-function calcQtdLiqPrev(qtdLatas: number, solid: number | null): number {
+/** Calcula Qtd. Liq. Prev. = Qtd. Latas × Solid (arredondado 3 decimais; ex.: 309,39 × 6,5 = 2011,035). */
+function calcQtdLiqPrev(latas: number, solid: number | null): number {
   const s = solid ?? 0;
-  return Math.round((qtdLatas * s) * 100) / 100;
+  return Math.round((latas * s) * 1000) / 1000;
 }
 
 /** Calcula Cort Solid = Previsão Latas × Solid (arredondado 2 decimais). */
@@ -115,6 +121,14 @@ function calcPrevisaoLatasFromTipoFruto(quantidadeKg: number, tipoFruto: string)
   return 0;
 }
 
+/** Previsão Latas efetiva para Cort Solid: quando Açaí/Fruto com Qtd. Kg, usa o valor calculado (ex.: 309,38) para dar Cort Solid = 2010,97. */
+function getEffectivePrevisaoLatasForCortSolid(row: { previsao_latas?: number | null; quantidade_kg?: number | null; tipo_fruto?: string | null }): number {
+  const tf = (row.tipo_fruto ?? "").trim();
+  const kg = row.quantidade_kg ?? 0;
+  if ((tf === "Açaí" || tf === "Fruto") && kg > 0) return calcPrevisaoLatasFromTipoFruto(kg, tf);
+  return row.previsao_latas ?? 0;
+}
+
 /** Converte valor de Cort Solid (string "385,6" ou "385.6") em número. */
 function parseCortSolidValue(stored: string | null | undefined): number {
   const s = (stored ?? "").trim();
@@ -122,9 +136,9 @@ function parseCortSolidValue(stored: string | null | undefined): number {
   return s.includes(",") ? parseFormattedNumber(s) : parseFloat(s) || 0;
 }
 
-/** Calcula T. Cort = Cort Solid - Qtd. Liq. Prev. (arredondado 2 decimais). */
+/** Calcula T. Cort = Cort Solid - Qtd. Liq. Prev. (arredondado 3 decimais; ex.: 2010,97 - 2011,035 = -0,065). */
 function calcTCort(cortSolid: number, qtdLiqPrev: number): number {
-  return Math.round((cortSolid - qtdLiqPrev) * 100) / 100;
+  return Math.round((cortSolid - qtdLiqPrev) * 1000) / 1000;
 }
 
 /** Calcula Qtd. Basqueta = Qtd. Kg Túneo / Uni. Basqueta (arredondado 2 decimais). Uni. Basqueta é string (ex.: "9"). */
@@ -238,16 +252,42 @@ export default function PlanejamentoProducao() {
   const { toast } = useToast();
   const hoje = new Date().toISOString().split("T")[0];
   const [dataFiltro, setDataFiltro] = useState(hoje);
+  const [dataFiltroPara, setDataFiltroPara] = useState(hoje);
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
   const [filialFiltro, setFilialFiltro] = useState<string>("");
   const [productionLines, setProductionLines] = useState<LineOption[]>([]);
+  const [filtroCodigo, setFiltroCodigo] = useState("");
+  const [filtroTipoLinha, setFiltroTipoLinha] = useState("");
+  const [filtroSolidos, setFiltroSolidos] = useState<number | "">("");
+  const [filtrosCardOpen, setFiltrosCardOpen] = useState(false);
+  /** Valores dos filtros dentro do card (só aplicados ao clicar em "Filtrar"). */
+  const [dataFiltroPending, setDataFiltroPending] = useState(hoje);
+  const [dataFiltroParaPending, setDataFiltroParaPending] = useState(hoje);
+  const [filtroCodigoPending, setFiltroCodigoPending] = useState("");
+  const [filtroTipoLinhaPending, setFiltroTipoLinhaPending] = useState("");
+  const [filtroSolidosPending, setFiltroSolidosPending] = useState<number | "">("");
+  const [filialFiltroPending, setFilialFiltroPending] = useState("");
   const [registros, setRegistros] = useState<OCPPRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [savingAll, setSavingAll] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
+  /** Mantém o texto digitado (com vírgula) nos campos numéricos até o blur, para permitir digitar "142,85". */
+  const [editingNumeric, setEditingNumeric] = useState<{ rowId: number; field: string; value: string } | null>(null);
+  /** Ao clicar em "Novo documento", guarda o próximo número (ex.: 2) para exibir "2 de 2" no header até carregar de novo. */
+  const [newDocumentIndex, setNewDocumentIndex] = useState<number | null>(null);
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { setDocumentNav } = useDocumentNav();
+
+  const isEditing = (rowId: number, field: string) =>
+    editingNumeric?.rowId === rowId && editingNumeric?.field === field;
+  const getNumericDisplay = (row: OCPPRow, field: keyof OCPPRow, fallback: string) => {
+    if (isEditing(row.id, field as string)) return editingNumeric!.value;
+    const val = row[field];
+    if (val == null || (typeof val === "number" && val === 0)) return fallback;
+    return formatNumber(val as number);
+  };
 
   useEffect(() => {
     getFiliais()
@@ -260,10 +300,13 @@ export default function PlanejamentoProducao() {
 
   const loadRegistros = useCallback(async () => {
     const de = dataFiltro.split("T")[0];
+    const ate = (dataFiltroPara || dataFiltro).toString().split("T")[0];
     if (!de) return;
+    const [dataInicio, dataFim] = de <= ate ? [de, ate] : [ate, de];
     setLoading(true);
+    setNewDocumentIndex(null);
     try {
-      const list = await getOcppByDateRange(de, de, filialFiltro || undefined);
+      const list = await getOcppByDateRange(dataInicio, dataFim, filialFiltro || undefined);
       setRegistros(list);
     } catch (e) {
       console.error("Erro ao carregar OCPP:", e);
@@ -276,16 +319,67 @@ export default function PlanejamentoProducao() {
     } finally {
       setLoading(false);
     }
-  }, [dataFiltro, filialFiltro, toast]);
+  }, [dataFiltro, dataFiltroPara, filialFiltro, toast]);
 
   useEffect(() => {
     loadRegistros();
   }, [loadRegistros]);
 
-  const registrosExibidos: OCPPRow[] =
-    filialFiltro && registros.length > 0
-      ? registros.filter((r) => (r.filial_nome || "").trim() === filialFiltro)
-      : registros ?? [];
+  /** Ao abrir o card de filtros, copia os valores aplicados para os campos pendentes. */
+  useEffect(() => {
+    if (filtrosCardOpen) {
+      setDataFiltroPending(dataFiltro);
+      setDataFiltroParaPending(dataFiltroPara);
+      setFiltroCodigoPending(filtroCodigo);
+      setFiltroTipoLinhaPending(filtroTipoLinha);
+      setFiltroSolidosPending(filtroSolidos);
+      setFilialFiltroPending(filialFiltro);
+    }
+  }, [filtrosCardOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- sync only when opening
+
+  /** Aplica os filtros do card (pendentes) e fecha o card. */
+  const applyFiltrosCard = useCallback(() => {
+    setDataFiltro(dataFiltroPending);
+    setDataFiltroPara(dataFiltroParaPending);
+    setFiltroCodigo(filtroCodigoPending);
+    setFiltroTipoLinha(filtroTipoLinhaPending);
+    setFiltroSolidos(filtroSolidosPending);
+    setFilialFiltro(filialFiltroPending);
+    setFiltrosCardOpen(false);
+  }, [dataFiltroPending, dataFiltroParaPending, filtroCodigoPending, filtroTipoLinhaPending, filtroSolidosPending, filialFiltroPending]);
+
+  /** Lista base após filtro de filial (para opções de Tipo Linha e filtros). */
+  const registrosBaseFilial: OCPPRow[] = filialFiltro && registros.length > 0
+    ? registros.filter((r) => (r.filial_nome || "").trim() === filialFiltro)
+    : registros ?? [];
+
+  /** Valores únicos de tipo_linha nos registros carregados, para o filtro bater com o que está salvo (ex.: código ou "Balde"). */
+  const opcoesTipoLinhaFiltro = useMemo(() => {
+    const set = new Set<string>();
+    registrosBaseFilial.forEach((r) => {
+      const t = (r.tipo_linha ?? "").trim();
+      if (t) set.add(t);
+    });
+    return Array.from(set).sort();
+  }, [registrosBaseFilial]);
+
+  /** Retorna o nome da linha para exibição no filtro (em vez do código). */
+  const getNomeLinhaParaFiltro = useCallback((valorSalvo: string) => {
+    const v = (valorSalvo ?? "").trim();
+    if (!v) return v;
+    const line = productionLines.find((l) => (l.code ?? "").trim() === v || (l.name ?? "").trim() === v);
+    return line?.name || line?.code || v;
+  }, [productionLines]);
+
+  const registrosExibidos: OCPPRow[] = (() => {
+    let list = registrosBaseFilial;
+    const codigoTrim = (filtroCodigo ?? "").trim().toLowerCase();
+    if (codigoTrim) list = list.filter((r) => String(r.Code ?? "").toLowerCase().includes(codigoTrim));
+    const tipoLinhaTrim = (filtroTipoLinha ?? "").trim();
+    if (tipoLinhaTrim) list = list.filter((r) => (r.tipo_linha ?? "").trim().toLowerCase() === tipoLinhaTrim.toLowerCase());
+    if (filtroSolidos !== "" && filtroSolidos != null) list = list.filter((r) => r.solidos === filtroSolidos);
+    return list;
+  })();
 
   /** Atualiza um registro no banco e no estado local (sem recarregar a tabela nem mostrar loading). Preserva zeros à esquerda do código. */
   const updateRow = async (id: number, payload: Partial<OCPPInsertPayload>) => {
@@ -439,11 +533,24 @@ export default function PlanejamentoProducao() {
     solidos: row.solidos ?? null,
     solid: row.solid ?? null,
     quantidade_kg_tuneo: row.quantidade_kg_tuneo ?? 0,
-    quantidade_liquida_prevista: (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null),
-    cort_solid: (row.cort_solid ?? "").trim() !== "" ? row.cort_solid : (formatNumber(calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null)) || null),
+    quantidade_liquida_prevista: (() => {
+      const hasFormula = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
+      if (hasFormula) return calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+      return (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+    })(),
+    cort_solid: (() => {
+      const tf = (row.tipo_fruto ?? "").trim();
+      const kg = row.quantidade_kg ?? 0;
+      if ((tf === "Açaí" || tf === "Fruto") && kg > 0) return formatNumber(calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null)) || null;
+      return (row.cort_solid ?? "").trim() !== "" ? row.cort_solid : (formatNumber(calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null)) || null);
+    })(),
     t_cort: (() => {
-      const cortNum = (row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null);
-      const liqPrev = (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+      const tf = (row.tipo_fruto ?? "").trim();
+      const kg = row.quantidade_kg ?? 0;
+      const useCalculatedCort = (tf === "Açaí" || tf === "Fruto") && kg > 0;
+      const cortNum = useCalculatedCort ? calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null) : ((row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null));
+      const hasFormulaLiq = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
+      const liqPrev = hasFormulaLiq ? calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null) : ((row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null));
       return formatNumber(calcTCort(cortNum, liqPrev)) || null;
     })(),
     quantidade_basqueta: calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, row.unidade_base ?? ""),
@@ -478,6 +585,7 @@ export default function PlanejamentoProducao() {
         );
       }
       toast({ title: "Salvo", description: `${rowsToSave.length} linha(s) atualizada(s).` });
+      await loadRegistros();
     } catch (e) {
       toast({
         title: "Erro ao salvar",
@@ -487,7 +595,33 @@ export default function PlanejamentoProducao() {
     } finally {
       setSavingAll(false);
     }
-  }, [registrosExibidos, rowToPayload, toast]);
+  }, [registrosExibidos, rowToPayload, toast, loadRegistros]);
+
+  /** Criar novo documento: limpa a lista; header mostra próximo número em ordem (ex.: 2 de 2, 3 de 3). */
+  const createNewDocument = useCallback(() => {
+    const totalAtual = registrosExibidos.length;
+    setNewDocumentIndex(totalAtual + 1);
+    setRegistros([]);
+    toast({ title: "Novo documento", description: "Lista limpa. Adicione linhas e salve." });
+  }, [registrosExibidos.length]);
+
+  /** Contagem para PCP: 0 de 0 (sem registros), 1 de 1, 2 de 2... Em "Novo documento" mostra próximo em ordem (ex.: 2 de 2). */
+  useEffect(() => {
+    const total = newDocumentIndex ?? registrosExibidos.length;
+    setDocumentNav({
+      showNav: true,
+      canGoPrev: false,
+      canGoNext: false,
+      onPrev: () => {},
+      onNext: () => {},
+      onNewDocument: createNewDocument,
+      navLabel: `${total} de ${total}`,
+      saving: savingAll,
+      canSave: registrosExibidos.length > 0,
+      onSave: handleSaveAll,
+    });
+    return () => setDocumentNav(null);
+  }, [registrosExibidos.length, newDocumentIndex, savingAll, handleSaveAll, createNewDocument, setDocumentNav]);
 
   useEffect(() => {
     return () => {
@@ -634,21 +768,22 @@ export default function PlanejamentoProducao() {
                   <div className="flex flex-col gap-2 w-full min-[892px]:hidden pt-2 items-center max-w-sm mx-auto">
                     <button
                       type="button"
+                      onClick={() => createNewDocument()}
+                      className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary w-full"
+                      title="Novo documento"
+                      aria-label="Novo documento"
+                    >
+                      <FilePlus className="h-4 w-4 shrink-0" />
+                      <span>Novo documento</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleSaveAll()}
                       disabled={savingAll || registrosExibidos.length === 0}
                       className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-success w-full disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {savingAll ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Save className="h-4 w-4 shrink-0" />}
                       <span>{savingAll ? "Salvando..." : "Salvar"}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={addLinha}
-                      disabled={savingId === -1}
-                      className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {savingId === -1 ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Plus className="h-4 w-4 shrink-0" />}
-                      <span>Adicionar Linha</span>
                     </button>
                   </div>
                 </div>
@@ -657,21 +792,22 @@ export default function PlanejamentoProducao() {
               <div className="hidden min-[892px]:flex flex-wrap items-center gap-2 order-2">
                 <button
                   type="button"
+                  onClick={() => createNewDocument()}
+                  className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary"
+                  title="Novo documento"
+                  aria-label="Novo documento"
+                >
+                  <FilePlus className="h-4 w-4 shrink-0" />
+                  <span>Novo documento</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleSaveAll()}
                   disabled={savingAll || registrosExibidos.length === 0}
                   className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-success disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {savingAll ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Save className="h-4 w-4 shrink-0" />}
                   <span>{savingAll ? "Salvando..." : "Salvar"}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={addLinha}
-                  disabled={savingId === -1}
-                  className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {savingId === -1 ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Plus className="h-4 w-4 shrink-0" />}
-                  <span>Adicionar Linha</span>
                 </button>
               </div>
             </div>
@@ -684,6 +820,124 @@ export default function PlanejamentoProducao() {
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           ) : (
+            <>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3">
+              <Dialog open={filtrosCardOpen} onOpenChange={setFiltrosCardOpen}>
+                <DialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0"
+                    aria-label="Abrir filtros"
+                  >
+                    <Filter className="h-4 w-4 shrink-0" />
+                    <span>Filtros</span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="w-[340px] sm:w-[380px] p-4 rounded-lg shadow-lg border-border/60 max-w-[95vw]">
+                  <div className="space-y-4">
+                    <p className="text-sm font-semibold text-foreground">Filtros</p>
+                    <div className="grid gap-3">
+                      <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                        <Label htmlFor="card-filtro-de" className="text-xs text-muted-foreground">De</Label>
+                        <DatePicker
+                          id="card-filtro-de"
+                          value={dataFiltroPending}
+                          onChange={(v) => v && setDataFiltroPending(v)}
+                          placeholder="Data"
+                          className="min-w-0"
+                          triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                        />
+                      </div>
+                      <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                        <Label htmlFor="card-filtro-para" className="text-xs text-muted-foreground">Para</Label>
+                        <DatePicker
+                          id="card-filtro-para"
+                          value={dataFiltroParaPending}
+                          onChange={(v) => v && setDataFiltroParaPending(v)}
+                          placeholder="Data"
+                          className="min-w-0"
+                          triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                        />
+                      </div>
+                      <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                        <Label htmlFor="card-filtro-codigo" className="text-xs text-muted-foreground">Código</Label>
+                        <Input
+                          id="card-filtro-codigo"
+                          value={filtroCodigoPending}
+                          onChange={(e) => setFiltroCodigoPending(e.target.value)}
+                          placeholder="Código do produto"
+                          className="h-9 text-sm"
+                        />
+                      </div>
+                      <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                        <Label htmlFor="card-filtro-tipo-linha" className="text-xs text-muted-foreground">Tipo Linha</Label>
+                        <Select value={filtroTipoLinhaPending || "__todos__"} onValueChange={(v) => setFiltroTipoLinhaPending(v === "__todos__" ? "" : v)}>
+                          <SelectTrigger id="card-filtro-tipo-linha" className="h-9 text-sm">
+                            <SelectValue placeholder="Todos" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__todos__">Todos</SelectItem>
+                            {opcoesTipoLinhaFiltro.length > 0
+                              ? opcoesTipoLinhaFiltro.map((valorSalvo) => (
+                                  <SelectItem key={valorSalvo} value={valorSalvo}>{getNomeLinhaParaFiltro(valorSalvo)}</SelectItem>
+                                ))
+                              : productionLines.map((l) => (
+                                  <SelectItem key={l.id} value={(l.name ?? l.code ?? "").trim() || String(l.id)}>{(l.name || l.code) || `Linha ${l.id}`}</SelectItem>
+                                ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                        <Label htmlFor="card-filtro-solidos" className="text-xs text-muted-foreground">Solidos</Label>
+                        <Select value={filtroSolidosPending === "" ? "__todos__" : String(filtroSolidosPending)} onValueChange={(v) => setFiltroSolidosPending(v === "__todos__" ? "" : Number(v))}>
+                          <SelectTrigger id="card-filtro-solidos" className="h-9 text-sm">
+                            <SelectValue placeholder="Todos" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__todos__">Todos</SelectItem>
+                            {SOLIDOS_PERFIS.map((p) => (
+                              <SelectItem key={p.value} value={String(p.value)}>{p.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                        <Label htmlFor="card-filtro-filial" className="text-xs text-muted-foreground">Filial</Label>
+                        <Select value={filialFiltroPending || "__todas__"} onValueChange={(v) => setFilialFiltroPending(v === "__todas__" ? "" : v)}>
+                          <SelectTrigger id="card-filtro-filial" className="h-9 text-sm">
+                            <SelectValue placeholder="Todas as filiais" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__todas__">Todas as filiais</SelectItem>
+                            {filiais.map((f) => (
+                              <SelectItem key={f.id} value={(f.nome || "").trim()}>{f.nome}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={applyFiltrosCard}
+                      className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+                    >
+                      Filtrar
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              <div className="ml-auto">
+                <button
+                  type="button"
+                  onClick={addLinha}
+                  disabled={savingId === -1}
+                  className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 h-9 rounded-md px-3 w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
+                >
+                  {savingId === -1 ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Plus className="h-4 w-4 shrink-0" />}
+                  <span className="truncate">Adicionar Linha</span>
+                </button>
+              </div>
+            </div>
             <div className="overflow-x-auto -mx-2 sm:mx-0 rounded-lg border border-border/40 [&::-webkit-scrollbar]:h-2" style={{ WebkitOverflowScrolling: "touch" }}>
               <div className="inline-block min-w-full align-middle">
                 <Table className="min-w-[2200px] sm:min-w-0">
@@ -796,37 +1050,17 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
                               type="text"
-                              value={row.quantidade != null && row.quantidade !== 0 ? formatNumber(row.quantidade) : ""}
+                              inputMode="decimal"
+                              value={getNumericDisplay(row, "quantidade", "")}
+                              onFocus={() => setEditingNumeric({ rowId: row.id, field: "quantidade", value: row.quantidade != null && row.quantidade !== 0 ? formatNumber(row.quantidade) : "" })}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) setRowField(row.id, "quantidade", parseFormattedNumber(v) || 0);
-                              }}
-                              onBlur={(e) => updateRow(row.id, { quantidade: parseFormattedNumber(e.target.value) || 0 })}
-                              className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell className="p-2 sm:p-4 text-center">
-                            <Input
-                              type="text"
-                              value={row.quantidade_latas != null && row.quantidade_latas !== 0 ? formatNumber(row.quantidade_latas) : ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) {
-                                  const latasVal = parseFormattedNumber(v) || 0;
-                                  const liqPrev = calcQtdLiqPrev(latasVal, row.solid ?? null);
-                                  setRowField(row.id, "quantidade_latas", latasVal);
-                                  setRowField(row.id, "quantidade_liquida_prevista", liqPrev);
-                                  const cortNum = parseCortSolidValue(row.cort_solid ?? "");
-                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortNum, liqPrev)) || "");
-                                }
+                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "quantidade" ? { ...p, value: v } : { rowId: row.id, field: "quantidade", value: v }));
                               }}
                               onBlur={(e) => {
-                                const latasVal = parseFormattedNumber(e.target.value) || 0;
-                                const liqPrev = calcQtdLiqPrev(latasVal, row.solid ?? null);
-                                const cortNum = parseCortSolidValue(row.cort_solid ?? "");
-                                const payload: Partial<OCPPInsertPayload> = { quantidade_latas: latasVal, quantidade_liquida_prevista: liqPrev, t_cort: formatNumber(calcTCort(cortNum, liqPrev)) || "" };
-                                updateRow(row.id, payload);
+                                const num = parseFormattedNumber(isEditing(row.id, "quantidade") ? editingNumeric?.value : e.target.value) || 0;
+                                setEditingNumeric(null);
+                                updateRow(row.id, { quantidade: num });
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
                               placeholder="0"
@@ -835,7 +1069,29 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
                               type="text"
-                              value={(() => {
+                              inputMode="decimal"
+                              value={getNumericDisplay(row, "quantidade_latas", "")}
+                              onFocus={() => setEditingNumeric({ rowId: row.id, field: "quantidade_latas", value: row.quantidade_latas != null && row.quantidade_latas !== 0 ? formatNumber(row.quantidade_latas) : "" })}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "quantidade_latas" ? { ...p, value: v } : { rowId: row.id, field: "quantidade_latas", value: v }));
+                              }}
+                              onBlur={(e) => {
+                                const latasVal = parseFormattedNumber(isEditing(row.id, "quantidade_latas") ? editingNumeric?.value : e.target.value) || 0;
+                                setEditingNumeric(null);
+                                const liqPrev = calcQtdLiqPrev(latasVal, row.solid ?? null);
+                                const cortNum = (row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null);
+                                updateRow(row.id, { quantidade_latas: latasVal, quantidade_liquida_prevista: liqPrev, t_cort: formatNumber(calcTCort(cortNum, liqPrev)) || "" });
+                              }}
+                              className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
+                              placeholder="0"
+                            />
+                          </TableCell>
+                          <TableCell className="p-2 sm:p-4 text-center">
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              value={isEditing(row.id, "previsao_latas") ? editingNumeric!.value : (() => {
                                 const tf = (row.tipo_fruto ?? "").trim();
                                 if ((tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)) {
                                   const calc = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? "");
@@ -843,23 +1099,23 @@ export default function PlanejamentoProducao() {
                                 }
                                 return row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "";
                               })()}
+                              onFocus={() => {
+                                const tf = (row.tipo_fruto ?? "").trim();
+                                const disp = (tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)
+                                  ? formatNumber(calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? ""))
+                                  : (row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "");
+                                setEditingNumeric({ rowId: row.id, field: "previsao_latas", value: disp });
+                              }}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) {
-                                  const prevLatas = parseFormattedNumber(v) || 0;
-                                  const cortSolid = calcCortSolid(prevLatas, row.solid ?? null);
-                                  const liqPrev = row.quantidade_liquida_prevista ?? 0;
-                                  setRowField(row.id, "previsao_latas", prevLatas);
-                                  setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
-                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
-                                }
+                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "previsao_latas" ? { ...p, value: v } : { rowId: row.id, field: "previsao_latas", value: v }));
                               }}
                               onBlur={(e) => {
-                                const prevLatas = parseFormattedNumber(e.target.value) || 0;
+                                const prevLatas = parseFormattedNumber(isEditing(row.id, "previsao_latas") ? editingNumeric?.value : e.target.value) || 0;
+                                setEditingNumeric(null);
                                 const cortSolid = calcCortSolid(prevLatas, row.solid ?? null);
-                                const liqPrev = row.quantidade_liquida_prevista ?? 0;
-                                const payload: Partial<OCPPInsertPayload> = { previsao_latas: prevLatas, cort_solid: formatNumber(cortSolid) || "", t_cort: formatNumber(calcTCort(cortSolid, liqPrev)) || "" };
-                                updateRow(row.id, payload);
+                                const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+                                updateRow(row.id, { previsao_latas: prevLatas, cort_solid: formatNumber(cortSolid) || "", quantidade_liquida_prevista: liqPrev, t_cort: formatNumber(calcTCort(cortSolid, liqPrev)) || "" });
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
                               placeholder="0"
@@ -868,26 +1124,16 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
                               type="text"
-                              value={row.quantidade_kg != null && row.quantidade_kg !== 0 ? formatNumber(row.quantidade_kg) : ""}
+                              inputMode="decimal"
+                              value={getNumericDisplay(row, "quantidade_kg", "")}
+                              onFocus={() => setEditingNumeric({ rowId: row.id, field: "quantidade_kg", value: row.quantidade_kg != null && row.quantidade_kg !== 0 ? formatNumber(row.quantidade_kg) : "" })}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) {
-                                  const kg = parseFormattedNumber(v) || 0;
-                                  setRowField(row.id, "quantidade_kg", kg);
-                                  const previsaoLatas = calcPrevisaoLatasFromTipoFruto(kg, row.tipo_fruto ?? "");
-                                  if ((row.tipo_fruto ?? "").trim() === "Açaí" || (row.tipo_fruto ?? "").trim() === "Fruto") {
-                                    setRowField(row.id, "previsao_latas", previsaoLatas);
-                                    if (previsaoLatas !== 0) {
-                                      const cortSolid = calcCortSolid(previsaoLatas, row.solid ?? null);
-                                      const liqPrev = (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
-                                      setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
-                                      setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
-                                    }
-                                  }
-                                }
+                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "quantidade_kg" ? { ...p, value: v } : { rowId: row.id, field: "quantidade_kg", value: v }));
                               }}
                               onBlur={(e) => {
-                                const kg = parseFormattedNumber(e.target.value) || 0;
+                                const kg = parseFormattedNumber(isEditing(row.id, "quantidade_kg") ? editingNumeric?.value : e.target.value) || 0;
+                                setEditingNumeric(null);
                                 const previsaoLatas = calcPrevisaoLatasFromTipoFruto(kg, row.tipo_fruto ?? "");
                                 const payload: Partial<OCPPInsertPayload> = { quantidade_kg: kg };
                                 if ((row.tipo_fruto ?? "").trim() === "Açaí" || (row.tipo_fruto ?? "").trim() === "Fruto") {
@@ -1139,7 +1385,7 @@ export default function PlanejamentoProducao() {
                                 const payload: Partial<OCPPInsertPayload> = { solidos: solidosVal };
                                 const solidVal = solidosVal === 1 ? 9.64 : solidosVal === 2 ? 6.5 : solidosVal === 3 ? 5.15 : solidosVal === 4 ? 1 : 0;
                                 const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal === 0 ? null : solidVal);
-                                const cortSolid = calcCortSolid(row.previsao_latas ?? 0, solidVal === 0 ? null : solidVal);
+                                const cortSolid = calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), solidVal === 0 ? null : solidVal);
                                 payload.solid = solidVal;
                                 payload.quantidade_liquida_prevista = liqPrev;
                                 payload.cort_solid = formatNumber(cortSolid) || "";
@@ -1165,25 +1411,20 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
                               type="text"
-                              value={row.solid != null ? formatNumber(row.solid) : ""}
+                              inputMode="decimal"
+                              value={getNumericDisplay(row, "solid", "")}
+                              onFocus={() => setEditingNumeric({ rowId: row.id, field: "solid", value: row.solid != null ? formatNumber(row.solid) : "" })}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) {
-                                  const solidVal = v === "" ? null : parseFormattedNumber(v);
-                                  const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal);
-                                  const cortSolid = calcCortSolid(row.previsao_latas ?? 0, solidVal);
-                                  setRowField(row.id, "solid", solidVal);
-                                  setRowField(row.id, "quantidade_liquida_prevista", liqPrev);
-                                  setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
-                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
-                                }
+                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "solid" ? { ...p, value: v } : { rowId: row.id, field: "solid", value: v }));
                               }}
                               onBlur={(e) => {
-                                const solidVal = e.target.value === "" ? null : parseFormattedNumber(e.target.value);
+                                const raw = isEditing(row.id, "solid") ? editingNumeric?.value : e.target.value;
+                                const solidVal = raw === "" ? null : parseFormattedNumber(raw);
+                                setEditingNumeric(null);
                                 const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal);
-                                const cortSolid = calcCortSolid(row.previsao_latas ?? 0, solidVal);
-                                const payload: Partial<OCPPInsertPayload> = { solid: solidVal, quantidade_liquida_prevista: liqPrev, cort_solid: formatNumber(cortSolid) || "", t_cort: formatNumber(calcTCort(cortSolid, liqPrev)) || "" };
-                                updateRow(row.id, payload);
+                                const cortSolid = calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), solidVal);
+                                updateRow(row.id, { solid: solidVal, quantidade_liquida_prevista: liqPrev, cort_solid: formatNumber(cortSolid) || "", t_cort: formatNumber(calcTCort(cortSolid, liqPrev)) || "" });
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[7rem]"
                               placeholder="—"
@@ -1192,19 +1433,16 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
                               type="text"
-                              value={row.quantidade_kg_tuneo != null && row.quantidade_kg_tuneo !== 0 ? formatNumber(row.quantidade_kg_tuneo) : ""}
+                              inputMode="decimal"
+                              value={getNumericDisplay(row, "quantidade_kg_tuneo", "")}
+                              onFocus={() => setEditingNumeric({ rowId: row.id, field: "quantidade_kg_tuneo", value: row.quantidade_kg_tuneo != null && row.quantidade_kg_tuneo !== 0 ? formatNumber(row.quantidade_kg_tuneo) : "" })}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) {
-                                  const kgTuneo = parseFormattedNumber(v) || 0;
-                                  const qtdBasqueta = calcQtdBasqueta(kgTuneo, row.unidade_base ?? "");
-                                  setRowField(row.id, "quantidade_kg_tuneo", kgTuneo);
-                                  setRowField(row.id, "quantidade_basqueta", qtdBasqueta);
-                                  setRowField(row.id, "quantidade_chapa", calcQtdChapa(qtdBasqueta, row.unidade_chapa ?? ""));
-                                }
+                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "quantidade_kg_tuneo" ? { ...p, value: v } : { rowId: row.id, field: "quantidade_kg_tuneo", value: v }));
                               }}
                               onBlur={(e) => {
-                                const kgTuneo = parseFormattedNumber(e.target.value) || 0;
+                                const kgTuneo = parseFormattedNumber(isEditing(row.id, "quantidade_kg_tuneo") ? editingNumeric?.value : e.target.value) || 0;
+                                setEditingNumeric(null);
                                 const qtdBasqueta = calcQtdBasqueta(kgTuneo, row.unidade_base ?? "");
                                 updateRow(row.id, { quantidade_kg_tuneo: kgTuneo, quantidade_basqueta: qtdBasqueta, quantidade_chapa: calcQtdChapa(qtdBasqueta, row.unidade_chapa ?? "") });
                               }}
@@ -1215,54 +1453,68 @@ export default function PlanejamentoProducao() {
                           <TableCell className="p-2 sm:p-4 text-center">
                             <Input
                               type="text"
-                              value={(() => {
-                                const stored = row.quantidade_liquida_prevista ?? 0;
+                              inputMode="decimal"
+                              value={isEditing(row.id, "quantidade_liquida_prevista") ? editingNumeric!.value : (() => {
                                 const calculated = calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
-                                const toShow = stored !== 0 ? stored : calculated !== 0 ? calculated : null;
+                                const hasFormula = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
+                                const toShow = hasFormula ? (calculated !== 0 ? calculated : null) : ((row.quantidade_liquida_prevista ?? 0) !== 0 ? row.quantidade_liquida_prevista : calculated !== 0 ? calculated : null);
                                 return toShow != null && toShow !== 0 ? formatNumber(toShow) : "";
                               })()}
+                              onFocus={() => {
+                                const calculated = calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+                                const hasFormula = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
+                                const toShow = hasFormula ? (calculated !== 0 ? calculated : null) : ((row.quantidade_liquida_prevista ?? 0) !== 0 ? row.quantidade_liquida_prevista : calculated !== 0 ? calculated : null);
+                                setEditingNumeric({ rowId: row.id, field: "quantidade_liquida_prevista", value: toShow != null && toShow !== 0 ? formatNumber(toShow) : "" });
+                              }}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) {
-                                  const newVal = parseFormattedNumber(v) || 0;
-                                  const cortNum = parseCortSolidValue(row.cort_solid ?? "");
-                                  setRowField(row.id, "quantidade_liquida_prevista", newVal);
-                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortNum, newVal)) || "");
-                                }
+                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "quantidade_liquida_prevista" ? { ...p, value: v } : { rowId: row.id, field: "quantidade_liquida_prevista", value: v }));
                               }}
                               onBlur={(e) => {
-                                const newVal = parseFormattedNumber(e.target.value) || 0;
+                                const newVal = parseFormattedNumber(isEditing(row.id, "quantidade_liquida_prevista") ? editingNumeric?.value : e.target.value) || 0;
+                                setEditingNumeric(null);
                                 const cortNum = parseCortSolidValue(row.cort_solid ?? "");
                                 updateRow(row.id, { quantidade_liquida_prevista: newVal, t_cort: formatNumber(calcTCort(cortNum, newVal)) || "" });
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem]"
-                              placeholder="0"
+                              placeholder="Qtd. Latas × Solid"
+                              title="Qtd. Liq. Prev. = Qtd. Latas × Solid"
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
                             <Input
                               value={(() => {
+                                const tf = (row.tipo_fruto ?? "").trim();
+                                const kg = row.quantidade_kg ?? 0;
+                                const useCalculated = (tf === "Açaí" || tf === "Fruto") && kg > 0;
+                                const calculated = calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null);
+                                if (useCalculated && calculated !== 0) return formatNumber(calculated);
                                 const stored = row.cort_solid ?? "";
-                                const calculated = calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null);
                                 if (stored.trim() !== "") {
-                                  // Aceita "385,6" (BR) ou "385.6" (ponto decimal) para exibir sempre com vírgula (ex.: 385,6)
-                                  const num = stored.includes(",") ? parseFormattedNumber(stored) : parseFloat(stored);
-                                  return formatNumber(!Number.isNaN(num) ? num : 0);
+                                  const num = parseCortSolidValue(stored);
+                                  return formatNumber(num);
                                 }
                                 return calculated !== 0 ? formatNumber(calculated) : "";
                               })()}
                               readOnly
                               className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-[8rem] bg-muted/50"
                               placeholder="Previsão Latas × Solid"
+                              title="Cort Solid = Previsão Latas × Solid"
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
                             <Input
                               value={(() => {
-                                const cortNum = parseCortSolidValue(row.cort_solid ?? "");
-                                const liqPrev = row.quantidade_liquida_prevista ?? 0;
+                                const tf = (row.tipo_fruto ?? "").trim();
+                                const kg = row.quantidade_kg ?? 0;
+                                const useCalculatedCort = (tf === "Açaí" || tf === "Fruto") && kg > 0;
+                                const cortNum = useCalculatedCort
+                                  ? calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null)
+                                  : ((row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null));
+                                const hasFormulaLiq = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
+                                const liqPrev = hasFormulaLiq ? calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null) : ((row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null));
                                 const calculated = calcTCort(cortNum, liqPrev);
-                                return calculated !== 0 ? formatNumber(calculated) : "";
+                                return formatNumber(calculated) || "0";
                               })()}
                               readOnly
                               className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-[8rem] bg-muted/50"
@@ -1542,6 +1794,7 @@ export default function PlanejamentoProducao() {
                 </Table>
               </div>
             </div>
+            </>
           )}
           </div>
         </div>

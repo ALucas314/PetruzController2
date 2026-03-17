@@ -29,6 +29,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
@@ -388,6 +389,24 @@ function Producao() {
   /** Filtro por filial no grid (valor do select); aplicado ao clicar em Filtrar */
   const [gridFilialFilter, setGridFilialFilter] = useState<string>("");
   const [gridFilialFilterApplied, setGridFilialFilterApplied] = useState<string>("");
+  /** Filtro por código do item e linha no grid (aplicado ao clicar em Filtrar no card de filtros) */
+  const [gridCodigoItem, setGridCodigoItem] = useState<string>("");
+  const [gridCodigoItemApplied, setGridCodigoItemApplied] = useState<string>("");
+  const [gridLinhaFilter, setGridLinhaFilter] = useState<string>("");
+  const [gridLinhaFilterApplied, setGridLinhaFilterApplied] = useState<string>("");
+  /** Dialog de filtros do grid (Data, Código, Linha) — aberto pelo botão Filtros no card Acompanhamento diário */
+  const [gridFiltrosDialogOpen, setGridFiltrosDialogOpen] = useState(false);
+  const [gridDataDePending, setGridDataDePending] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [gridDataAtePending, setGridDataAtePending] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [gridCodigoItemPending, setGridCodigoItemPending] = useState("");
+  const [gridLinhaPending, setGridLinhaPending] = useState("");
+
+  /** Voltar: se veio de Relatórios (returnTo no state), navega para lá; senão volta ao menu da página. */
+  const handleVoltar = useCallback(() => {
+    const s = location.state as { returnTo?: string } | null;
+    if (s?.returnTo) navigate(s.returnTo);
+    else setCurrentView("menu");
+  }, [location.state, navigate]);
 
   // Catálogo de itens vindo da OCTI (mapeado por código)
   const [itemCatalog, setItemCatalog] = useState<Record<string, { nome_item: string }>>({});
@@ -395,19 +414,32 @@ function Producao() {
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   // Reprocessos
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
-  // Filtros do card de reprocesso (tipo, linha e grupo) — valores do formulário
+  // Filtros do card de reprocesso (tipo, linha, grupo, código) — valores do formulário
   const [reprocessoFiltroTipo, setReprocessoFiltroTipo] = useState<"" | "Cortado" | "Usado">("");
   const [reprocessoFiltroLinha, setReprocessoFiltroLinha] = useState<string>("");
   const [reprocessoFiltroGrupo, setReprocessoFiltroGrupo] = useState<"" | GrupoReprocesso>("");
+  const [reprocessoFiltroCodigo, setReprocessoFiltroCodigo] = useState<string>("");
   // Valores aplicados ao clicar em Filtrar (usados para exibir a tabela)
   const [reprocessoAppliedTipo, setReprocessoAppliedTipo] = useState<"" | "Cortado" | "Usado">("");
   const [reprocessoAppliedLinha, setReprocessoAppliedLinha] = useState<string>("");
   const [reprocessoAppliedGrupo, setReprocessoAppliedGrupo] = useState<"" | GrupoReprocesso>("");
+  const [reprocessoAppliedCodigo, setReprocessoAppliedCodigo] = useState<string>("");
+  /** Dialog de filtros do reprocesso — aberto pelo botão Filtros */
+  const [reprocessoFiltrosDialogOpen, setReprocessoFiltrosDialogOpen] = useState(false);
+  const [reprocessoFiltroTipoPending, setReprocessoFiltroTipoPending] = useState<"" | "Cortado" | "Usado">("");
+  const [reprocessoFiltroLinhaPending, setReprocessoFiltroLinhaPending] = useState<string>("");
+  const [reprocessoFiltroGrupoPending, setReprocessoFiltroGrupoPending] = useState<"" | GrupoReprocesso>("");
+  const [reprocessoFiltroCodigoPending, setReprocessoFiltroCodigoPending] = useState<string>("");
   // Lista de reprocessos filtrada pelos valores aplicados (só atualiza ao clicar em Filtrar)
   const reprocessosFiltrados = useMemo(() => {
     return reprocessos.filter((r) => {
       if (reprocessoAppliedTipo && r.tipo !== reprocessoAppliedTipo) return false;
       if (reprocessoAppliedGrupo && r.grupo !== reprocessoAppliedGrupo) return false;
+      if (reprocessoAppliedCodigo.trim()) {
+        const codigoVal = (r.codigo ?? "").toString().trim().toLowerCase();
+        const filtroCodigo = reprocessoAppliedCodigo.trim().toLowerCase();
+        if (!codigoVal.includes(filtroCodigo)) return false;
+      }
       if (!reprocessoAppliedLinha) return true;
       const linhaVal = (r.linha ?? "").toString().trim();
       const filtroVal = reprocessoAppliedLinha.trim();
@@ -419,7 +451,31 @@ function Producao() {
       }
       return false;
     });
-  }, [reprocessos, reprocessoAppliedTipo, reprocessoAppliedLinha, reprocessoAppliedGrupo, productionLines]);
+  }, [reprocessos, reprocessoAppliedTipo, reprocessoAppliedLinha, reprocessoAppliedGrupo, reprocessoAppliedCodigo, productionLines]);
+
+  // Ao abrir o dialog de filtros do reprocesso, copiar valores aplicados para os campos pendentes
+  useEffect(() => {
+    if (reprocessoFiltrosDialogOpen) {
+      setReprocessoFiltroTipoPending(reprocessoAppliedTipo);
+      setReprocessoFiltroLinhaPending(reprocessoAppliedLinha);
+      setReprocessoFiltroGrupoPending(reprocessoAppliedGrupo);
+      setReprocessoFiltroCodigoPending(reprocessoAppliedCodigo);
+    }
+  }, [reprocessoFiltrosDialogOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- sync only when opening
+
+  /** Aplica os filtros do dialog de reprocesso e fecha o dialog */
+  const applyReprocessoFiltrosDialog = useCallback(() => {
+    setReprocessoFiltroTipo(reprocessoFiltroTipoPending);
+    setReprocessoAppliedTipo(reprocessoFiltroTipoPending);
+    setReprocessoFiltroLinha(reprocessoFiltroLinhaPending);
+    setReprocessoAppliedLinha(reprocessoFiltroLinhaPending);
+    setReprocessoFiltroGrupo(reprocessoFiltroGrupoPending);
+    setReprocessoAppliedGrupo(reprocessoFiltroGrupoPending);
+    setReprocessoFiltroCodigo(reprocessoFiltroCodigoPending);
+    setReprocessoAppliedCodigo(reprocessoFiltroCodigoPending);
+    setReprocessoFiltrosDialogOpen(false);
+  }, [reprocessoFiltroTipoPending, reprocessoFiltroLinhaPending, reprocessoFiltroGrupoPending, reprocessoFiltroCodigoPending]);
+
   // Normaliza data vinda do banco (string ISO ou Date) para YYYY-MM-DD (evita mistura BELA/Petruz por fuso)
   const normalizeDataDia = (dateValue: string | Date | null | undefined): string => {
     if (!dateValue) return "";
@@ -1573,15 +1629,15 @@ function Producao() {
   };
   saveToDatabaseRef.current = saveToDatabase;
 
-  // Função para carregar dados do Supabase (docId: null = documento legado, string = documento com doc_id)
-  const loadFromDatabase = async (data?: string, filialNomeOverride?: string, docId?: string | null) => {
+  // Função para carregar dados do Supabase (docId: null = documento legado, string = documento com doc_id; docOrdemGlobal: quando docId é null, identifica qual doc legado carregar)
+  const loadFromDatabase = async (data?: string, filialNomeOverride?: string, docId?: string | null, docOrdemGlobal?: number | null) => {
     setLoading(true);
     setSaveStatus(null);
 
     try {
       const dataToLoad = data || dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
       const filialNomeToUse = filialNomeOverride ?? filialSelecionadaObj?.nome;
-      const result = await loadProducao({ data: dataToLoad, filialNome: filialNomeToUse, docId });
+      const result = await loadProducao({ data: dataToLoad, filialNome: filialNomeToUse, docId, docOrdemGlobal });
 
       if (result.data && result.data.length > 0) {
         // Converter dados do banco (tabela OCPD) para o formato da interface
@@ -1856,7 +1912,7 @@ function Producao() {
   }, []);
 
   // Busca documentos de um intervalo (De/Até) e mescla em allRecords (para grid com filtro por período)
-  const loadDocumentsForDateRange = useCallback(async (de: string, ate: string) => {
+  const loadDocumentsForDateRange = useCallback(async (de: string, ate: string, codigoItem?: string, linha?: string) => {
     const deNorm = de?.split("T")[0];
     const ateNorm = ate?.split("T")[0];
     if (!deNorm || !ateNorm || !/^\d{4}-\d{2}-\d{2}$/.test(deNorm) || !/^\d{4}-\d{2}-\d{2}$/.test(ateNorm)) return;
@@ -1866,6 +1922,8 @@ function Producao() {
         dataInicio: deNorm,
         dataFim: ateNorm,
         limit: 2000,
+        ...(codigoItem != null && String(codigoItem).trim() !== "" ? { codigoItem: String(codigoItem).trim() } : {}),
+        ...(linha != null && String(linha).trim() !== "" ? { linha: String(linha).trim() } : {}),
       });
       if (!Array.isArray(result) || result.length === 0) return;
       setAllRecords((prev) => {
@@ -2142,8 +2200,43 @@ function Producao() {
   // Quando o grid está visível e o usuário clicou em Filtrar (intervalo aplicado), carregar documentos do período
   useEffect(() => {
     if (!showDocumentGridForDate || !gridDataDeApplied || !gridDataAteApplied) return;
-    loadDocumentsForDateRange(gridDataDeApplied, gridDataAteApplied);
-  }, [showDocumentGridForDate, gridDataDeApplied, gridDataAteApplied, loadDocumentsForDateRange]);
+    loadDocumentsForDateRange(
+      gridDataDeApplied,
+      gridDataAteApplied,
+      gridCodigoItemApplied || undefined,
+      gridLinhaFilterApplied || undefined
+    );
+  }, [showDocumentGridForDate, gridDataDeApplied, gridDataAteApplied, gridCodigoItemApplied, gridLinhaFilterApplied, loadDocumentsForDateRange]);
+
+  // Ao abrir o dialog de filtros do grid, copiar valores aplicados para os campos pendentes
+  useEffect(() => {
+    if (gridFiltrosDialogOpen) {
+      setGridDataDePending(gridDataDeApplied);
+      setGridDataAtePending(gridDataAteApplied);
+      setGridCodigoItemPending(gridCodigoItemApplied);
+      setGridLinhaPending(gridLinhaFilterApplied);
+    }
+  }, [gridFiltrosDialogOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- sync only when opening
+
+  /** Aplica os filtros do dialog (Data, Código, Linha), mostra o grid e carrega os documentos */
+  const applyGridFiltrosDialog = useCallback(() => {
+    setGridDataDe(gridDataDePending);
+    setGridDataAte(gridDataAtePending);
+    setGridDataDeApplied(gridDataDePending);
+    setGridDataAteApplied(gridDataAtePending);
+    setGridCodigoItem(gridCodigoItemPending);
+    setGridCodigoItemApplied(gridCodigoItemPending);
+    setGridLinhaFilter(gridLinhaPending);
+    setGridLinhaFilterApplied(gridLinhaPending);
+    setShowDocumentGridForDate(true);
+    setGridFiltrosDialogOpen(false);
+    loadDocumentsForDateRange(
+      gridDataDePending,
+      gridDataAtePending,
+      gridCodigoItemPending.trim() || undefined,
+      gridLinhaPending.trim() || undefined
+    );
+  }, [gridDataDePending, gridDataAtePending, gridCodigoItemPending, gridLinhaPending, loadDocumentsForDateRange]);
 
   // Sincronizar data e filial com o Painel de Controle (dashboard) para acompanhar o diário
   useEffect(() => {
@@ -2155,9 +2248,9 @@ function Producao() {
     } catch {}
   }, [dataCabecalhoSelecionada, filialSelecionada, filiais]);
 
-  // Abrir documento vindo de Relatórios (navigate com state: loadData, loadFilialNome, loadDocId?)
+  // Abrir documento vindo de Relatórios (navigate com state: loadData, loadFilialNome, loadDocId?, loadDocOrdemGlobal?)
   useEffect(() => {
-    const state = location.state as { loadData?: string; loadFilialNome?: string; loadDocId?: string | null } | null;
+    const state = location.state as { loadData?: string; loadFilialNome?: string; loadDocId?: string | null; loadDocOrdemGlobal?: number | null } | null;
     if (!state?.loadData || !state?.loadFilialNome || openedFromStateRef.current || filiais.length === 0) return;
     openedFromStateRef.current = true;
     reportDocumentLoadedRef.current = false;
@@ -2165,7 +2258,7 @@ function Producao() {
     const filial = filiais.find((f) => (f.nome || "").trim() === (state.loadFilialNome || "").trim());
     if (filial) setFilialSelecionada(filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`);
     setCurrentView("cadastro");
-    loadFromDatabase(state.loadData, state.loadFilialNome, state.loadDocId ?? undefined).finally(() => {
+    loadFromDatabase(state.loadData, state.loadFilialNome, state.loadDocId ?? undefined, state.loadDocOrdemGlobal ?? undefined).finally(() => {
       reportDocumentLoadedRef.current = true;
     });
   }, [location.state, filiais]);
@@ -2612,7 +2705,7 @@ function Producao() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setCurrentView("menu")}
+                onClick={handleVoltar}
                 className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
                 aria-label="Voltar ao menu"
                 title="Voltar ao menu"
@@ -2635,7 +2728,7 @@ function Producao() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setCurrentView("menu")}
+              onClick={handleVoltar}
               className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
               aria-label="Voltar ao menu"
               title="Voltar ao menu"
@@ -2724,6 +2817,80 @@ function Producao() {
                           triggerClassName="border-transparent group-hover:border-primary/30 bg-transparent hover:bg-muted/60 px-2 py-1 min-h-0 h-auto text-sm sm:text-base text-muted-foreground/90 font-medium"
                           className="min-w-[140px]"
                         />
+                        <Dialog open={gridFiltrosDialogOpen} onOpenChange={setGridFiltrosDialogOpen}>
+                          <DialogTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0"
+                              aria-label="Abrir filtros de produção"
+                            >
+                              <Filter className="h-4 w-4 shrink-0" />
+                              <span>Filtros</span>
+                            </button>
+                          </DialogTrigger>
+                          <DialogContent className="w-[340px] sm:w-[380px] max-w-[95vw] p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
+                            <DialogHeader>
+                              <DialogTitle className="text-base">Filtros de produção</DialogTitle>
+                              <DialogDescription className="text-sm text-muted-foreground">
+                                Defina data, código do item e linha. Ao clicar em Filtrar, o grid de documentos será exibido.
+                              </DialogDescription>
+                            </DialogHeader>
+                            <div className="grid gap-3 py-2">
+                              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                                <Label htmlFor="grid-dialog-de" className="text-xs text-muted-foreground">De</Label>
+                                <DatePicker
+                                  id="grid-dialog-de"
+                                  value={gridDataDePending}
+                                  onChange={(v) => v && setGridDataDePending(v)}
+                                  placeholder="Data"
+                                  className="min-w-0"
+                                  triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                                />
+                              </div>
+                              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                                <Label htmlFor="grid-dialog-ate" className="text-xs text-muted-foreground">Até</Label>
+                                <DatePicker
+                                  id="grid-dialog-ate"
+                                  value={gridDataAtePending}
+                                  onChange={(v) => v && setGridDataAtePending(v)}
+                                  placeholder="Data"
+                                  className="min-w-0"
+                                  triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                                />
+                              </div>
+                              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                                <Label htmlFor="grid-dialog-codigo" className="text-xs text-muted-foreground">Código do item</Label>
+                                <Input
+                                  id="grid-dialog-codigo"
+                                  value={gridCodigoItemPending}
+                                  onChange={(e) => setGridCodigoItemPending(e.target.value)}
+                                  placeholder="Código"
+                                  className="h-9 text-sm"
+                                />
+                              </div>
+                              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                                <Label htmlFor="grid-dialog-linha" className="text-xs text-muted-foreground">Linha</Label>
+                                <Select value={gridLinhaPending || "__todas__"} onValueChange={(v) => setGridLinhaPending(v === "__todas__" ? "" : v)}>
+                                  <SelectTrigger id="grid-dialog-linha" className="h-9 text-sm">
+                                    <SelectValue placeholder="Todas as linhas" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__todas__">Todas as linhas</SelectItem>
+                                    {productionLines.map((line) => (
+                                      <SelectItem key={line.id} value={String(line.code || line.name || line.id).trim() || `line-${line.id}`}>
+                                        {line.name || line.code || `Linha ${line.id}`}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <Button type="button" onClick={applyGridFiltrosDialog} className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90">
+                              Filtrar
+                            </Button>
+                          </DialogContent>
+                        </Dialog>
                       </div>
                     </div>
 
@@ -2914,7 +3081,7 @@ function Producao() {
                         <Filter className="h-4 w-4" />
                         Filtrar
                       </Button>
-                      {(gridFilterNumeroDocApplied || gridFilialFilterApplied) && (
+                      {(gridFilterNumeroDocApplied || gridFilialFilterApplied || gridCodigoItemApplied || gridLinhaFilterApplied) && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -2925,6 +3092,10 @@ function Producao() {
                             setGridFilterNumeroDocApplied("");
                             setGridFilialFilter("");
                             setGridFilialFilterApplied("");
+                            setGridCodigoItem("");
+                            setGridCodigoItemApplied("");
+                            setGridLinhaFilter("");
+                            setGridLinhaFilterApplied("");
                           }}
                         >
                           Limpar
@@ -2990,7 +3161,7 @@ function Producao() {
                       Nenhum documento nesta data. Clique em &quot;Novo documento&quot; para criar.
                     </p>
                   )}
-                  {documentsForSelectedDate.length > 0 && (gridFilterNumeroDocApplied || gridFilialFilterApplied) && gridFilteredDocuments.length === 0 && (
+                  {documentsForSelectedDate.length > 0 && (gridFilterNumeroDocApplied || gridFilialFilterApplied || gridCodigoItemApplied || gridLinhaFilterApplied) && gridFilteredDocuments.length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-4">
                       Nenhum documento encontrado com os filtros aplicados. Use &quot;Limpar&quot; para ver todos.
                     </p>
@@ -3542,59 +3713,109 @@ function Producao() {
                       />
                     </div>
                     </div>
-                    <div className="flex flex-col gap-2 pt-1 border-t border-border/40 min-[748px]:flex-row min-[748px]:flex-wrap min-[748px]:items-center min-[748px]:gap-3">
-                      <span className="text-xs text-muted-foreground font-medium shrink-0">Filtros:</span>
-                      <div className="flex items-center gap-2 w-full min-h-[44px] min-[748px]:min-h-0 rounded-lg border border-input bg-background px-4 py-2 min-[748px]:border-0 min-[748px]:bg-transparent min-[748px]:p-0 min-[748px]:w-auto min-[748px]:flex-none">
-                        <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Tipo</span>
-                        <Select
-                          value={reprocessoFiltroTipo || "todos"}
-                          onValueChange={(v) => setReprocessoFiltroTipo(v === "todos" ? "" : (v as "Cortado" | "Usado"))}
-                        >
-                          <SelectTrigger className="min-h-[44px] min-[748px]:min-h-0 min-[748px]:h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-sm min-[748px]:text-xs rounded-lg">
-                            <SelectValue placeholder="Todos" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="todos">Todos</SelectItem>
-                            <SelectItem value="Cortado">Cortado</SelectItem>
-                            <SelectItem value="Usado">Usado</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex items-center gap-2 w-full min-h-[44px] min-[748px]:min-h-0 rounded-lg border border-input bg-background px-4 py-2 min-[748px]:border-0 min-[748px]:bg-transparent min-[748px]:p-0 min-[748px]:w-auto min-[748px]:flex-none">
-                        <span className="text-xs text-muted-foreground whitespace-nowrap w-12 shrink-0">Linha</span>
-                        <Select
-                          value={reprocessoFiltroLinha || "todas"}
-                          onValueChange={(v) => setReprocessoFiltroLinha(v === "todas" ? "" : v)}
-                        >
-                          <SelectTrigger className="min-h-[44px] min-[748px]:min-h-0 min-[748px]:h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-sm min-[748px]:text-xs rounded-lg">
-                            <SelectValue placeholder="Todas" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="todas">Todas as linhas</SelectItem>
-                            {productionLines.map((line) => (
-                              <SelectItem key={line.id} value={line.code ? String(line.code) : `line-${line.id}`}>
-                                {line.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex justify-center w-full min-[748px]:w-auto min-[748px]:flex-none min-[748px]:justify-start min-[748px]:contents">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 border-t border-border/40">
+                      <Dialog open={reprocessoFiltrosDialogOpen} onOpenChange={setReprocessoFiltrosDialogOpen}>
+                        <DialogTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0"
+                            aria-label="Abrir filtros de reprocesso"
+                          >
+                            <Filter className="h-4 w-4 shrink-0" />
+                            <span>Filtros</span>
+                          </button>
+                        </DialogTrigger>
+                        <DialogContent className="w-[340px] sm:w-[380px] max-w-[95vw] p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
+                          <DialogHeader>
+                            <DialogTitle className="text-base">Filtros de reprocesso</DialogTitle>
+                            <DialogDescription className="text-sm text-muted-foreground">
+                              Tipo, linha, grupo e código. Os filtros são aplicados ao clicar em Filtrar.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="grid gap-3 py-2">
+                            <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                              <Label htmlFor="reprocesso-dialog-tipo" className="text-xs text-muted-foreground">Tipo do reprocesso</Label>
+                              <Select value={reprocessoFiltroTipoPending || "todos"} onValueChange={(v) => setReprocessoFiltroTipoPending(v === "todos" ? "" : (v as "Cortado" | "Usado"))}>
+                                <SelectTrigger id="reprocesso-dialog-tipo" className="h-9 text-sm">
+                                  <SelectValue placeholder="Todos" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="todos">Todos</SelectItem>
+                                  <SelectItem value="Cortado">Cortado</SelectItem>
+                                  <SelectItem value="Usado">Usado</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                              <Label htmlFor="reprocesso-dialog-linha" className="text-xs text-muted-foreground">Linha</Label>
+                              <Select value={reprocessoFiltroLinhaPending || "todas"} onValueChange={(v) => setReprocessoFiltroLinhaPending(v === "todas" ? "" : v)}>
+                                <SelectTrigger id="reprocesso-dialog-linha" className="h-9 text-sm">
+                                  <SelectValue placeholder="Todas as linhas" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="todas">Todas as linhas</SelectItem>
+                                  {productionLines.map((line) => (
+                                    <SelectItem key={line.id} value={line.code ? String(line.code) : `line-${line.id}`}>
+                                      {line.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                              <Label htmlFor="reprocesso-dialog-grupo" className="text-xs text-muted-foreground">Grupo</Label>
+                              <Select value={reprocessoFiltroGrupoPending || "todos"} onValueChange={(v) => setReprocessoFiltroGrupoPending(v === "todos" ? "" : (v as GrupoReprocesso))}>
+                                <SelectTrigger id="reprocesso-dialog-grupo" className="h-9 text-sm">
+                                  <SelectValue placeholder="Todos" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="todos">Todos</SelectItem>
+                                  <SelectItem value="Reprocesso">Reprocesso</SelectItem>
+                                  <SelectItem value="Matéria Prima Açaí">Matéria Prima Açaí</SelectItem>
+                                  <SelectItem value="Matéria Prima Fruto">Matéria Prima Fruto</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                              <Label htmlFor="reprocesso-dialog-codigo" className="text-xs text-muted-foreground">Código do reprocesso</Label>
+                              <Input
+                                id="reprocesso-dialog-codigo"
+                                value={reprocessoFiltroCodigoPending}
+                                onChange={(e) => setReprocessoFiltroCodigoPending(e.target.value)}
+                                placeholder="Código"
+                                className="h-9 text-sm"
+                              />
+                            </div>
+                          </div>
+                          <Button type="button" onClick={applyReprocessoFiltrosDialog} className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90">
+                            Filtrar
+                          </Button>
+                        </DialogContent>
+                      </Dialog>
+                      {(reprocessoAppliedTipo || reprocessoAppliedLinha || reprocessoAppliedGrupo || reprocessoAppliedCodigo) && (
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 text-muted-foreground hover:text-foreground"
                           onClick={() => {
-                            setReprocessoAppliedTipo(reprocessoFiltroTipo);
-                            setReprocessoAppliedLinha(reprocessoFiltroLinha);
-                            setReprocessoAppliedGrupo(reprocessoFiltroGrupo);
+                            setReprocessoFiltroTipo("");
+                            setReprocessoAppliedTipo("");
+                            setReprocessoFiltroLinha("");
+                            setReprocessoAppliedLinha("");
+                            setReprocessoFiltroGrupo("");
+                            setReprocessoAppliedGrupo("");
+                            setReprocessoFiltroCodigo("");
+                            setReprocessoAppliedCodigo("");
+                            setReprocessoFiltroTipoPending("");
+                            setReprocessoFiltroLinhaPending("");
+                            setReprocessoFiltroGrupoPending("");
+                            setReprocessoFiltroCodigoPending("");
                           }}
-                          className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 w-full min-[748px]:min-h-0 min-[748px]:h-8 min-[748px]:w-auto min-[748px]:min-w-[160px] min-[748px]:px-5 min-[748px]:py-2 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-foreground min-[748px]:text-xs"
-                          title="Filtrar por tipo e linha"
                         >
-                          <Database className="h-4 w-4 min-[748px]:h-3.5 min-[748px]:w-3.5 shrink-0" />
-                          <span>Filtrar</span>
+                          Limpar filtros
                         </Button>
-                      </div>
+                      )}
                     </div>
                   </div>
 
@@ -4532,7 +4753,7 @@ function Producao() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setCurrentView("menu")}
+              onClick={handleVoltar}
               className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
               aria-label="Voltar ao menu"
               title="Voltar ao menu"

@@ -461,8 +461,8 @@ export async function getProductionLines(params: { dataInicio: string; dataFim: 
 }
 
 // --- Produção (OCPD) load ---
-/** docId: quando informado, carrega só as linhas desse documento. Quando null/undefined, carrega documento "legado" (doc_id IS NULL) para a data+filial. */
-export async function loadProducao(params: { data?: string; filialNome?: string; docId?: string | null }) {
+/** docId: quando informado, carrega só as linhas desse documento. Quando null/undefined, carrega documento "legado" (doc_id IS NULL). docOrdemGlobal: quando docId é null, filtra por doc_ordem_global para identificar qual documento legado carregar. */
+export async function loadProducao(params: { data?: string; filialNome?: string; docId?: string | null; docOrdemGlobal?: number | null }) {
   const hoje = new Date().toISOString().split("T")[0];
   const dataDia = params.data || hoje;
   let query = supabase.from("OCPD").select("*").order("id", { ascending: true }).eq("data_dia", dataDia);
@@ -471,6 +471,9 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
     query = query.eq("doc_id", params.docId);
   } else {
     query = query.is("doc_id", null);
+    if (params.docOrdemGlobal != null && params.docOrdemGlobal !== undefined) {
+      query = query.eq("doc_ordem_global", params.docOrdemGlobal);
+    }
   }
   const { data: producaoData, error } = await query;
   if (error) throw error;
@@ -723,6 +726,7 @@ export async function getProducaoHistory(params: {
   dataFim?: string;
   linha?: string;
   filialNome?: string;
+  codigoItem?: string;
 }) {
   let query = supabase
     .from("OCPD")
@@ -734,6 +738,8 @@ export async function getProducaoHistory(params: {
   if (params.dataFim) query = query.lte("data_dia", params.dataFim);
   if (params.linha) query = query.eq("linha", params.linha);
   if (params.filialNome) query = query.eq("filial_nome", params.filialNome);
+  if (params.codigoItem != null && String(params.codigoItem).trim() !== "")
+    query = query.eq("code", String(params.codigoItem).trim());
   const { data, error } = await query;
   if (error) throw error;
   return data || [];
