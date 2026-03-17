@@ -525,6 +525,12 @@ function Producao() {
   const [editingHoraInicioId, setEditingHoraInicioId] = useState<number | null>(null);
   const [editingHoraInicioValue, setEditingHoraInicioValue] = useState("");
   const [octpLoading, setOctpLoading] = useState(false);
+  /** Dialog e filtros do card Problemas e Ações (OCTP): apenas responsável e descrição do status. Aplicados só ao clicar em Filtrar. */
+  const [octpFiltrosDialogOpen, setOctpFiltrosDialogOpen] = useState(false);
+  const [octpFilterStatus, setOctpFilterStatus] = useState<string>("");
+  const [octpFilterResponsavel, setOctpFilterResponsavel] = useState<string>("");
+  const [octpFilterStatusPending, setOctpFilterStatusPending] = useState<string>("");
+  const [octpFilterResponsavelPending, setOctpFilterResponsavelPending] = useState<string>("");
   // Filiais (OCTF)
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string; endereco: string }>>([]);
   const [filiaisLoadError, setFiliaisLoadError] = useState<string | null>(null);
@@ -1287,23 +1293,68 @@ function Producao() {
     }
   };
 
-  /** Dados do gráfico de pizza: porcentagem por status (OCTP) */
+  /** Responsáveis já cadastrados no documento (únicos, ordenados) — para o filtro por responsável */
+  const octpResponsaveisList = useMemo(() => {
+    const set = new Set<string>();
+    octpItems.forEach((item) => {
+      const r = (item.responsavel ?? "").trim();
+      if (r) set.add(r);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [octpItems]);
+
+  /** Lista de itens OCTP filtrada por descrição do status e por responsável (valores aplicados ao clicar em Filtrar) */
+  const octpItemsFiltered = useMemo(() => {
+    let list = octpItems;
+    if (octpFilterStatus) {
+      const statusNorm = octpFilterStatus.trim();
+      list = list.filter((item) => (item.descricao_status?.trim() || "") === statusNorm);
+    }
+    if (octpFilterResponsavel) {
+      const respNorm = octpFilterResponsavel.trim();
+      list = list.filter((item) => (item.responsavel ?? "").trim() === respNorm);
+    }
+    return list;
+  }, [octpItems, octpFilterStatus, octpFilterResponsavel]);
+
+  // Ao abrir o dialog de filtros OCTP, copiar valores aplicados para os campos pendentes
+  useEffect(() => {
+    if (octpFiltrosDialogOpen) {
+      setOctpFilterStatusPending(octpFilterStatus);
+      setOctpFilterResponsavelPending(octpFilterResponsavel);
+    }
+  }, [octpFiltrosDialogOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- sync only when opening
+
+  /** Aplica os filtros do dialog de Problemas e Ações e fecha o dialog */
+  const applyOctpFiltrosDialog = useCallback(() => {
+    setOctpFilterStatus(octpFilterStatusPending);
+    setOctpFilterResponsavel(octpFilterResponsavelPending);
+    setOctpFiltrosDialogOpen(false);
+  }, [octpFilterStatusPending, octpFilterResponsavelPending]);
+
+  /** Dados do gráfico de pizza: porcentagem por status (OCTP) — usa lista filtrada */
   const octpStatusPieData = useMemo(() => {
     const countBy: Record<string, number> = {};
     OCTP_STATUS_OPTIONS.forEach((o) => { countBy[o.id] = 0; });
-    octpItems.forEach((item) => {
+    octpItemsFiltered.forEach((item) => {
       const k = item.descricao_status?.trim() || "";
       if (k && OCTP_STATUS_OPTIONS.some((o) => o.id === k)) countBy[k]++;
       else if (k) countBy[k] = (countBy[k] || 0) + 1;
     });
-    const total = octpItems.length;
+    const total = octpItemsFiltered.length;
     return OCTP_STATUS_OPTIONS.map((o) => ({
       name: o.label,
       value: total > 0 ? Math.round(((countBy[o.id] ?? 0) / total) * 100) : 0,
       count: countBy[o.id] ?? 0,
       color: o.color,
     })).filter((d) => d.count > 0);
-  }, [octpItems]);
+  }, [octpItemsFiltered]);
+
+  /** Total de minutos de intervalo dos itens filtrados (exibido na tabela). */
+  const octpTotalIntervaloMinutosFiltered = useMemo(
+    () => octpItemsFiltered.reduce((acc, item) => acc + getOCTPItemMinutos(item), 0),
+    [octpItemsFiltered, getOCTPItemMinutos]
+  );
 
   // Remover linha (só estado local)
   const removeItem = (id: number) => {
@@ -3664,56 +3715,6 @@ function Producao() {
                         </div>
                       </div>
                       <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
-                      <Button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          e.nativeEvent.stopImmediatePropagation();
-                          addReprocesso();
-                        }}
-                        size="sm"
-                        className="w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
-                        type="button"
-                      >
-                        <Plus className="h-4 w-4 shrink-0" />
-                        <span className="truncate">Adicionar Reprocesso</span>
-                      </Button>
-                      <ExportToPng
-                        targetRef={reprocessoCardRef}
-                        filenamePrefix="reprocesso"
-                        expandScrollable={true}
-                        onBeforeCapture={() => {
-                          const card = reprocessoCardRef.current;
-                          if (!card) return;
-                          reprocessoExportRestoreRef.current = [];
-                          const cells = card.querySelectorAll("table tbody tr td:nth-child(5)");
-                          cells.forEach((cell) => {
-                            const input = cell.querySelector("input");
-                            if (!input) return;
-                            const el = input as HTMLInputElement;
-                            const value = el.value ?? "";
-                            const wrapper = document.createElement("div");
-                            wrapper.setAttribute("data-export-descricao", "true");
-                            wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[200px]";
-                            wrapper.textContent = value || "—";
-                            el.style.display = "none";
-                            cell.appendChild(wrapper);
-                            reprocessoExportRestoreRef.current.push({ input: el, wrapper });
-                          });
-                        }}
-                        onAfterCapture={() => {
-                          reprocessoExportRestoreRef.current.forEach(({ input, wrapper }) => {
-                            wrapper.remove();
-                            input.style.display = "";
-                          });
-                          reprocessoExportRestoreRef.current = [];
-                        }}
-                        className="inline-flex h-9 rounded-md px-3 w-full sm:w-auto shrink-0"
-                        label="Exportar PNG"
-                      />
-                    </div>
-                    </div>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 border-t border-border/40">
                       <Dialog open={reprocessoFiltrosDialogOpen} onOpenChange={setReprocessoFiltrosDialogOpen}>
                         <DialogTrigger asChild>
                           <button
@@ -3792,6 +3793,56 @@ function Producao() {
                           </Button>
                         </DialogContent>
                       </Dialog>
+                      <Button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          e.nativeEvent.stopImmediatePropagation();
+                          addReprocesso();
+                        }}
+                        size="sm"
+                        className="w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
+                        type="button"
+                      >
+                        <Plus className="h-4 w-4 shrink-0" />
+                        <span className="truncate">Adicionar Reprocesso</span>
+                      </Button>
+                      <ExportToPng
+                        targetRef={reprocessoCardRef}
+                        filenamePrefix="reprocesso"
+                        expandScrollable={true}
+                        onBeforeCapture={() => {
+                          const card = reprocessoCardRef.current;
+                          if (!card) return;
+                          reprocessoExportRestoreRef.current = [];
+                          const cells = card.querySelectorAll("table tbody tr td:nth-child(5)");
+                          cells.forEach((cell) => {
+                            const input = cell.querySelector("input");
+                            if (!input) return;
+                            const el = input as HTMLInputElement;
+                            const value = el.value ?? "";
+                            const wrapper = document.createElement("div");
+                            wrapper.setAttribute("data-export-descricao", "true");
+                            wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[200px]";
+                            wrapper.textContent = value || "—";
+                            el.style.display = "none";
+                            cell.appendChild(wrapper);
+                            reprocessoExportRestoreRef.current.push({ input: el, wrapper });
+                          });
+                        }}
+                        onAfterCapture={() => {
+                          reprocessoExportRestoreRef.current.forEach(({ input, wrapper }) => {
+                            wrapper.remove();
+                            input.style.display = "";
+                          });
+                          reprocessoExportRestoreRef.current = [];
+                        }}
+                        className="inline-flex h-9 rounded-md px-3 w-full sm:w-auto shrink-0"
+                        label="Exportar PNG"
+                      />
+                    </div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 border-t border-border/40">
                       {(reprocessoAppliedTipo || reprocessoAppliedLinha || reprocessoAppliedGrupo || reprocessoAppliedCodigo) && (
                         <Button
                           type="button"
@@ -4022,6 +4073,74 @@ function Producao() {
                       </div>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
+                      <Dialog open={octpFiltrosDialogOpen} onOpenChange={setOctpFiltrosDialogOpen}>
+                        <DialogTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0"
+                            aria-label="Abrir filtros de problemas e ações"
+                            aria-haspopup="dialog"
+                          >
+                            <Filter className="h-4 w-4 shrink-0" />
+                            <span>Filtros</span>
+                          </button>
+                        </DialogTrigger>
+                        <DialogContent className="w-[340px] sm:w-[380px] max-w-[95vw] p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
+                          <DialogHeader>
+                            <DialogTitle className="text-base">Filtros — Problemas e Ações</DialogTitle>
+                            <DialogDescription className="text-sm text-muted-foreground">
+                              Defina responsável e descrição do status. Os filtros são aplicados ao clicar em Filtrar.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="grid gap-3 py-2">
+                            <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                              <Label htmlFor="octp-dialog-responsavel" className="text-xs text-muted-foreground">Responsável</Label>
+                              <Select value={octpFilterResponsavelPending || "__todos__"} onValueChange={(v) => setOctpFilterResponsavelPending(v === "__todos__" ? "" : v)}>
+                                <SelectTrigger id="octp-dialog-responsavel" className="h-9 text-sm">
+                                  <SelectValue placeholder="Todos os responsáveis" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__todos__">Todos os responsáveis</SelectItem>
+                                  {octpResponsaveisList.map((nome) => (
+                                    <SelectItem key={nome} value={nome}>{nome}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                              <Label htmlFor="octp-dialog-status" className="text-xs text-muted-foreground">Descrição do status</Label>
+                              <Select value={octpFilterStatusPending || "__todos__"} onValueChange={(v) => setOctpFilterStatusPending(v === "__todos__" ? "" : v)}>
+                                <SelectTrigger id="octp-dialog-status" className="h-9 text-sm">
+                                  <SelectValue placeholder="Todos os status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__todos__">Todos os status</SelectItem>
+                                  {OCTP_STATUS_OPTIONS.map((opt) => (
+                                    <SelectItem key={opt.id} value={opt.id}>{opt.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="flex-1 h-9"
+                              onClick={() => {
+                                setOctpFilterStatusPending("");
+                                setOctpFilterResponsavelPending("");
+                              }}
+                            >
+                              Limpar
+                            </Button>
+                            <Button type="button" onClick={applyOctpFiltrosDialog} className="flex-1 h-9 bg-primary text-primary-foreground hover:bg-primary/90">
+                              Filtrar
+                            </Button>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
                       <Button
                         onClick={(e) => {
                           e.preventDefault();
@@ -4065,8 +4184,8 @@ function Producao() {
                             });
                             // Coluna 9: Status (Select) — exibir label com bolinha colorida
                             const cell7 = row.querySelector("td:nth-child(9)");
-                            if (!cell7 || rowIndex >= octpItems.length) return;
-                            const item = octpItems[rowIndex];
+                            if (!cell7 || rowIndex >= octpItemsFiltered.length) return;
+                            const item = octpItemsFiltered[rowIndex];
                             const statusKey = item.descricao_status?.trim() || "";
                             const statusOpt = OCTP_STATUS_OPTIONS.find((o) => o.id === statusKey);
                             const label = statusOpt ? statusOpt.label : (statusKey || "—");
@@ -4117,20 +4236,20 @@ function Producao() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {octpLoading && octpItems.length === 0 ? (
+                          {octpLoading && octpItemsFiltered.length === 0 ? (
                             <TableRow>
                               <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                                 Carregando...
                               </TableCell>
                             </TableRow>
-                          ) : octpItems.length === 0 ? (
+                          ) : octpItemsFiltered.length === 0 ? (
                             <TableRow>
                               <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                                 Nenhum registro. Selecione a data de início e clique em &quot;Adicionar registro&quot;.
                               </TableCell>
                             </TableRow>
                           ) : (
-                            octpItems.map((item) => (
+                            octpItemsFiltered.map((item) => (
                               <TableRow key={item.id}>
                                 <TableCell className="text-center font-medium text-xs sm:text-sm">{item.numero}</TableCell>
                                 <TableCell className="p-2 sm:p-4">
@@ -4283,13 +4402,13 @@ function Producao() {
                               </TableRow>
                             ))
                           )}
-                          {octpItems.length > 0 && (
+                          {octpItemsFiltered.length > 0 && (
                             <TableRow className="bg-muted/50 hover:bg-muted/50 border-t-2 border-border font-semibold">
                               <TableCell colSpan={7} className="p-2 sm:p-4 text-xs sm:text-sm text-right">
                                 Total (intervalo)
                               </TableCell>
                               <TableCell className="p-2 sm:p-4 text-xs sm:text-sm font-mono font-semibold text-foreground text-right min-w-[80px] sm:min-w-[90px]">
-                                {formatMinutosToHHMM(octpTotalIntervaloMinutos)}
+                                {formatMinutosToHHMM(octpTotalIntervaloMinutosFiltered)}
                               </TableCell>
                               <TableCell colSpan={2} className="p-2 sm:p-4" />
                             </TableRow>
