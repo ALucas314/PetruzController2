@@ -65,6 +65,7 @@ import {
   LabelList,
 } from "recharts";
 import { ExportToPng } from "@/components/ExportToPng";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 function formatDateBr(str: string): string {
   if (!str) return "—";
@@ -358,6 +359,7 @@ export default function PlanejamentoProducao() {
   const [newDocumentIndex, setNewDocumentIndex] = useState<number | null>(null);
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chartQtdKgRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
   /** Ao entrar na aba PCP, abrir direto o último documento (só uma vez por carga). */
   const hasAutoOpenedLastDocRef = useRef(false);
   const { setDocumentNav } = useDocumentNav();
@@ -1297,12 +1299,12 @@ export default function PlanejamentoProducao() {
             </div>
           ) : (
             <>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3">
+            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 sm:gap-3 mb-3">
               <Dialog open={filtrosCardOpen} onOpenChange={setFiltrosCardOpen}>
                 <DialogTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0"
+                    className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0 w-full sm:w-auto"
                     aria-label="Abrir filtros"
                   >
                     <Filter className="h-4 w-4 shrink-0" />
@@ -1402,7 +1404,7 @@ export default function PlanejamentoProducao() {
                   </div>
                 </DialogContent>
               </Dialog>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:ml-auto items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 {!showDocumentGridForRange && documentosDoPeriodo.length > 0 && (
                   <button
                     type="button"
@@ -1410,7 +1412,7 @@ export default function PlanejamentoProducao() {
                       setSelectedDocKey(null);
                       setShowDocumentGridForRange(true);
                     }}
-                    className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0"
+                    className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0 w-full sm:w-auto"
                     aria-label="Ver documentos"
                     title="Ver documentos"
                   >
@@ -1492,73 +1494,6 @@ export default function PlanejamentoProducao() {
               </div>
             ) : (
               <>
-              {/* Gráfico Qtd. em Kg por item — sempre visível na vista do documento */}
-              <div ref={chartQtdKgRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden min-w-0 mb-6">
-                <div className="mb-5 lg:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
-                      <Target className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Qtd. em Kg por item</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Quantidade a ser feita de cada item (Qtd. Kg)</p>
-                    </div>
-                  </div>
-                  <ExportToPng targetRef={chartQtdKgRef} filenamePrefix="pcp-qtd-kg-por-item" expandScrollable={false} className="shrink-0" />
-                </div>
-                <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
-                  {chartQtdKgData.length > 0 ? (
-                    <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-4 sm:p-5 w-full min-w-0" style={{ height: Math.min(720, Math.max(200, chartQtdKgData.length * 52)) }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          layout="vertical"
-                          data={chartQtdKgData}
-                          margin={{ top: 8, right: 72, left: 8, bottom: 8 }}
-                          barCategoryGap={40}
-                          barGap={22}
-                        >
-                          <defs>
-                            <linearGradient id="pcp-qtdkg-primary" x1="0" y1="0" x2="1" y2="0">
-                              <stop offset="0%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
-                              <stop offset="50%" stopColor="hsl(var(--primary))" stopOpacity={1} />
-                              <stop offset="100%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
-                          <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
-                          <YAxis type="category" dataKey="name" width={200} tickLine={false} axisLine={false} tick={makeYAxisTickMultiLine(22, 3)} />
-                          <Tooltip
-                            cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }}
-                            contentStyle={{
-                              backgroundColor: "hsl(var(--card) / 0.98)",
-                              backdropFilter: "blur(12px)",
-                              WebkitBackdropFilter: "blur(12px)",
-                              border: "1px solid hsl(var(--border) / 0.8)",
-                              borderRadius: "14px",
-                              padding: "16px 20px",
-                              boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
-                              fontSize: "13px",
-                              fontWeight: 500,
-                            }}
-                            labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 8 }}
-                            formatter={(value: number) => [formatNumber(value), "Qtd. Kg"]}
-                            itemStyle={{ fontWeight: 600 }}
-                          />
-                          <Bar dataKey="qtdKg" fill="url(#pcp-qtdkg-primary)" radius={[0, 8, 8, 0]} name="Qtd. Kg" barSize={20} isAnimationActive animationDuration={600} animationEasing="ease-out">
-                            <LabelList dataKey="qtdKg" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-8 sm:p-12 flex flex-col items-center justify-center min-h-[200px] text-center">
-                      <Target className="h-10 w-10 text-muted-foreground/60 mb-3" />
-                      <p className="text-sm font-medium text-muted-foreground">Nenhum item com Qtd. Kg informada</p>
-                      <p className="text-xs text-muted-foreground/80 mt-1">Preencha a coluna &quot;Qtd. Kg&quot; nas linhas da tabela para visualizar o gráfico.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
               <div className="overflow-x-auto -mx-2 sm:mx-0 rounded-lg border border-border/40 [&::-webkit-scrollbar]:h-2" style={{ WebkitOverflowScrolling: "touch" }}>
                 <div className="inline-block min-w-full align-middle">
                   <Table className="min-w-[2200px] sm:min-w-0">
@@ -2413,6 +2348,73 @@ export default function PlanejamentoProducao() {
                     })()}
                   </TableBody>
                   </Table>
+                </div>
+              </div>
+              {/* Gráfico Qtd. em Kg por item — abaixo da tabela de planejamento */}
+              <div ref={chartQtdKgRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden min-w-0 mb-6">
+                <div className="mb-5 lg:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
+                      <Target className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Qtd. em Kg por item</h3>
+                      <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Quantidade a ser feita de cada item (Qtd. Kg)</p>
+                    </div>
+                  </div>
+                  <ExportToPng targetRef={chartQtdKgRef} filenamePrefix="pcp-qtd-kg-por-item" expandScrollable={false} className="shrink-0" />
+                </div>
+                <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
+                  {chartQtdKgData.length > 0 ? (
+                    <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-2 sm:p-5 w-full min-w-0" style={{ height: isMobile ? Math.min(400, Math.max(200, chartQtdKgData.length * 58)) : Math.min(720, Math.max(200, chartQtdKgData.length * 62)) }}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={isMobile ? undefined : 360}>
+                        <BarChart
+                          layout="vertical"
+                          data={chartQtdKgData}
+                          margin={{ top: isMobile ? 6 : 8, right: isMobile ? 44 : 72, left: isMobile ? 6 : 8, bottom: isMobile ? 6 : 8 }}
+                          barCategoryGap={isMobile ? 28 : 48}
+                          barGap={isMobile ? 18 : 28}
+                        >
+                          <defs>
+                            <linearGradient id="pcp-qtdkg-primary" x1="0" y1="0" x2="1" y2="0">
+                              <stop offset="0%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
+                              <stop offset="50%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                              <stop offset="100%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
+                          <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
+                          <YAxis type="category" dataKey="name" width={isMobile ? 100 : 200} tickLine={false} axisLine={false} tick={makeYAxisTickMultiLine(isMobile ? 10 : 22, isMobile ? 4 : 3)} />
+                          <Tooltip
+                            cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }}
+                            contentStyle={{
+                              backgroundColor: "hsl(var(--card) / 0.98)",
+                              backdropFilter: "blur(12px)",
+                              WebkitBackdropFilter: "blur(12px)",
+                              border: "1px solid hsl(var(--border) / 0.8)",
+                              borderRadius: "14px",
+                              padding: "16px 20px",
+                              boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
+                              fontSize: "13px",
+                              fontWeight: 500,
+                            }}
+                            labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 8 }}
+                            formatter={(value: number) => [formatNumber(value), "Qtd. Kg"]}
+                            itemStyle={{ fontWeight: 600 }}
+                          />
+                          <Bar dataKey="qtdKg" fill="url(#pcp-qtdkg-primary)" radius={[0, 8, 8, 0]} name="Qtd. Kg" barSize={20} isAnimationActive animationDuration={600} animationEasing="ease-out">
+                            <LabelList dataKey="qtdKg" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-8 sm:p-12 flex flex-col items-center justify-center min-h-[200px] text-center">
+                      <Target className="h-10 w-10 text-muted-foreground/60 mb-3" />
+                      <p className="text-sm font-medium text-muted-foreground">Nenhum item com Qtd. Kg informada</p>
+                      <p className="text-xs text-muted-foreground/80 mt-1">Preencha a coluna &quot;Qtd. Kg&quot; nas linhas da tabela para visualizar o gráfico.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
