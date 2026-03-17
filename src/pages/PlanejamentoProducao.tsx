@@ -84,6 +84,18 @@ const formatNumber = (value: number | string | null | undefined): string => {
   return decimalPart ? `${formattedInteger},${decimalPart}` : formattedInteger;
 };
 
+const formatNumberFixed = (value: number | string | null | undefined, fractionDigits: number): string => {
+  if (value === null || value === undefined || value === "" || value === 0) return "";
+  const num = typeof value === "number"
+    ? value
+    : parseFloat(String(value).replace(/\./g, "").replace(",", "."));
+  if (!isFinite(num) || num === 0) return "";
+  return num.toLocaleString("pt-BR", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
+};
+
 /** Opções fixas para o campo Tipo Fruto (sem tabela no Supabase). */
 const TIPO_FRUTO_OPCOES = ["Açaí", "Fruto"] as const;
 
@@ -923,7 +935,7 @@ export default function PlanejamentoProducao() {
                         <SelectContent>
                           <SelectItem value="__todos__">Todos</SelectItem>
                           {dashboardFilterOptions.tipoLinhas.map((tl) => (
-                            <SelectItem key={tl} value={tl}>{tl}</SelectItem>
+                            <SelectItem key={tl} value={tl}>{getNomeLinhaParaFiltro(tl) || tl}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -971,18 +983,19 @@ export default function PlanejamentoProducao() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">OP Code</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">OP</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Código</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Descrição</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium">Unidade</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium">Grupo</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo de Linha</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo de Fruto</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo Linha</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo Fruto</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">Sólidos</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Quant. Latas</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Previsão de Latas</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Real de Latas</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Quantidade em Kg</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Latas</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Prev. Latas</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd em Kg</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Basq</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Q. Chapa</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Chapa</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">T. Cort</TableHead>
                       <TableHead className="whitespace-nowrap text-xs font-medium text-right">Entrada no Túnel (Kg)</TableHead>
                     </TableRow>
@@ -990,7 +1003,7 @@ export default function PlanejamentoProducao() {
                   <TableBody>
                     {dashboardFiltered.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={14} className="text-center text-muted-foreground py-8">
+                        <TableCell colSpan={15} className="text-center text-muted-foreground py-8">
                           Nenhum registro encontrado para os filtros aplicados.
                         </TableCell>
                       </TableRow>
@@ -998,14 +1011,15 @@ export default function PlanejamentoProducao() {
                       dashboardFiltered.map((row) => (
                         <TableRow key={row.id}>
                           <TableCell className="font-mono text-xs">{row.op ?? "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">{row.Code ?? "—"}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">{row.descricao ?? "—"}</TableCell>
                           <TableCell className="text-xs">{row.unidade ?? "—"}</TableCell>
-                          <TableCell className="text-xs">{row.grupo ?? "—"}</TableCell>
-                          <TableCell className="text-xs">{row.tipo_linha ?? "—"}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">{row.grupo ?? "—"}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">{row.tipo_linha ? (getNomeLinhaParaFiltro(row.tipo_linha) || row.tipo_linha) : "—"}</TableCell>
                           <TableCell className="text-xs">{row.tipo_fruto ?? "—"}</TableCell>
                           <TableCell className="text-xs text-right">{row.solidos != null ? SOLIDOS_PERFIS.find((p) => p.value === row.solidos)?.label ?? row.solidos : "—"}</TableCell>
                           <TableCell className="text-xs text-right">{formatNumber(row.quantidade_latas)}</TableCell>
                           <TableCell className="text-xs text-right">{formatNumber(row.previsao_latas)}</TableCell>
-                          <TableCell className="text-xs text-right">{formatNumber(row.latas)}</TableCell>
                           <TableCell className="text-xs text-right">{formatNumber(row.quantidade_kg)}</TableCell>
                           <TableCell className="text-xs text-right">{formatNumber(row.quantidade_basqueta)}</TableCell>
                           <TableCell className="text-xs text-right">{formatNumber(row.quantidade_chapa)}</TableCell>
@@ -1018,15 +1032,14 @@ export default function PlanejamentoProducao() {
                   {dashboardFiltered.length > 0 && (
                     <TableFooter>
                       <TableRow className="bg-primary/10 font-bold border-t-2 border-primary/30">
-                        <TableCell colSpan={5} className="text-sm">Total</TableCell>
-                        <TableCell className="text-xs text-right">—</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_latas)}</TableCell>
+                        <TableCell colSpan={7} className="text-sm">Total</TableCell>
+                        <TableCell className="text-xs text-right"></TableCell>
+                          <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_latas, 2)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.previsao_latas)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.latas)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_kg)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_basqueta)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_chapa)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.t_cort)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.t_cort, 3)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_kg_tuneo)}</TableCell>
                       </TableRow>
                     </TableFooter>
