@@ -53,41 +53,33 @@ const AppLayout = () => {
   );
 };
 
-const router = createBrowserRouter(
-  [
-    {
-      element: <AppLayout />,
-      children: [
-        { index: true, element: <Navigate to="/login" replace /> },
-        { path: "login", element: <Login /> },
-        { path: "cadastro", element: <Register /> },
-        { path: "esqueci-senha", element: <ForgotPassword /> },
-        { path: "redefinir-senha", element: <RedefinirSenha /> },
-        { path: "termos", element: <TermosUso /> },
-        { path: "privacidade", element: <PoliticaPrivacidade /> },
-        { path: "dashboard", element: <ProtectedRoute><Index /></ProtectedRoute> },
-        { path: "producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
-        { path: "analise-producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
-        { path: "planejamento-pcp", element: <ProtectedRoute><PlanejamentoProducao /></ProtectedRoute> },
-        { path: "cadastro-linhas", element: <ProtectedRoute><CadastroLinhas /></ProtectedRoute> },
-        { path: "itens", element: <ProtectedRoute><Itens /></ProtectedRoute> },
-        { path: "importar-excel", element: <ProtectedRoute><ImportarExcel /></ProtectedRoute> },
-        { path: "relatorios", element: <ProtectedRoute><Relatorios /></ProtectedRoute> },
-        { path: "guia-desenvolvedor", element: <ProtectedRoute><GuiaDesenvolvedor /></ProtectedRoute> },
-        { path: "financeiro", element: <ProtectedRoute><PlaceholderPage title="Financeiro" /></ProtectedRoute> },
-        { path: "estoque", element: <ProtectedRoute><PlaceholderPage title="Estoque" /></ProtectedRoute> },
-        { path: "configuracoes", element: <ProtectedRoute><PlaceholderPage title="Configurações" /></ProtectedRoute> },
-        { path: "*", element: <NotFound /> },
-      ],
-    },
-  ],
+const router = createBrowserRouter([
   {
-    future: {
-      v7_startTransition: true,
-      v7_relativeSplatPath: true,
-    },
-  }
-);
+    element: <AppLayout />,
+    children: [
+      { index: true, element: <Navigate to="/login" replace /> },
+      { path: "login", element: <Login /> },
+      { path: "cadastro", element: <Register /> },
+      { path: "esqueci-senha", element: <ForgotPassword /> },
+      { path: "redefinir-senha", element: <RedefinirSenha /> },
+      { path: "termos", element: <TermosUso /> },
+      { path: "privacidade", element: <PoliticaPrivacidade /> },
+      { path: "dashboard", element: <ProtectedRoute><Index /></ProtectedRoute> },
+      { path: "producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
+      { path: "analise-producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
+      { path: "planejamento-pcp", element: <ProtectedRoute><PlanejamentoProducao /></ProtectedRoute> },
+      { path: "cadastro-linhas", element: <ProtectedRoute><CadastroLinhas /></ProtectedRoute> },
+      { path: "itens", element: <ProtectedRoute><Itens /></ProtectedRoute> },
+      { path: "importar-excel", element: <ProtectedRoute><ImportarExcel /></ProtectedRoute> },
+      { path: "relatorios", element: <ProtectedRoute><Relatorios /></ProtectedRoute> },
+      { path: "guia-desenvolvedor", element: <ProtectedRoute><GuiaDesenvolvedor /></ProtectedRoute> },
+      { path: "financeiro", element: <ProtectedRoute><PlaceholderPage title="Financeiro" /></ProtectedRoute> },
+      { path: "estoque", element: <ProtectedRoute><PlaceholderPage title="Estoque" /></ProtectedRoute> },
+      { path: "configuracoes", element: <ProtectedRoute><PlaceholderPage title="Configurações" /></ProtectedRoute> },
+      { path: "*", element: <NotFound /> },
+    ],
+  },
+]);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
