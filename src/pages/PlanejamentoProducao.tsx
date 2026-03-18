@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, ArrowRight, Plus, Trash2, Loader2, Factory, Save, Clock, FilePlus, Filter, Target } from "lucide-react";
+import { ArrowLeft, ArrowRight, Plus, Trash2, Loader2, Factory, Save, Clock, FilePlus, Filter } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   getOcppByDateRange,
@@ -36,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,17 +55,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  LabelList,
-} from "recharts";
-import { ExportToPng } from "@/components/ExportToPng";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 function formatDateBr(str: string): string {
@@ -114,44 +104,6 @@ const formatNumberFixed = (value: number | string | null | undefined, fractionDi
     maximumFractionDigits: fractionDigits,
   });
 };
-
-/** Quebra texto em linhas para o eixo Y do gráfico. */
-function wrapTextToLines(text: string, maxCharsPerLine: number, maxLines: number): string[] {
-  if (!text || maxLines < 1) return [""];
-  const lines: string[] = [];
-  let rest = text.trim();
-  while (rest.length > 0 && lines.length < maxLines) {
-    if (rest.length <= maxCharsPerLine) {
-      lines.push(rest);
-      break;
-    }
-    let breakAt = rest.slice(0, maxCharsPerLine).lastIndexOf(" ");
-    if (breakAt <= 0) breakAt = maxCharsPerLine;
-    lines.push(rest.slice(0, breakAt).trim());
-    rest = rest.slice(breakAt).trim();
-  }
-  return lines.length ? lines : [""];
-}
-
-/** Tick do eixo Y com nome em múltiplas linhas. */
-function makeYAxisTickMultiLine(maxCharsPerLine: number, maxLines: number) {
-  return (props: { x?: number; y?: number; payload?: { value?: string } }) => {
-    const { x = 0, y = 0, payload } = props;
-    const label = payload?.value ?? "";
-    const lines = wrapTextToLines(label, maxCharsPerLine, maxLines);
-    const fontSize = maxCharsPerLine <= 10 ? 10 : maxCharsPerLine <= 14 ? 11 : 13;
-    const lineHeight = maxCharsPerLine <= 10 ? "1em" : "1.05em";
-    return (
-      <g transform={`translate(${x},${y})`}>
-        <text textAnchor="end" fontSize={fontSize} fontWeight={600} fill="hsl(var(--foreground))">
-          {lines.map((line, i) => (
-            <tspan key={i} x={0} dy={i === 0 ? 0 : lineHeight}>{line}</tspan>
-          ))}
-        </text>
-      </g>
-    );
-  };
-}
 
 /** Opções fixas para o campo Tipo Fruto (sem tabela no Supabase). */
 const TIPO_FRUTO_OPCOES = ["Açaí", "Fruto"] as const;
@@ -319,6 +271,26 @@ const emptyPayload = (data: string): OCPPInsertPayload => ({
 
 type LineOption = { id: number; code: string; name: string };
 
+/** Colunas da tabela do dashboard PCP: id, label e função que indica se a célula está "vazia" (para filtrar itens). */
+const DASHBOARD_TABLE_COLUMNS: Array<{ id: string; label: string; isEmpty: (row: OCPPRow) => boolean }> = [
+  { id: "op", label: "OP", isEmpty: (r) => !(r.op ?? "").toString().trim() },
+  { id: "codigo", label: "Código", isEmpty: (r) => !(r.Code ?? "").toString().trim() },
+  { id: "descricao", label: "Descrição", isEmpty: (r) => !(r.descricao ?? "").toString().trim() },
+  { id: "unidade", label: "Unidade", isEmpty: (r) => !(r.unidade ?? "").toString().trim() },
+  { id: "grupo", label: "Grupo", isEmpty: (r) => !(r.grupo ?? "").toString().trim() },
+  { id: "quantidade", label: "Quantidade", isEmpty: (r) => (r.quantidade ?? 0) === 0 },
+  { id: "tipo_linha", label: "Tipo Linha", isEmpty: (r) => !(r.tipo_linha ?? "").toString().trim() },
+  { id: "tipo_fruto", label: "Tipo Fruto", isEmpty: (r) => !(r.tipo_fruto ?? "").toString().trim() },
+  { id: "solidos", label: "Sólidos", isEmpty: (r) => r.solidos == null },
+  { id: "previsao_latas", label: "Previsão Latas", isEmpty: (r) => (r.previsao_latas ?? 0) === 0 },
+  { id: "qtd_latas", label: "Qtd. Latas", isEmpty: (r) => (r.quantidade_latas ?? 0) === 0 && !(((r.tipo_fruto ?? "").trim() === "Açaí" || (r.tipo_fruto ?? "").trim() === "Fruto") && (r.quantidade_kg ?? 0) > 0) },
+  { id: "qtd_kg", label: "Qtd em Kg", isEmpty: (r) => (r.quantidade_kg ?? 0) === 0 },
+  { id: "qtd_basq", label: "Qtd. Basq", isEmpty: (r) => (r.quantidade_basqueta ?? 0) === 0 },
+  { id: "qtd_chapa", label: "Qtd. Chapa", isEmpty: (r) => (r.quantidade_chapa ?? 0) === 0 },
+  { id: "t_cort", label: "T. Cort", isEmpty: (r) => !(r.t_cort ?? "").toString().trim() },
+  { id: "entrada_tunel", label: "Entrada no Túnel (Kg)", isEmpty: (r) => (r.quantidade_kg_tuneo ?? 0) === 0 },
+];
+
 export default function PlanejamentoProducao() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -360,7 +332,6 @@ export default function PlanejamentoProducao() {
   /** Filial do novo documento (ao clicar em "Novo documento"); alterar aqui não dispara filtro. */
   const [filialNovoDocumento, setFilialNovoDocumento] = useState<string>("");
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chartQtdKgRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   /** Ao entrar na aba PCP, abrir direto o último documento (só uma vez por carga). */
   const hasAutoOpenedLastDocRef = useRef(false);
@@ -388,6 +359,22 @@ export default function PlanejamentoProducao() {
   const [dashboardTipoLinhaPending, setDashboardTipoLinhaPending] = useState("");
   const [dashboardTipoFrutoPending, setDashboardTipoFrutoPending] = useState("");
   const [dashboardOpCodePending, setDashboardOpCodePending] = useState("");
+  const [dashboardItemCode, setDashboardItemCode] = useState("");
+  const [dashboardItemCodePending, setDashboardItemCodePending] = useState("");
+  /** Colunas visíveis na tabela do dashboard (id -> visível). Padrão: todas visíveis. */
+  const [dashboardVisibleColumns, setDashboardVisibleColumns] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(DASHBOARD_TABLE_COLUMNS.map((c) => [c.id, true]))
+  );
+  /** Ocultar itens em que estas colunas estejam vazias (id -> ocultar quando vazio). Padrão: nenhuma. */
+  const [dashboardHideWhenEmptyColumns, setDashboardHideWhenEmptyColumns] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(DASHBOARD_TABLE_COLUMNS.map((c) => [c.id, false]))
+  );
+  const [dashboardVisibleColumnsPending, setDashboardVisibleColumnsPending] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(DASHBOARD_TABLE_COLUMNS.map((c) => [c.id, true]))
+  );
+  const [dashboardHideWhenEmptyPending, setDashboardHideWhenEmptyPending] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(DASHBOARD_TABLE_COLUMNS.map((c) => [c.id, false]))
+  );
 
   const isEditing = (rowId: number, field: string) =>
     editingNumeric?.rowId === rowId && editingNumeric?.field === field;
@@ -513,6 +500,9 @@ export default function PlanejamentoProducao() {
       setDashboardTipoLinhaPending(dashboardTipoLinha);
       setDashboardTipoFrutoPending(dashboardTipoFruto);
       setDashboardOpCodePending(dashboardOpCode);
+      setDashboardItemCodePending(dashboardItemCode);
+      setDashboardVisibleColumnsPending({ ...dashboardVisibleColumns });
+      setDashboardHideWhenEmptyPending({ ...dashboardHideWhenEmptyColumns });
     }
   }, [dashboardFiltersOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -525,10 +515,13 @@ export default function PlanejamentoProducao() {
     setDashboardTipoLinha(dashboardTipoLinhaPending);
     setDashboardTipoFruto(dashboardTipoFrutoPending);
     setDashboardOpCode(dashboardOpCodePending);
+    setDashboardItemCode(dashboardItemCodePending);
+    setDashboardVisibleColumns({ ...dashboardVisibleColumnsPending });
+    setDashboardHideWhenEmptyColumns({ ...dashboardHideWhenEmptyPending });
     setDashboardFiltersOpen(false);
-  }, [dashboardDateFromPending, dashboardDateToPending, dashboardUnidadePending, dashboardGrupoPending, dashboardTipoLinhaPending, dashboardTipoFrutoPending, dashboardOpCodePending]);
+  }, [dashboardDateFromPending, dashboardDateToPending, dashboardUnidadePending, dashboardGrupoPending, dashboardTipoLinhaPending, dashboardTipoFrutoPending, dashboardOpCodePending, dashboardItemCodePending, dashboardVisibleColumnsPending, dashboardHideWhenEmptyPending]);
 
-  /** Dados do dashboard após filtros (client-side). */
+  /** Dados do dashboard após filtros (client-side). Inclui filtro "ocultar itens com colunas vazias". */
   const dashboardFiltered: OCPPRow[] = useMemo(() => {
     let list = dashboardData;
     const u = (dashboardUnidade ?? "").trim();
@@ -541,17 +534,25 @@ export default function PlanejamentoProducao() {
     if (tf) list = list.filter((r) => (r.tipo_fruto ?? "").trim().toLowerCase() === tf.toLowerCase());
     const op = (dashboardOpCode ?? "").trim();
     if (op) list = list.filter((r) => (r.op ?? "").trim().toLowerCase().includes(op.toLowerCase()));
+    const itemCode = (dashboardItemCode ?? "").trim();
+    if (itemCode) list = list.filter((r) => `${r.Code ?? ""}`.toLowerCase().includes(itemCode.toLowerCase()));
+    const hideWhenEmpty = dashboardHideWhenEmptyColumns;
+    const colsToHide = DASHBOARD_TABLE_COLUMNS.filter((c) => hideWhenEmpty[c.id]);
+    if (colsToHide.length > 0) {
+      list = list.filter((row) => !colsToHide.some((c) => c.isEmpty(row)));
+    }
     return list;
-  }, [dashboardData, dashboardUnidade, dashboardGrupo, dashboardTipoLinha, dashboardTipoFruto, dashboardOpCode]);
+  }, [dashboardData, dashboardUnidade, dashboardGrupo, dashboardTipoLinha, dashboardTipoFruto, dashboardOpCode, dashboardItemCode, dashboardHideWhenEmptyColumns]);
 
   /** Totais do dashboard. Previsão Latas: só soma valor manual (no cenário Açaí/Fruto+Qtd.Kg não conta). Qtd. Latas: soma valor exibido (inclui calculado). */
   const dashboardTotals = useMemo(() => {
     const qtd = dashboardFiltered.length;
     if (qtd === 0) {
-      return { quantidade_latas: 0, previsao_latas: 0, latas: 0, quantidade_kg: 0, quantidade_basqueta: 0, quantidade_chapa: 0, t_cort: 0, quantidade_kg_tuneo: 0 };
+      return { quantidade: 0, quantidade_latas: 0, previsao_latas: 0, latas: 0, quantidade_kg: 0, quantidade_basqueta: 0, quantidade_chapa: 0, t_cort: 0, quantidade_kg_tuneo: 0 };
     }
-    let quantidade_latas = 0, previsao_latas = 0, latas = 0, quantidade_kg = 0, quantidade_basqueta = 0, quantidade_chapa = 0, t_cort = 0, quantidade_kg_tuneo = 0;
+    let quantidade = 0, quantidade_latas = 0, previsao_latas = 0, latas = 0, quantidade_kg = 0, quantidade_basqueta = 0, quantidade_chapa = 0, t_cort = 0, quantidade_kg_tuneo = 0;
     dashboardFiltered.forEach((r) => {
+      quantidade += r.quantidade ?? 0;
       const tf = (r.tipo_fruto ?? "").trim();
       const kg = r.quantidade_kg ?? 0;
       const isCalculado = (tf === "Açaí" || tf === "Fruto") && kg > 0;
@@ -567,8 +568,14 @@ export default function PlanejamentoProducao() {
       quantidade_kg_tuneo += r.quantidade_kg_tuneo ?? 0;
       t_cort += parseCortSolidValue(r.t_cort);
     });
-    return { quantidade_latas, previsao_latas, latas, quantidade_kg, quantidade_basqueta, quantidade_chapa, t_cort, quantidade_kg_tuneo };
+    return { quantidade, quantidade_latas, previsao_latas, latas, quantidade_kg, quantidade_basqueta, quantidade_chapa, t_cort, quantidade_kg_tuneo };
   }, [dashboardFiltered]);
+
+  /** Colunas do dashboard visíveis atualmente (ordem preservada). */
+  const dashboardVisibleColsList = useMemo(
+    () => DASHBOARD_TABLE_COLUMNS.filter((c) => dashboardVisibleColumns[c.id] !== false),
+    [dashboardVisibleColumns]
+  );
 
   /** Opções únicas para filtros do dashboard (Unidade, Grupo, Tipo Linha, Tipo Fruto). */
   const dashboardFilterOptions = useMemo(() => {
@@ -674,17 +681,6 @@ export default function PlanejamentoProducao() {
     if (filtroSolidos !== "" && filtroSolidos != null) list = list.filter((r) => r.solidos === filtroSolidos);
     return list;
   })();
-
-  /** Dados para o gráfico de barras horizontais: Qtd. em Kg por item (descrição ou código). */
-  const chartQtdKgData = useMemo(() => {
-    const list = [...registrosExibidos]
-      .filter((r) => (r.quantidade_kg ?? 0) > 0)
-      .sort((a, b) => (b.quantidade_kg ?? 0) - (a.quantidade_kg ?? 0));
-    return list.map((r) => ({
-      name: (r.descricao || r.Code || "").trim() || `Item ${r.id ?? ""}`,
-      qtdKg: r.quantidade_kg ?? 0,
-    }));
-  }, [registrosExibidos]);
 
   /** Atualiza um registro no banco e no estado local (sem recarregar a tabela nem mostrar loading). Preserva zeros à esquerda do código. */
   const updateRow = async (id: number, payload: Partial<OCPPInsertPayload>) => {
@@ -1071,205 +1067,6 @@ export default function PlanejamentoProducao() {
             <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
           </Button>
         </div>
-
-        {/* Dashboard PCP — acima do card de planejamento */}
-        <section className="rounded-2xl border border-border/50 bg-card/95 backdrop-blur-sm shadow-md overflow-hidden" aria-label="Dashboard Planejamento de Produção PCP">
-          <div className="border-b border-border/40 bg-muted/30 px-4 py-3 sm:px-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <h2 className="text-lg sm:text-xl font-bold text-foreground">Planejamento de Produção PCP</h2>
-              <Dialog open={dashboardFiltersOpen} onOpenChange={setDashboardFiltersOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-2 shrink-0" aria-label="Abrir filtros do dashboard">
-                    <Filter className="h-4 w-4" />
-                    Filtros
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-[95vw] sm:max-w-md rounded-lg">
-                  <DialogHeader>
-                    <DialogTitle>Filtros do dashboard</DialogTitle>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-2">
-                    <div className="grid gap-2">
-                      <Label>Data (intervalo)</Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <Label className="text-xs text-muted-foreground">De</Label>
-                          <DatePicker
-                            value={dashboardDateFromPending}
-                            onChange={(v) => v && setDashboardDateFromPending(v)}
-                            placeholder="Data"
-                            triggerClassName="h-9 border rounded-md w-full text-sm"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Até</Label>
-                          <DatePicker
-                            value={dashboardDateToPending}
-                            onChange={(v) => v && setDashboardDateToPending(v)}
-                            placeholder="Data"
-                            triggerClassName="h-9 border rounded-md w-full text-sm"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="dashboard-filtro-unidade">Unidade</Label>
-                      <Select value={dashboardUnidadePending || "__todos__"} onValueChange={(v) => setDashboardUnidadePending(v === "__todos__" ? "" : v)}>
-                        <SelectTrigger id="dashboard-filtro-unidade" className="h-9">
-                          <SelectValue placeholder="Todos" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__todos__">Todos</SelectItem>
-                          {dashboardFilterOptions.unidades.map((u) => (
-                            <SelectItem key={u} value={u}>{u}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="dashboard-filtro-grupo">Grupo</Label>
-                      <Select value={dashboardGrupoPending || "__todos__"} onValueChange={(v) => setDashboardGrupoPending(v === "__todos__" ? "" : v)}>
-                        <SelectTrigger id="dashboard-filtro-grupo" className="h-9">
-                          <SelectValue placeholder="Todos" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__todos__">Todos</SelectItem>
-                          {dashboardFilterOptions.grupos.map((g) => (
-                            <SelectItem key={g} value={g}>{g}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="dashboard-filtro-tipo-linha">Tipo de Linha</Label>
-                      <Select value={dashboardTipoLinhaPending || "__todos__"} onValueChange={(v) => setDashboardTipoLinhaPending(v === "__todos__" ? "" : v)}>
-                        <SelectTrigger id="dashboard-filtro-tipo-linha" className="h-9">
-                          <SelectValue placeholder="Todos" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__todos__">Todos</SelectItem>
-                          {dashboardFilterOptions.tipoLinhas.map((tl) => (
-                            <SelectItem key={tl} value={tl}>{getNomeLinhaParaFiltro(tl) || tl}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="dashboard-filtro-tipo-fruto">Tipo de Fruto</Label>
-                      <Select value={dashboardTipoFrutoPending || "__todos__"} onValueChange={(v) => setDashboardTipoFrutoPending(v === "__todos__" ? "" : v)}>
-                        <SelectTrigger id="dashboard-filtro-tipo-fruto" className="h-9">
-                          <SelectValue placeholder="Todos" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__todos__">Todos</SelectItem>
-                          {dashboardFilterOptions.tipoFrutos.map((tf) => (
-                            <SelectItem key={tf} value={tf}>{tf}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="dashboard-filtro-op">OP Code</Label>
-                      <Input
-                        id="dashboard-filtro-op"
-                        value={dashboardOpCodePending}
-                        onChange={(e) => setDashboardOpCodePending(e.target.value)}
-                        placeholder="Ex.: OP-001"
-                        className="h-9 text-sm"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2 pt-2">
-                    <Button variant="outline" onClick={() => setDashboardFiltersOpen(false)}>Cancelar</Button>
-                    <Button onClick={applyDashboardFilters}>Aplicar filtros</Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-          <div className="p-4 sm:p-5 overflow-x-auto">
-            {dashboardLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-            ) : (
-              <div className="rounded-lg border border-border/40 overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">OP</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">Código</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">Descrição</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">Unidade</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">Grupo</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo Linha</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo Fruto</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Sólidos</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Previsão Latas</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Latas</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd em Kg</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Basq</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Chapa</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">T. Cort</TableHead>
-                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Entrada no Túnel (Kg)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dashboardFiltered.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={15} className="text-center text-muted-foreground py-8">
-                          Nenhum registro encontrado para os filtros aplicados.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      dashboardFiltered.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell className="font-mono text-xs">{row.op ?? "—"}</TableCell>
-                          <TableCell className="font-mono text-xs">{row.Code ?? "—"}</TableCell>
-                          <TableCell className="text-xs whitespace-nowrap">{row.descricao ?? "—"}</TableCell>
-                          <TableCell className="text-xs">{row.unidade ?? "—"}</TableCell>
-                          <TableCell className="text-xs whitespace-nowrap">{row.grupo ?? "—"}</TableCell>
-                          <TableCell className="text-xs whitespace-nowrap">{row.tipo_linha ? (getNomeLinhaParaFiltro(row.tipo_linha) || row.tipo_linha) : "—"}</TableCell>
-                          <TableCell className="text-xs">{row.tipo_fruto ?? "—"}</TableCell>
-                          <TableCell className="text-xs text-right">{row.solidos != null ? SOLIDOS_PERFIS.find((p) => p.value === row.solidos)?.label ?? row.solidos : "—"}</TableCell>
-                          <TableCell className="text-xs text-right">{row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "—"}</TableCell>
-                          <TableCell className="text-xs text-right">{(() => {
-                            const tf = (row.tipo_fruto ?? "").trim();
-                            if ((tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)) {
-                              const calc = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? "");
-                              return calc !== 0 ? formatNumber(calc) : formatNumber(row.quantidade_latas);
-                            }
-                            return formatNumber(row.quantidade_latas);
-                          })()}</TableCell>
-                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_kg)}</TableCell>
-                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_basqueta)}</TableCell>
-                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_chapa)}</TableCell>
-                          <TableCell className="text-xs text-right">{row.t_cort ?? "—"}</TableCell>
-                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_kg_tuneo)}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                  {dashboardFiltered.length > 0 && (
-                    <TableFooter>
-                      <TableRow className="bg-primary/10 font-bold border-t-2 border-primary/30">
-                        <TableCell colSpan={7} className="text-sm">Total</TableCell>
-                        <TableCell className="text-xs text-right"></TableCell>
-                          <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.previsao_latas, 2)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_latas, 2)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg, 2)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_basqueta, 2)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_chapa, 2)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.t_cort, 3)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg_tuneo, 2)}</TableCell>
-                      </TableRow>
-                    </TableFooter>
-                  )}
-                </Table>
-              </div>
-            )}
-          </div>
-        </section>
 
         {/* Card principal — mesmo estilo do Acompanhamento diário da produção */}
         <div className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
@@ -2447,79 +2244,303 @@ export default function PlanejamentoProducao() {
                   </Table>
                 </div>
               </div>
-              {/* Gráfico Qtd. em Kg por item — abaixo da tabela de planejamento */}
-              <div ref={chartQtdKgRef} className="chart-card rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card to-card/98 pl-3 pr-4 py-5 sm:p-6 lg:p-8 shadow-[0_4px_24px_rgba(0,0,0,0.06)] lg:shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden min-w-0 mb-6">
-                <div className="mb-5 lg:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
-                      <Target className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Qtd. em Kg por item</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Quantidade a ser feita de cada item (Qtd. Kg)</p>
-                    </div>
-                  </div>
-                  <ExportToPng targetRef={chartQtdKgRef} filenamePrefix="pcp-qtd-kg-por-item" expandScrollable={false} className="shrink-0" />
-                </div>
-                <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
-                  {chartQtdKgData.length > 0 ? (
-                    <div className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-2xl p-2 sm:p-5 w-full min-w-0" style={{ height: isMobile ? Math.min(400, Math.max(200, chartQtdKgData.length * 58)) : Math.min(720, Math.max(200, chartQtdKgData.length * 62)) }}>
-                      <ResponsiveContainer width="100%" height="100%" minWidth={isMobile ? undefined : 360}>
-                        <BarChart
-                          layout="vertical"
-                          data={chartQtdKgData}
-                          margin={{ top: isMobile ? 6 : 8, right: isMobile ? 44 : 72, left: isMobile ? 6 : 8, bottom: isMobile ? 6 : 8 }}
-                          barCategoryGap={isMobile ? 28 : 48}
-                          barGap={isMobile ? 18 : 28}
-                        >
-                          <defs>
-                            <linearGradient id="pcp-qtdkg-primary" x1="0" y1="0" x2="1" y2="0">
-                              <stop offset="0%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
-                              <stop offset="50%" stopColor="hsl(var(--primary))" stopOpacity={1} />
-                              <stop offset="100%" stopColor="hsl(217 71% 65%)" stopOpacity={1} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 6" strokeOpacity={0.2} horizontal={false} />
-                          <XAxis type="number" tickLine={false} axisLine={false} tick={() => null} ticks={[]} />
-                          <YAxis type="category" dataKey="name" width={isMobile ? 100 : 200} tickLine={false} axisLine={false} tick={makeYAxisTickMultiLine(isMobile ? 10 : 22, isMobile ? 4 : 3)} />
-                          <Tooltip
-                            cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 6 }}
-                            contentStyle={{
-                              backgroundColor: "hsl(var(--card) / 0.98)",
-                              backdropFilter: "blur(12px)",
-                              WebkitBackdropFilter: "blur(12px)",
-                              border: "1px solid hsl(var(--border) / 0.8)",
-                              borderRadius: "14px",
-                              padding: "16px 20px",
-                              boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
-                              fontSize: "13px",
-                              fontWeight: 500,
-                            }}
-                            labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 700, marginBottom: 8 }}
-                            formatter={(value: number) => [formatNumber(value), "Qtd. Kg"]}
-                            itemStyle={{ fontWeight: 600 }}
-                          />
-                          <Bar dataKey="qtdKg" fill="url(#pcp-qtdkg-primary)" radius={[0, 8, 8, 0]} name="Qtd. Kg" barSize={20} isAnimationActive animationDuration={600} animationEasing="ease-out">
-                            <LabelList dataKey="qtdKg" position="right" formatter={(v: number) => formatNumber(v)} style={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--foreground))" }} />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-8 sm:p-12 flex flex-col items-center justify-center min-h-[200px] text-center">
-                      <Target className="h-10 w-10 text-muted-foreground/60 mb-3" />
-                      <p className="text-sm font-medium text-muted-foreground">Nenhum item com Qtd. Kg informada</p>
-                      <p className="text-xs text-muted-foreground/80 mt-1">Preencha a coluna &quot;Qtd. Kg&quot; nas linhas da tabela para visualizar o gráfico.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
             </>
           )}
             </>
           )}
           </div>
         </div>
+
+        {/* Dashboard PCP — abaixo do card de planejamento */}
+        <section className="rounded-2xl border border-border/50 bg-card/95 backdrop-blur-sm shadow-md overflow-hidden" aria-label="Dashboard Planejamento de Produção PCP (Personalizado)">
+          <div className="border-b border-border/40 bg-muted/30 px-4 py-3 sm:px-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <h2 className="text-lg sm:text-xl font-bold text-foreground">Planejamento de Produção PCP (Personalizado)</h2>
+              <Dialog open={dashboardFiltersOpen} onOpenChange={setDashboardFiltersOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2 shrink-0" aria-label="Abrir filtros do dashboard">
+                    <Filter className="h-4 w-4" />
+                    Filtros
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="w-[95vw] max-w-[95vw] sm:w-full sm:max-w-lg rounded-lg max-h-[85dvh] sm:max-h-[90vh] flex flex-col p-4 sm:p-6">
+                  <DialogHeader className="shrink-0 pb-2">
+                    <DialogTitle className="text-base sm:text-lg">Filtros do dashboard</DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-3 sm:gap-4 py-2 overflow-y-auto min-h-0 pr-1 -mr-1 overscroll-contain">
+                    <div className="grid gap-2">
+                      <Label className="text-sm">Data (intervalo)</Label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">De</Label>
+                          <DatePicker
+                            value={dashboardDateFromPending}
+                            onChange={(v) => v && setDashboardDateFromPending(v)}
+                            placeholder="Data"
+                            triggerClassName="h-9 sm:h-9 border rounded-md w-full text-sm min-h-[2.25rem]"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Até</Label>
+                          <DatePicker
+                            value={dashboardDateToPending}
+                            onChange={(v) => v && setDashboardDateToPending(v)}
+                            placeholder="Data"
+                            triggerClassName="h-9 sm:h-9 border rounded-md w-full text-sm min-h-[2.25rem]"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-unidade" className="text-sm">Unidade</Label>
+                      <Select value={dashboardUnidadePending || "__todos__"} onValueChange={(v) => setDashboardUnidadePending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-unidade" className="h-9 min-h-[2.25rem] text-sm">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.unidades.map((u) => (
+                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-grupo" className="text-sm">Grupo</Label>
+                      <Select value={dashboardGrupoPending || "__todos__"} onValueChange={(v) => setDashboardGrupoPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-grupo" className="h-9 min-h-[2.25rem] text-sm">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.grupos.map((g) => (
+                            <SelectItem key={g} value={g}>{g}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-tipo-linha" className="text-sm">Tipo de Linha</Label>
+                      <Select value={dashboardTipoLinhaPending || "__todos__"} onValueChange={(v) => setDashboardTipoLinhaPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-tipo-linha" className="h-9 min-h-[2.25rem] text-sm">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.tipoLinhas.map((tl) => (
+                            <SelectItem key={tl} value={tl}>{getNomeLinhaParaFiltro(tl) || tl}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-tipo-fruto" className="text-sm">Tipo de Fruto</Label>
+                      <Select value={dashboardTipoFrutoPending || "__todos__"} onValueChange={(v) => setDashboardTipoFrutoPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-tipo-fruto" className="h-9 min-h-[2.25rem] text-sm">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.tipoFrutos.map((tf) => (
+                            <SelectItem key={tf} value={tf}>{tf}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-op" className="text-sm">OP Code</Label>
+                      <Input
+                        id="dashboard-filtro-op"
+                        value={dashboardOpCodePending}
+                        onChange={(e) => setDashboardOpCodePending(e.target.value)}
+                        placeholder="Ex.: OP-001"
+                        className="h-9 min-h-[2.25rem] text-sm"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-item-code" className="text-sm">Código do item (Item Code)</Label>
+                      <Input
+                        id="dashboard-filtro-item-code"
+                        value={dashboardItemCodePending}
+                        onChange={(e) => setDashboardItemCodePending(e.target.value)}
+                        placeholder="Ex.: 001 ou parte do código"
+                        className="h-9 min-h-[2.25rem] text-sm"
+                      />
+                  </div>
+                    <div className="grid gap-2 border-t border-border pt-4">
+                      <Label className="text-sm font-semibold">Colunas visíveis</Label>
+                      <p className="text-xs text-muted-foreground">Marque as colunas que deseja exibir na tabela.</p>
+                      <label className="flex items-center gap-2.5 cursor-pointer py-2 px-1 rounded-md hover:bg-muted/50 min-h-[2.5rem] border-b border-border/50 mb-1 touch-manipulation">
+                        <Checkbox
+                          checked={DASHBOARD_TABLE_COLUMNS.every((c) => dashboardVisibleColumnsPending[c.id] !== false)}
+                          onCheckedChange={(checked) => {
+                            const value = checked === true;
+                            setDashboardVisibleColumnsPending(() =>
+                              Object.fromEntries(DASHBOARD_TABLE_COLUMNS.map((c) => [c.id, value]))
+                            );
+                          }}
+                          className="shrink-0"
+                        />
+                        <span className="text-sm font-medium">Selecionar tudo / Desmarcar tudo</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 max-h-44 sm:max-h-40 overflow-y-auto py-1">
+                        {DASHBOARD_TABLE_COLUMNS.map((col) => (
+                          <label key={col.id} className="flex items-center gap-2.5 cursor-pointer py-2 sm:py-1.5 px-1 rounded-md hover:bg-muted/50 min-h-[2.5rem] sm:min-h-0 touch-manipulation">
+                            <Checkbox
+                              checked={dashboardVisibleColumnsPending[col.id] !== false}
+                              onCheckedChange={(checked) =>
+                                setDashboardVisibleColumnsPending((prev) => ({ ...prev, [col.id]: checked !== false }))
+                              }
+                              className="shrink-0"
+                            />
+                            <span className="text-xs sm:text-xs">{col.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid gap-2 border-t border-border pt-4">
+                      <Label className="text-sm font-semibold">Ocultar itens com colunas vazias</Label>
+                      <p className="text-xs text-muted-foreground">Se marcar uma coluna, itens em que essa coluna estiver vazia não aparecerão na tabela.</p>
+                      <label className="flex items-center gap-2.5 cursor-pointer py-2 px-1 rounded-md hover:bg-muted/50 min-h-[2.5rem] border-b border-border/50 mb-1 touch-manipulation">
+                        <Checkbox
+                          checked={DASHBOARD_TABLE_COLUMNS.every((c) => dashboardHideWhenEmptyPending[c.id] === true)}
+                          onCheckedChange={(checked) => {
+                            const value = checked === true;
+                            setDashboardHideWhenEmptyPending(() =>
+                              Object.fromEntries(DASHBOARD_TABLE_COLUMNS.map((c) => [c.id, value]))
+                            );
+                          }}
+                          className="shrink-0"
+                        />
+                        <span className="text-sm font-medium">Selecionar tudo / Desmarcar tudo</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 max-h-44 sm:max-h-40 overflow-y-auto py-1">
+                        {DASHBOARD_TABLE_COLUMNS.map((col) => (
+                          <label key={col.id} className="flex items-center gap-2.5 cursor-pointer py-2 sm:py-1.5 px-1 rounded-md hover:bg-muted/50 min-h-[2.5rem] sm:min-h-0 touch-manipulation">
+                            <Checkbox
+                              checked={dashboardHideWhenEmptyPending[col.id] === true}
+                              onCheckedChange={(checked) =>
+                                setDashboardHideWhenEmptyPending((prev) => ({ ...prev, [col.id]: checked === true }))
+                              }
+                              className="shrink-0"
+                            />
+                            <span className="text-xs sm:text-xs">{col.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-3 sm:pt-2 shrink-0 border-t border-border/60 mt-2 pt-4">
+                    <Button variant="outline" onClick={() => setDashboardFiltersOpen(false)} className="min-h-[2.5rem] sm:min-h-9 w-full sm:w-auto">Cancelar</Button>
+                    <Button onClick={applyDashboardFilters} className="min-h-[2.5rem] sm:min-h-9 w-full sm:w-auto">Aplicar filtros</Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+          <div className="p-4 sm:p-5 overflow-x-auto">
+            {dashboardLoading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border/40 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {dashboardVisibleColsList.map((col) => (
+                        <TableHead
+                          key={col.id}
+                          className={["quantidade", "previsao_latas", "qtd_latas", "qtd_kg", "qtd_basq", "qtd_chapa", "t_cort", "entrada_tunel"].includes(col.id) ? "whitespace-nowrap text-xs font-medium text-right" : "whitespace-nowrap text-xs font-medium"}
+                        >
+                          {col.label}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dashboardFiltered.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={dashboardVisibleColsList.length || 15} className="text-center text-muted-foreground py-8">
+                          Nenhum registro encontrado para os filtros aplicados.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      dashboardFiltered.map((row) => (
+                        <TableRow key={row.id}>
+                          {dashboardVisibleColsList.map((col) => {
+                            const isRight = ["quantidade", "previsao_latas", "qtd_latas", "qtd_kg", "qtd_basq", "qtd_chapa", "t_cort", "entrada_tunel"].includes(col.id);
+                            const cn = isRight ? "text-xs text-right" : col.id === "op" || col.id === "codigo" ? "font-mono text-xs" : col.id === "descricao" || col.id === "grupo" || col.id === "tipo_linha" ? "text-xs whitespace-nowrap" : "text-xs";
+                            let content: React.ReactNode = "—";
+                            switch (col.id) {
+                              case "op": content = row.op ?? "—"; break;
+                              case "codigo": content = row.Code ?? "—"; break;
+                              case "descricao": content = row.descricao ?? "—"; break;
+                              case "unidade": content = row.unidade ?? "—"; break;
+                              case "grupo": content = row.grupo ?? "—"; break;
+                              case "quantidade": content = (row.quantidade ?? 0) !== 0 ? formatNumber(row.quantidade ?? 0) : "—"; break;
+                              case "tipo_linha": content = row.tipo_linha ? (getNomeLinhaParaFiltro(row.tipo_linha) || row.tipo_linha) : "—"; break;
+                              case "tipo_fruto": content = row.tipo_fruto ?? "—"; break;
+                              case "solidos": content = row.solidos != null ? (SOLIDOS_PERFIS.find((p) => p.value === row.solidos)?.label ?? row.solidos) : "—"; break;
+                              case "previsao_latas": content = row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "—"; break;
+                              case "qtd_latas":
+                                content = (() => {
+                            const tf = (row.tipo_fruto ?? "").trim();
+                            if ((tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)) {
+                              const calc = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? "");
+                              return calc !== 0 ? formatNumber(calc) : formatNumber(row.quantidade_latas);
+                            }
+                            return formatNumber(row.quantidade_latas);
+                                })();
+                                break;
+                              case "qtd_kg": content = formatNumber(row.quantidade_kg); break;
+                              case "qtd_basq": content = formatNumber(row.quantidade_basqueta); break;
+                              case "qtd_chapa": content = formatNumber(row.quantidade_chapa); break;
+                              case "t_cort": content = row.t_cort ?? "—"; break;
+                              case "entrada_tunel": content = formatNumber(row.quantidade_kg_tuneo); break;
+                              default: break;
+                            }
+                            return <TableCell key={col.id} className={cn}>{content}</TableCell>;
+                          })}
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                  {dashboardFiltered.length > 0 && dashboardVisibleColsList.length > 0 && (
+                    <TableFooter>
+                      <TableRow className="bg-primary/10 font-bold border-t-2 border-primary/30">
+                        {(() => {
+                          const labelIds = ["op", "codigo", "descricao", "unidade", "grupo", "tipo_linha", "tipo_fruto"];
+                          const visibleLabels = dashboardVisibleColsList.filter((c) => labelIds.includes(c.id));
+                          let labelSpanShown = false;
+                          return dashboardVisibleColsList.map((col) => {
+                            if (labelIds.includes(col.id)) {
+                              if (!labelSpanShown) {
+                                labelSpanShown = true;
+                                return <TableCell key="total" colSpan={visibleLabels.length} className="text-sm">Total</TableCell>;
+                              }
+                              return null;
+                            }
+                            if (col.id === "solidos") return <TableCell key={col.id} className="text-xs text-right"></TableCell>;
+                            if (col.id === "quantidade") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade, 2)}</TableCell>;
+                            if (col.id === "previsao_latas") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.previsao_latas, 2)}</TableCell>;
+                            if (col.id === "qtd_latas") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_latas, 2)}</TableCell>;
+                            if (col.id === "qtd_kg") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg, 2)}</TableCell>;
+                            if (col.id === "qtd_basq") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_basqueta, 2)}</TableCell>;
+                            if (col.id === "qtd_chapa") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_chapa, 2)}</TableCell>;
+                            if (col.id === "t_cort") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.t_cort, 3)}</TableCell>;
+                            if (col.id === "entrada_tunel") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg_tuneo, 2)}</TableCell>;
+                            return <TableCell key={col.id} className="text-xs text-right"></TableCell>;
+                          }).filter((x): x is React.ReactElement => x != null);
+                        })()}
+                      </TableRow>
+                    </TableFooter>
+                  )}
+                </Table>
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </AppLayout>
   );
