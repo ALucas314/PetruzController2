@@ -140,6 +140,63 @@ export interface CaptureToPngBlobOptions {
   watermark?: string;
 }
 
+const PADDING_BETWEEN = 24;
+
+/**
+ * Combina vários blobs PNG em uma única imagem vertical (um embaixo do outro).
+ * Útil para relatório único com vários blocos (gráficos, tabelas).
+ */
+export async function combinePngBlobsVertical(
+  blobs: Blob[],
+  paddingBetween: number = PADDING_BETWEEN
+): Promise<Blob> {
+  if (blobs.length === 0) throw new Error("Nenhum blob para combinar");
+  const loadImage = (blob: Blob): Promise<HTMLImageElement | null> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = URL.createObjectURL(blob);
+    });
+  const allImages = await Promise.all(blobs.map(loadImage));
+  allImages.forEach((img) => img?.src && URL.revokeObjectURL(img.src));
+  const images = allImages.filter((img): img is HTMLImageElement => img != null && img.width > 0 && img.height > 0);
+  if (images.length === 0) throw new Error("Nenhuma imagem válida para combinar");
+
+  const padding = 40;
+  let totalHeight = padding * 2;
+  let maxWidth = 800;
+  for (const img of images) {
+    totalHeight += img.height + paddingBetween;
+    if (img.width > maxWidth) maxWidth = img.width;
+  }
+  totalHeight -= paddingBetween;
+  totalHeight += padding;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = maxWidth + padding * 2;
+  canvas.height = totalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2d não disponível");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  let y = padding;
+  for (const img of images) {
+    const x = padding + (maxWidth - img.width) / 2;
+    ctx.drawImage(img, x, y, img.width, img.height);
+    y += img.height + paddingBetween;
+  }
+
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("Falha ao gerar PNG"))),
+      "image/png",
+      1.0
+    );
+  });
+}
+
 /**
  * Captura um elemento DOM como PNG e retorna o blob e o nome do arquivo.
  * Útil para exportação em lote e compartilhamento (ex.: Web Share API no mobile).

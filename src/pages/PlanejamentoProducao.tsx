@@ -193,11 +193,11 @@ function calcPrevisaoLatasFromTipoFruto(quantidadeKg: number, tipoFruto: string)
   return 0;
 }
 
-/** Previsão Latas efetiva para Cort Solid: quando Açaí/Fruto com Qtd. Kg, usa o valor calculado (ex.: 309,38) para dar Cort Solid = 2010,97. */
-function getEffectivePrevisaoLatasForCortSolid(row: { previsao_latas?: number | null; quantidade_kg?: number | null; tipo_fruto?: string | null }): number {
+/** Valor de latas efetivo para Cort Solid: quando Açaí/Fruto com Qtd. Kg, o valor calculado fica em quantidade_latas (Qtd. Latas); senão usa previsao_latas. */
+function getEffectivePrevisaoLatasForCortSolid(row: { previsao_latas?: number | null; quantidade_latas?: number | null; quantidade_kg?: number | null; tipo_fruto?: string | null }): number {
   const tf = (row.tipo_fruto ?? "").trim();
   const kg = row.quantidade_kg ?? 0;
-  if ((tf === "Açaí" || tf === "Fruto") && kg > 0) return calcPrevisaoLatasFromTipoFruto(kg, tf);
+  if ((tf === "Açaí" || tf === "Fruto") && kg > 0) return (row.quantidade_latas ?? 0) !== 0 ? (row.quantidade_latas ?? 0) : calcPrevisaoLatasFromTipoFruto(kg, tf);
   return row.previsao_latas ?? 0;
 }
 
@@ -357,11 +357,17 @@ export default function PlanejamentoProducao() {
   const [editingNumeric, setEditingNumeric] = useState<{ rowId: number; field: string; value: string } | null>(null);
   /** Ao clicar em "Novo documento", guarda o próximo número (ex.: 2) para exibir "2 de 2" no header até carregar de novo. */
   const [newDocumentIndex, setNewDocumentIndex] = useState<number | null>(null);
+  /** Filial do novo documento (ao clicar em "Novo documento"); alterar aqui não dispara filtro. */
+  const [filialNovoDocumento, setFilialNovoDocumento] = useState<string>("");
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chartQtdKgRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   /** Ao entrar na aba PCP, abrir direto o último documento (só uma vez por carga). */
   const hasAutoOpenedLastDocRef = useRef(false);
+  /** Marca o momento da última alteração feita por este usuário; evita recarregar ao receber o próprio evento realtime. */
+  const lastLocalChangeAtRef = useRef(0);
+  /** Timeout do debounce do realtime para não recarregar a cada tecla. */
+  const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { setDocumentNav } = useDocumentNav();
 
   // --- Estado do Dashboard PCP (acima do card) ---
@@ -428,12 +434,21 @@ export default function PlanejamentoProducao() {
     loadRegistros();
   }, [loadRegistros]);
 
-  /** Sincronização em tempo real: quando outro usuário alterar a OCPP, recarrega para todos verem o mesmo. */
+  /** Sincronização em tempo real: quando outro usuário alterar a OCPP, recarrega após debounce. Ignora eventos logo após nossa própria alteração para não interromper o cadastro. */
   useEffect(() => {
     const unsubscribe = subscribeOCPPRealtime(() => {
-      loadRegistros();
+      const now = Date.now();
+      if (now - lastLocalChangeAtRef.current < 2500) return; // nossa própria alteração acabou de disparar o evento
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      realtimeDebounceRef.current = setTimeout(() => {
+        realtimeDebounceRef.current = null;
+        loadRegistros();
+      }, 1800);
     });
-    return unsubscribe;
+    return () => {
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      unsubscribe();
+    };
   }, [loadRegistros]);
 
   /** Ao abrir o card de filtros, copia os valores aplicados para os campos pendentes. */
@@ -529,7 +544,7 @@ export default function PlanejamentoProducao() {
     return list;
   }, [dashboardData, dashboardUnidade, dashboardGrupo, dashboardTipoLinha, dashboardTipoFruto, dashboardOpCode]);
 
-  /** Totais do dashboard (soma dos valores numéricos; t_cort parseado como número). */
+  /** Totais do dashboard. Previsão Latas: só soma valor manual (no cenário Açaí/Fruto+Qtd.Kg não conta). Qtd. Latas: soma valor exibido (inclui calculado). */
   const dashboardTotals = useMemo(() => {
     const qtd = dashboardFiltered.length;
     if (qtd === 0) {
@@ -537,10 +552,16 @@ export default function PlanejamentoProducao() {
     }
     let quantidade_latas = 0, previsao_latas = 0, latas = 0, quantidade_kg = 0, quantidade_basqueta = 0, quantidade_chapa = 0, t_cort = 0, quantidade_kg_tuneo = 0;
     dashboardFiltered.forEach((r) => {
-      quantidade_latas += r.quantidade_latas ?? 0;
+      const tf = (r.tipo_fruto ?? "").trim();
+      const kg = r.quantidade_kg ?? 0;
+      const isCalculado = (tf === "Açaí" || tf === "Fruto") && kg > 0;
       previsao_latas += r.previsao_latas ?? 0;
+      const qtdLatasRow = isCalculado
+        ? ((r.quantidade_latas ?? 0) !== 0 ? (r.quantidade_latas ?? 0) : calcPrevisaoLatasFromTipoFruto(kg, tf))
+        : (r.quantidade_latas ?? 0);
+      quantidade_latas += qtdLatasRow;
       latas += r.latas ?? 0;
-      quantidade_kg += r.quantidade_kg ?? 0;
+      quantidade_kg += kg;
       quantidade_basqueta += r.quantidade_basqueta ?? 0;
       quantidade_chapa += r.quantidade_chapa ?? 0;
       quantidade_kg_tuneo += r.quantidade_kg_tuneo ?? 0;
@@ -667,6 +688,7 @@ export default function PlanejamentoProducao() {
 
   /** Atualiza um registro no banco e no estado local (sem recarregar a tabela nem mostrar loading). Preserva zeros à esquerda do código. */
   const updateRow = async (id: number, payload: Partial<OCPPInsertPayload>) => {
+    lastLocalChangeAtRef.current = Date.now();
     try {
       const updated = await updateOcpp(id, payload);
       setRegistros((prev) =>
@@ -742,6 +764,7 @@ export default function PlanejamentoProducao() {
           prev.map((r) => (r.id === rowId ? { ...r, descricao: "", unidade: "", grupo: "", unidade_base: "", unidade_chapa: "" } : r))
         );
       }
+      lastLocalChangeAtRef.current = Date.now();
       try {
         const updated = await updateOcpp(rowId, payload);
         setRegistros((prev) =>
@@ -860,6 +883,7 @@ export default function PlanejamentoProducao() {
       toast({ title: "Nada para salvar", description: "Não há linhas para salvar.", variant: "destructive" });
       return;
     }
+    lastLocalChangeAtRef.current = Date.now();
     setSavingAll(true);
     try {
       for (const row of rowsToSave) {
@@ -881,33 +905,65 @@ export default function PlanejamentoProducao() {
     }
   }, [registrosExibidos, rowToPayload, toast, loadRegistros]);
 
-  /** Criar novo documento: limpa a lista; header mostra próximo número em ordem (ex.: 2 de 2, 3 de 3). */
+  /** Criar novo documento: limpa a lista; usa filial atual (ou filial do filtro) para o novo doc; alterar filial no header não filtra. */
   const createNewDocument = useCallback(() => {
-    const totalAtual = registrosExibidos.length;
-    setNewDocumentIndex(totalAtual + 1);
+    const totalDocs = documentosDoPeriodo.length;
+    setNewDocumentIndex(totalDocs + 1);
+    setFilialNovoDocumento(filialFiltro || "");
     setRegistros([]);
     setSelectedDocKey(null);
     setShowDocumentGridForRange(false);
-    toast({ title: "Novo documento", description: "Lista limpa. Adicione linhas e salve." });
-  }, [registrosExibidos.length]);
+    toast({ title: "Novo documento", description: "Selecione a filial acima se quiser. Adicione linhas e salve." });
+  }, [documentosDoPeriodo.length, filialFiltro]);
 
-  /** Contagem para PCP: 0 de 0 (sem registros), 1 de 1, 2 de 2... Em "Novo documento" mostra próximo em ordem (ex.: 2 de 2). */
+  /** Contagem para PCP por documento: "1 de 1" = um documento (com N linhas), "2 de 3" = segundo doc de três. Setas navegam entre documentos. */
   useEffect(() => {
-    const total = newDocumentIndex ?? registrosExibidos.length;
+    let current: number;
+    let total: number;
+    if (newDocumentIndex != null) {
+      current = newDocumentIndex;
+      total = newDocumentIndex;
+    } else if (documentosDoPeriodo.length > 0) {
+      total = documentosDoPeriodo.length;
+      if (selectedDocKey) {
+        const idx = documentosDoPeriodo.findIndex((d) => d.key === selectedDocKey);
+        current = idx >= 0 ? idx + 1 : 1;
+      } else {
+        current = total;
+      }
+    } else {
+      total = 0;
+      current = 0;
+    }
+    const idx = selectedDocKey ? documentosDoPeriodo.findIndex((d) => d.key === selectedDocKey) : -1;
+    const canGoPrev = documentosDoPeriodo.length > 0 && idx > 0;
+    const canGoNext = documentosDoPeriodo.length > 0 && idx >= 0 && idx < documentosDoPeriodo.length - 1;
     setDocumentNav({
       showNav: true,
-      canGoPrev: false,
-      canGoNext: false,
-      onPrev: () => {},
-      onNext: () => {},
+      canGoPrev,
+      canGoNext,
+      onPrev: () => {
+        if (idx > 0) {
+          setNewDocumentIndex(null);
+          setSelectedDocKey(documentosDoPeriodo[idx - 1].key);
+          setShowDocumentGridForRange(false);
+        }
+      },
+      onNext: () => {
+        if (idx >= 0 && idx < documentosDoPeriodo.length - 1) {
+          setNewDocumentIndex(null);
+          setSelectedDocKey(documentosDoPeriodo[idx + 1].key);
+          setShowDocumentGridForRange(false);
+        }
+      },
       onNewDocument: createNewDocument,
-      navLabel: `${total} de ${total}`,
+      navLabel: `${current} de ${total}`,
       saving: savingAll,
       canSave: registrosExibidos.length > 0,
       onSave: handleSaveAll,
     });
     return () => setDocumentNav(null);
-  }, [registrosExibidos.length, newDocumentIndex, savingAll, handleSaveAll, createNewDocument, setDocumentNav]);
+  }, [documentosDoPeriodo, selectedDocKey, newDocumentIndex, registrosExibidos.length, savingAll, handleSaveAll, createNewDocument, setDocumentNav]);
 
   useEffect(() => {
     return () => {
@@ -921,13 +977,28 @@ export default function PlanejamentoProducao() {
   }, []);
 
   const addLinha = async () => {
-    const payload = emptyPayload(dataFiltro.split("T")[0]);
-    if (filialFiltro) payload.filial_nome = filialFiltro;
+    const isNovoDoc = newDocumentIndex != null && !selectedDocKey;
+    const isDocExistente = selectedDocKey != null && documentosDoPeriodo.length > 0;
+    let payload: OCPPInsertPayload;
+    if (isDocExistente) {
+      const doc = documentosDoPeriodo.find((d) => d.key === selectedDocKey);
+      const first = doc?.rows[0];
+      const dataStr = first?.data ? String(first.data).split("T")[0] : dataFiltro.split("T")[0];
+      payload = emptyPayload(dataStr);
+      payload.filial_nome = (first?.filial_nome ?? doc?.filial_nome ?? filialFiltro) || null;
+      if (first?.doc_numero != null) payload.doc_numero = first.doc_numero;
+      if (first?.doc_ordem_global != null) payload.doc_ordem_global = first.doc_ordem_global;
+    } else {
+      payload = emptyPayload(dataFiltro.split("T")[0]);
+      const filial = isNovoDoc ? filialNovoDocumento : filialFiltro;
+      if (filial) payload.filial_nome = filial;
+    }
+    lastLocalChangeAtRef.current = Date.now();
     try {
       setSavingId(-1);
       const newRow = await createOcpp(payload);
       setRegistros((prev) => [...prev, newRow]);
-      toast({ title: "Linha adicionada", description: "Registro incluído." });
+      toast({ title: "Linha adicionada", description: isDocExistente ? "Linha incluída no documento." : "Registro incluído." });
     } catch (e) {
       toast({
         title: "Erro ao adicionar",
@@ -940,6 +1011,7 @@ export default function PlanejamentoProducao() {
   };
 
   const handleDelete = async (id: number) => {
+    lastLocalChangeAtRef.current = Date.now();
     try {
       await deleteOcpp(id);
       setRegistros((prev) => prev.filter((r) => r.id !== id));
@@ -956,13 +1028,15 @@ export default function PlanejamentoProducao() {
 
   const calcularTotais = () => {
     const totalQuantidade = registrosExibidos.reduce((sum, r) => sum + (r.quantidade ?? 0), 0);
-    const totalLatas = registrosExibidos.reduce((sum, r) => sum + (r.quantidade_latas ?? 0), 0);
-    const totalPrevisaoLatas = registrosExibidos.reduce((sum, r) => {
+    const totalPrevisaoLatas = registrosExibidos.reduce((sum, r) => sum + (r.previsao_latas ?? 0), 0);
+    const totalLatas = registrosExibidos.reduce((sum, r) => {
       const tf = (r.tipo_fruto ?? "").trim();
-      const previsao = (tf === "Açaí" || tf === "Fruto") && (r.quantidade_kg != null && r.quantidade_kg !== 0)
-        ? calcPrevisaoLatasFromTipoFruto(r.quantidade_kg, r.tipo_fruto ?? "")
-        : (r.previsao_latas ?? 0);
-      return sum + previsao;
+      const kg = r.quantidade_kg ?? 0;
+      const isCalculado = (tf === "Açaí" || tf === "Fruto") && kg > 0;
+      const qtdLatas = isCalculado
+        ? ((r.quantidade_latas ?? 0) !== 0 ? (r.quantidade_latas ?? 0) : calcPrevisaoLatasFromTipoFruto(kg, tf))
+        : (r.quantidade_latas ?? 0);
+      return sum + qtdLatas;
     }, 0);
     const totalKg = registrosExibidos.reduce((sum, r) => sum + (r.quantidade_kg ?? 0), 0);
     return { totalQuantidade, totalLatas, totalPrevisaoLatas, totalKg };
@@ -1158,8 +1232,15 @@ export default function PlanejamentoProducao() {
                           <TableCell className="text-xs whitespace-nowrap">{row.tipo_linha ? (getNomeLinhaParaFiltro(row.tipo_linha) || row.tipo_linha) : "—"}</TableCell>
                           <TableCell className="text-xs">{row.tipo_fruto ?? "—"}</TableCell>
                           <TableCell className="text-xs text-right">{row.solidos != null ? SOLIDOS_PERFIS.find((p) => p.value === row.solidos)?.label ?? row.solidos : "—"}</TableCell>
-                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_latas)}</TableCell>
-                          <TableCell className="text-xs text-right">{formatNumber(row.previsao_latas)}</TableCell>
+                          <TableCell className="text-xs text-right">{row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "—"}</TableCell>
+                          <TableCell className="text-xs text-right">{(() => {
+                            const tf = (row.tipo_fruto ?? "").trim();
+                            if ((tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)) {
+                              const calc = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? "");
+                              return calc !== 0 ? formatNumber(calc) : formatNumber(row.quantidade_latas);
+                            }
+                            return formatNumber(row.quantidade_latas);
+                          })()}</TableCell>
                           <TableCell className="text-xs text-right">{formatNumber(row.quantidade_kg)}</TableCell>
                           <TableCell className="text-xs text-right">{formatNumber(row.quantidade_basqueta)}</TableCell>
                           <TableCell className="text-xs text-right">{formatNumber(row.quantidade_chapa)}</TableCell>
@@ -1174,8 +1255,8 @@ export default function PlanejamentoProducao() {
                       <TableRow className="bg-primary/10 font-bold border-t-2 border-primary/30">
                         <TableCell colSpan={7} className="text-sm">Total</TableCell>
                         <TableCell className="text-xs text-right"></TableCell>
-                          <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_latas, 2)}</TableCell>
-                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.previsao_latas, 2)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.previsao_latas, 2)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_latas, 2)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg, 2)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_basqueta, 2)}</TableCell>
                         <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_chapa, 2)}</TableCell>
@@ -1225,14 +1306,18 @@ export default function PlanejamentoProducao() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Select
-                        value={filialFiltro || "__todas__"}
-                        onValueChange={(v) => setFilialFiltro(v === "__todas__" ? "" : v)}
+                        value={(newDocumentIndex != null && !selectedDocKey ? filialNovoDocumento : filialFiltro) || "__todas__"}
+                        onValueChange={(v) => {
+                          const val = v === "__todas__" ? "" : v;
+                          if (newDocumentIndex != null && !selectedDocKey) setFilialNovoDocumento(val);
+                          else setFilialFiltro(val);
+                        }}
                       >
                         <SelectTrigger id="filial-select" className="w-full min-w-[160px] sm:w-[220px] h-9 text-sm">
-                          <SelectValue placeholder="Todas as filiais" />
+                          <SelectValue placeholder={newDocumentIndex != null && !selectedDocKey ? "Filial do novo documento" : "Todas as filiais"} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__todas__">Todas as filiais</SelectItem>
+                          <SelectItem value="__todas__">{newDocumentIndex != null && !selectedDocKey ? "Nenhuma" : "Todas as filiais"}</SelectItem>
                           {filiais.map((f) => (
                             <SelectItem key={f.id} value={(f.nome || "").trim()}>
                               {f.nome}
@@ -1409,6 +1494,7 @@ export default function PlanejamentoProducao() {
                   <button
                     type="button"
                     onClick={() => {
+                      setNewDocumentIndex(null);
                       setSelectedDocKey(null);
                       setShowDocumentGridForRange(true);
                     }}
@@ -1454,12 +1540,14 @@ export default function PlanejamentoProducao() {
                         role="button"
                         tabIndex={0}
                         onClick={() => {
+                          setNewDocumentIndex(null);
                           setSelectedDocKey(doc.key);
                           setShowDocumentGridForRange(false);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
+                            setNewDocumentIndex(null);
                             setSelectedDocKey(doc.key);
                             setShowDocumentGridForRange(false);
                           }
@@ -1626,40 +1714,9 @@ export default function PlanejamentoProducao() {
                             <Input
                               type="text"
                               inputMode="decimal"
-                              value={getNumericDisplay(row, "quantidade_latas", "")}
-                              onFocus={() => setEditingNumeric({ rowId: row.id, field: "quantidade_latas", value: row.quantidade_latas != null && row.quantidade_latas !== 0 ? formatNumber(row.quantidade_latas) : "" })}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "quantidade_latas" ? { ...p, value: v } : { rowId: row.id, field: "quantidade_latas", value: v }));
-                              }}
-                              onBlur={(e) => {
-                                const latasVal = parseFormattedNumber(isEditing(row.id, "quantidade_latas") ? editingNumeric?.value : e.target.value) || 0;
-                                setEditingNumeric(null);
-                                const liqPrev = calcQtdLiqPrev(latasVal, row.solid ?? null);
-                                const cortNum = (row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null);
-                                updateRow(row.id, { quantidade_latas: latasVal, quantidade_liquida_prevista: liqPrev, t_cort: formatNumber(calcTCort(cortNum, liqPrev)) || "" });
-                              }}
-                              className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell className="p-2 sm:p-4 text-center">
-                            <Input
-                              type="text"
-                              inputMode="decimal"
-                              value={isEditing(row.id, "previsao_latas") ? editingNumeric!.value : (() => {
-                                const tf = (row.tipo_fruto ?? "").trim();
-                                if ((tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)) {
-                                  const calc = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? "");
-                                  return calc !== 0 ? formatNumber(calc) : "";
-                                }
-                                return row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "";
-                              })()}
+                              value={isEditing(row.id, "previsao_latas") ? editingNumeric!.value : (row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "")}
                               onFocus={() => {
-                                const tf = (row.tipo_fruto ?? "").trim();
-                                const disp = (tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)
-                                  ? formatNumber(calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? ""))
-                                  : (row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "");
+                                const disp = row.previsao_latas != null && row.previsao_latas !== 0 ? formatNumber(row.previsao_latas) : "";
                                 setEditingNumeric({ rowId: row.id, field: "previsao_latas", value: disp });
                               }}
                               onChange={(e) => {
@@ -1681,6 +1738,40 @@ export default function PlanejamentoProducao() {
                             <Input
                               type="text"
                               inputMode="decimal"
+                              value={isEditing(row.id, "quantidade_latas") ? editingNumeric!.value : (() => {
+                                const tf = (row.tipo_fruto ?? "").trim();
+                                if ((tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)) {
+                                  const calc = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? "");
+                                  if (calc !== 0) return formatNumber(calc);
+                                }
+                                return row.quantidade_latas != null && row.quantidade_latas !== 0 ? formatNumber(row.quantidade_latas) : "";
+                              })()}
+                              onFocus={() => {
+                                const tf = (row.tipo_fruto ?? "").trim();
+                                const disp = (tf === "Açaí" || tf === "Fruto") && (row.quantidade_kg != null && row.quantidade_kg !== 0)
+                                  ? formatNumber(calcPrevisaoLatasFromTipoFruto(row.quantidade_kg, row.tipo_fruto ?? ""))
+                                  : (row.quantidade_latas != null && row.quantidade_latas !== 0 ? formatNumber(row.quantidade_latas) : "");
+                                setEditingNumeric({ rowId: row.id, field: "quantidade_latas", value: disp });
+                              }}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "quantidade_latas" ? { ...p, value: v } : { rowId: row.id, field: "quantidade_latas", value: v }));
+                              }}
+                              onBlur={(e) => {
+                                const latasVal = parseFormattedNumber(isEditing(row.id, "quantidade_latas") ? editingNumeric?.value : e.target.value) || 0;
+                                setEditingNumeric(null);
+                                const liqPrev = calcQtdLiqPrev(latasVal, row.solid ?? null);
+                                const cortNum = (row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null);
+                                updateRow(row.id, { quantidade_latas: latasVal, quantidade_liquida_prevista: liqPrev, t_cort: formatNumber(calcTCort(cortNum, liqPrev)) || "" });
+                              }}
+                              className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
+                              placeholder="0"
+                            />
+                          </TableCell>
+                          <TableCell className="p-2 sm:p-4 text-center">
+                            <Input
+                              type="text"
+                              inputMode="decimal"
                               value={getNumericDisplay(row, "quantidade_kg", "")}
                               onFocus={() => setEditingNumeric({ rowId: row.id, field: "quantidade_kg", value: row.quantidade_kg != null && row.quantidade_kg !== 0 ? formatNumber(row.quantidade_kg) : "" })}
                               onChange={(e) => {
@@ -1690,13 +1781,15 @@ export default function PlanejamentoProducao() {
                               onBlur={(e) => {
                                 const kg = parseFormattedNumber(isEditing(row.id, "quantidade_kg") ? editingNumeric?.value : e.target.value) || 0;
                                 setEditingNumeric(null);
-                                const previsaoLatas = calcPrevisaoLatasFromTipoFruto(kg, row.tipo_fruto ?? "");
+                                const latasCalculado = calcPrevisaoLatasFromTipoFruto(kg, row.tipo_fruto ?? "");
                                 const payload: Partial<OCPPInsertPayload> = { quantidade_kg: kg };
                                 if ((row.tipo_fruto ?? "").trim() === "Açaí" || (row.tipo_fruto ?? "").trim() === "Fruto") {
-                                  payload.previsao_latas = previsaoLatas;
-                                  if (previsaoLatas !== 0) {
-                                    const cortSolid = calcCortSolid(previsaoLatas, row.solid ?? null);
-                                    const liqPrev = (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+                                  payload.quantidade_latas = latasCalculado;
+                                  payload.previsao_latas = 0;
+                                  if (latasCalculado !== 0) {
+                                    const cortSolid = calcCortSolid(latasCalculado, row.solid ?? null);
+                                    const liqPrev = calcQtdLiqPrev(latasCalculado, row.solid ?? null);
+                                    payload.quantidade_liquida_prevista = liqPrev;
                                     payload.cort_solid = formatNumber(cortSolid) || "";
                                     payload.t_cort = formatNumber(calcTCort(cortSolid, liqPrev)) || "";
                                   }
@@ -1753,17 +1846,21 @@ export default function PlanejamentoProducao() {
                                   payload.quantidade_basqueta = qtdBasqueta;
                                   payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
                                 }
-                                const previsaoLatas = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg ?? 0, newVal);
-                                payload.previsao_latas = previsaoLatas;
-                                if (previsaoLatas !== 0) {
-                                  const cortSolid = calcCortSolid(previsaoLatas, row.solid ?? null);
-                                  const liqPrev = (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+                                const latasCalculado = calcPrevisaoLatasFromTipoFruto(row.quantidade_kg ?? 0, newVal);
+                                payload.quantidade_latas = latasCalculado;
+                                payload.previsao_latas = 0;
+                                if (latasCalculado !== 0) {
+                                  const cortSolid = calcCortSolid(latasCalculado, row.solid ?? null);
+                                  const liqPrev = calcQtdLiqPrev(latasCalculado, row.solid ?? null);
+                                  payload.quantidade_liquida_prevista = liqPrev;
                                   payload.cort_solid = formatNumber(cortSolid) || "";
                                   payload.t_cort = formatNumber(calcTCort(cortSolid, liqPrev)) || "";
-                                  setRowField(row.id, "previsao_latas", previsaoLatas);
+                                  setRowField(row.id, "quantidade_latas", latasCalculado);
+                                  setRowField(row.id, "previsao_latas", 0);
                                   setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
                                   setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
                                 } else {
+                                  setRowField(row.id, "quantidade_latas", 0);
                                   setRowField(row.id, "previsao_latas", 0);
                                 }
                                 updateRow(row.id, payload);
@@ -2329,12 +2426,12 @@ export default function PlanejamentoProducao() {
                           </TableCell>
                           <TableCell className="p-2 sm:p-4 text-center">
                             <div className="flex h-8 sm:h-9 items-center justify-center rounded-md border border-primary/20 bg-primary/10 px-2 text-xs sm:text-sm font-bold text-primary">
-                              {formatTotal(totais.totalLatas)}
+                              {formatTotal(totais.totalPrevisaoLatas)}
                             </div>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4 text-center">
                             <div className="flex h-8 sm:h-9 items-center justify-center rounded-md border border-primary/20 bg-primary/10 px-2 text-xs sm:text-sm font-bold text-primary">
-                              {formatTotal(totais.totalPrevisaoLatas)}
+                              {formatTotal(totais.totalLatas)}
                             </div>
                           </TableCell>
                           <TableCell className="p-2 sm:p-4 text-center">

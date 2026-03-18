@@ -1,9 +1,10 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, CircleUser, Loader2, LogOut, Menu, Save } from "lucide-react";
+import { BarChart3, ChevronLeft, ChevronRight, CircleUser, Loader2, LogOut, Menu, Moon, Save, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { useSidebarContext } from "@/contexts/SidebarContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +40,7 @@ export function SiteHeader() {
   const pageTitle = routeTitles[pathname] || "";
   const { documentNav } = useDocumentNav();
   const { user, logout } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
   const { setMobileOpen } = useSidebarContext();
   const headerRef = useRef<HTMLElement>(null);
 
@@ -142,6 +144,35 @@ export function SiteHeader() {
         )}
 
         <div className="flex-1 min-w-0" />
+
+        {/* Toggle modo escuro — estilo dashboard futurista */}
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                aria-label={isDark ? "Ativar modo claro" : "Ativar modo escuro"}
+                className={cn(
+                  "h-9 w-9 sm:h-9 sm:w-9 shrink-0 rounded-xl border transition-all duration-300",
+                  "hover:scale-105 active:scale-95",
+                  "border-border/60 bg-background/80 backdrop-blur-sm hover:border-primary/40 hover:bg-primary/5",
+                  "dark:border-primary/30 dark:bg-primary/5 dark:shadow-[0_0_20px_rgba(var(--primary),0.15)] dark:hover:shadow-[0_0_24px_rgba(var(--primary),0.25)]"
+                )}
+              >
+                {isDark ? (
+                  <Sun className="h-4 w-4 text-amber-400/90 dark:text-amber-300" />
+                ) : (
+                  <Moon className="h-4 w-4 text-primary" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {isDark ? "Modo claro" : "Modo escuro"}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
         {/* Botão Salvar — visível apenas quando a tela for menor que 1024px */}
         {documentNav?.onSave && (

@@ -13,6 +13,7 @@ import {
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import { DocumentNavProvider } from "@/contexts/DocumentNavContext";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppSidebar } from "@/components/AppSidebar";
 import Login from "./pages/Login";
@@ -84,15 +85,17 @@ const router = createBrowserRouter([
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <AuthProvider>
-        <SidebarProvider>
-        <DocumentNavProvider>
-          <Toaster />
-          <Sonner />
-          <RouterProvider router={router} />
-        </DocumentNavProvider>
-      </SidebarProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <SidebarProvider>
+            <DocumentNavProvider>
+              <Toaster />
+              <Sonner />
+              <RouterProvider router={router} />
+            </DocumentNavProvider>
+          </SidebarProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

@@ -200,6 +200,8 @@ export type OCPPInsertPayload = {
   data: string;
   op?: string | null;
   filial_nome?: string | null;
+  doc_numero?: number | null;
+  doc_ordem_global?: number | null;
   Code?: number | string | null;
   descricao?: string | null;
   unidade?: string | null;
@@ -240,6 +242,8 @@ function ocppPayloadToBaseRow(payload: OCPPInsertPayload): Record<string, unknow
     data: payload.data.split("T")[0],
     op: payload.op ?? null,
     filial_nome: payload.filial_nome ?? null,
+    doc_numero: payload.doc_numero ?? null,
+    doc_ordem_global: payload.doc_ordem_global ?? null,
     code: payload.Code != null ? String(payload.Code) : null,
     descricao: payload.descricao ?? null,
     unidade: payload.unidade ?? null,

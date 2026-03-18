@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, MouseEvent, useCallback, useRef, RefObject } from "react";
+import { useState, useEffect, useMemo, MouseEvent, useCallback, useRef, type RefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck, FilePlus, Filter } from "lucide-react";
-import { ExportToPng, captureElementToPngBlob } from "@/components/ExportToPng";
+import { ExportToPng, captureElementToPngBlob, combinePngBlobsVertical } from "@/components/ExportToPng";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,7 @@ import {
   getDraft,
   saveDraft,
   getProducaoHistory,
+  getDashboardStats,
   subscribeOCPDRealtime,
   getOCTPByInicio,
   insertOCTP,
@@ -583,6 +584,10 @@ function Producao() {
     }
   }, [historicoVermelhoStorageKey, historicoLinhasVermelhas]);
   const [exportingAllPng, setExportingAllPng] = useState(false);
+  const [exportCombinedDialogOpen, setExportCombinedDialogOpen] = useState(false);
+  const [exportCombinedDate, setExportCombinedDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [exportCombinedFilialNome, setExportCombinedFilialNome] = useState<string>("");
+  const [exportingCombined, setExportingCombined] = useState(false);
 
   const [items, setItems] = useState<ProductionItem[]>([
     {
@@ -2649,6 +2654,206 @@ function Producao() {
     }
   };
 
+  // Gera blob PNG do gráfico "Planejado vs Realizado vs Diferença" (totais) para o relatório combinado
+  const createTotalsChartBlob = async (date: string, filialNome: string | undefined): Promise<Blob> => {
+    const stats = await getDashboardStats({ dataInicio: date, dataFim: date, filialNome: filialNome || undefined });
+    const planejado = parseFloat(String(stats.totalPlanejado || "0").replace(",", "."));
+    const realizado = parseFloat(String(stats.totalRealizado || "0").replace(",", "."));
+    const diferenca = parseFloat(String(stats.diferenca || "0").replace(",", "."));
+    const maxVal = Math.max(planejado, realizado, Math.abs(diferenca), 1);
+    const w = 800;
+    const h = 340;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas 2d não disponível");
+    // Fundo visível (cinza claro) e moldura para garantir que a imagem não fique em branco
+    ctx.fillStyle = "#f1f5f9";
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = "#cbd5e1";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, w - 2, h - 2);
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "bold 20px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Planejado vs Realizado vs Diferença", w / 2, 36);
+    ctx.font = "13px system-ui, sans-serif";
+    ctx.fillStyle = "#475569";
+    ctx.fillText(`Data: ${date}${filialNome ? ` · ${filialNome}` : ""}`, w / 2, 58);
+    const barH = 38;
+    const barMaxW = w - 220;
+    const left = 180;
+    const y1 = 100;
+    const y2 = 155;
+    const y3 = 210;
+    const drawBar = (y: number, value: number, label: string, color: string) => {
+      const width = maxVal > 0 ? (Math.abs(value) / maxVal) * barMaxW : 0;
+      ctx.fillStyle = "#e2e8f0";
+      ctx.fillRect(left, y - barH / 2, barMaxW, barH);
+      ctx.fillStyle = color;
+      ctx.fillRect(left, y - barH / 2, Math.min(width, barMaxW), barH);
+      ctx.fillStyle = "#0f172a";
+      ctx.textAlign = "left";
+      ctx.font = "600 14px system-ui, sans-serif";
+      ctx.fillText(label, 14, y + 6);
+      ctx.textAlign = "right";
+      ctx.fillText(Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 }), left - 10, y + 6);
+    };
+    drawBar(y1, planejado, "Planejado", "#2563eb");
+    drawBar(y2, realizado, "Realizado", "#16a34a");
+    drawBar(y3, diferenca, "Diferença", "#d97706");
+    const dataUrl = canvas.toDataURL("image/png");
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    if (!blob || blob.size === 0) throw new Error("Falha ao gerar PNG do gráfico");
+    return blob;
+  };
+
+  // Exporta relatório combinado (um único PNG): filtro por data e filial no dialog; inclui Reprocesso e Problemas e Ações só se houver dados
+  const exportCombinedReport = async () => {
+    const date = exportCombinedDate?.split("T")[0];
+    const filialNome = (exportCombinedFilialNome || "").trim() || undefined;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      toast({ title: "Data inválida", description: "Selecione uma data válida.", variant: "destructive" });
+      return;
+    }
+    setExportCombinedDialogOpen(false);
+    setExportingCombined(true);
+    const wasView = currentView;
+    let switchedToHistorico = false;
+    try {
+      // Garantir que a view do documento (não a grade) está visível para os refs dos gráficos existirem no DOM
+      setShowDocumentGridForDate(false);
+      await new Promise((r) => setTimeout(r, 100));
+
+      const result = await getProducaoHistory({ dataInicio: date, dataFim: date, filialNome, limit: 500 });
+      const byDoc = new Map<string, { data_dia: string; filial_nome: string; doc_id: string | null }>();
+      for (const row of result || []) {
+        const d = (row.data_dia || row.data_cabecalho || row.data) as string;
+        const dateStr = typeof d === "string" ? d.split("T")[0] : new Date(d).toISOString().split("T")[0];
+        const fn = (row.filial_nome || "").trim();
+        const docId = row.doc_id ?? null;
+        const key = `${dateStr}_${fn}_${docId}`;
+        if (!byDoc.has(key)) byDoc.set(key, { data_dia: dateStr, filial_nome: fn, doc_id: docId });
+      }
+      const firstDoc = byDoc.values().next().value;
+      if (firstDoc) {
+        await loadFromDatabase(firstDoc.data_dia, firstDoc.filial_nome, firstDoc.doc_id);
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+      setHistoryDataInicio(date);
+      setHistoryDataFim(date);
+      const filialCode = filialNome ? filiais.find((f) => (f.nome || "").trim() === filialNome)?.codigo ?? "todas" : "todas";
+      setHistoryFilialFilter(filialCode);
+      await loadHistory({ dataInicio: date, dataFim: date, filialCodigo: filialCode === "todas" ? undefined : filialCode });
+      await new Promise((r) => setTimeout(r, 800));
+
+      const blobs: Blob[] = [];
+      let totalsBlob: Blob;
+      try {
+        totalsBlob = await createTotalsChartBlob(date, filialNome);
+        blobs.push(totalsBlob);
+      } catch (e) {
+        console.error("createTotalsChartBlob failed:", e);
+        toast({ title: "Erro ao gerar gráfico de totais", description: "Verifique a conexão e tente novamente.", variant: "destructive" });
+        return;
+      }
+
+      const captureOne = async (
+        ref: RefObject<HTMLElement | null>,
+        opts?: { expandScrollable?: boolean; onBeforeCapture?: () => void | Promise<void>; onAfterCapture?: () => void | Promise<void> }
+      ): Promise<void> => {
+        const el = ref.current;
+        if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return;
+        el.scrollIntoView({ behavior: "instant", block: "center" });
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(undefined))));
+        await new Promise((r) => setTimeout(r, 350));
+        try {
+          const { blob } = await captureElementToPngBlob(el, { expandScrollable: opts?.expandScrollable ?? false, onBeforeCapture: opts?.onBeforeCapture, onAfterCapture: opts?.onAfterCapture });
+          blobs.push(blob);
+        } catch (err) {
+          console.warn("Captura de bloco falhou (será omitido):", err);
+        }
+      };
+
+      if (chartStatusProducaoRef.current) await captureOne(chartStatusProducaoRef);
+      if (chartPlanejadoRealizadoRef.current) await captureOne(chartPlanejadoRealizadoRef);
+      if (chartProducaoLinhaRef.current) await captureOne(chartProducaoLinhaRef);
+
+      if (currentView === "cadastro" && !historicoCardRef.current) {
+        setCurrentView("historico");
+        switchedToHistorico = true;
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      if (historicoCardRef.current) await captureOne(historicoCardRef, { expandScrollable: true });
+      if (switchedToHistorico) setCurrentView("cadastro");
+
+      if (reprocessos.length > 0 && reprocessoCardRef.current) {
+        await captureOne(reprocessoCardRef, {
+          expandScrollable: true,
+          onBeforeCapture: () => {
+            const card = reprocessoCardRef.current;
+            if (!card) return;
+            reprocessoExportRestoreRef.current = [];
+            const cells = card.querySelectorAll("table tbody tr td:nth-child(5)");
+            cells.forEach((cell) => {
+              const input = cell.querySelector("input");
+              if (!input) return;
+              const el = input as HTMLInputElement;
+              const value = el.value ?? "";
+              const wrapper = document.createElement("div");
+              wrapper.setAttribute("data-export-descricao", "true");
+              wrapper.className = "min-h-9 px-3 py-2 rounded-md border border-input bg-background text-sm whitespace-normal break-words w-full min-w-[200px]";
+              wrapper.textContent = value || "—";
+              el.style.display = "none";
+              cell.appendChild(wrapper);
+              reprocessoExportRestoreRef.current.push({ input: el, wrapper });
+            });
+          },
+          onAfterCapture: () => {
+            reprocessoExportRestoreRef.current.forEach(({ input, wrapper }) => {
+              wrapper.remove();
+              input.style.display = "";
+            });
+            reprocessoExportRestoreRef.current = [];
+          },
+        });
+      }
+      if (octpItemsFiltered.length > 0 && octpCardRef.current) await captureOne(octpCardRef, { expandScrollable: true });
+
+      let blobToDownload: Blob;
+      if (blobs.length === 1) {
+        blobToDownload = blobs[0];
+      } else {
+        try {
+          blobToDownload = await combinePngBlobsVertical(blobs);
+        } catch (e) {
+          console.warn("combinePngBlobsVertical failed, baixando só o gráfico de totais:", e);
+          blobToDownload = totalsBlob;
+        }
+      }
+
+      const fileName = `relatorio-producao-${date}${filialNome ? `-${String(filialNome).replace(/\s+/g, "-")}` : ""}.png`;
+      const url = URL.createObjectURL(blobToDownload);
+      const link = document.createElement("a");
+      link.download = fileName;
+      link.href = url;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast({ title: "Relatório exportado", description: blobs.length > 1 ? "Um único PNG foi gerado com todos os blocos." : "PNG gerado (gráfico de totais)." });
+    } catch (err) {
+      console.error("Erro ao exportar relatório combinado:", err);
+      if (switchedToHistorico) setCurrentView(wasView);
+      toast({ title: "Erro ao exportar", description: "Não foi possível gerar o relatório. Tente novamente.", variant: "destructive" });
+    } finally {
+      setExportingCombined(false);
+    }
+  };
+
   // Renderizar conteúdo baseado na view atual
   const renderContent = () => {
     // Tela de menu inicial
@@ -3042,24 +3247,6 @@ function Producao() {
                       <Save className="h-4 w-4 shrink-0" />
                     )}
                     <span className="hidden sm:inline">{saving ? "Salvando..." : "Salvar"}</span>
-                  </button>
-
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      exportAllProducaoAsPNG();
-                    }}
-                    disabled={exportingAllPng}
-                    className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-primary z-20 relative backdrop-blur-sm max-[891px]:w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Baixa 4 imagens. No celular (Android/iPhone) abre opção de enviar no WhatsApp."
-                  >
-                    {exportingAllPng ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                    ) : (
-                      <Download className="h-4 w-4 shrink-0" />
-                    )}
-                    <span className="hidden min-[791px]:inline">{exportingAllPng ? "Exportando…" : "Exportar PNG"}</span>
                   </button>
                 </div>
               </div>
