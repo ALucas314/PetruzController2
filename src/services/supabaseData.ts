@@ -963,20 +963,24 @@ export function computeDuracaoMinutos(horaInicio: string | null | undefined, hor
   return diff;
 }
 
-/** Busca registros OCTP vinculados a um documento específico (data + filial) e à data de início. */
+/**
+ * Busca registros OCTP do documento (problemas/ações).
+ * Quando `data_dia` existe no banco, filtra só por `data_dia` + `filial_nome` — a coluna `inicio` é a data
+ * editável de cada linha, não o documento; filtrar por `inicio === "hoje"` fazia sumir tudo ao abrir dias antigos.
+ */
 export async function getOCTPByInicio(
   inicio: string,
   dataDia?: string,
   filialNome?: string
 ): Promise<OCTPRow[]> {
   // select("*") para funcionar mesmo se as colunas hora_inicio/hora_final ainda não existirem (antes da migration)
-  let query = supabase
-    .from("OCTP")
-    .select("*")
-    .eq("inicio", inicio);
+  let query = supabase.from("OCTP").select("*");
 
   if (dataDia) {
     query = query.eq("data_dia", dataDia);
+  } else {
+    // Legado: registros sem data_dia preenchido
+    query = query.eq("inicio", inicio);
   }
   if (filialNome) {
     query = query.eq("filial_nome", filialNome);

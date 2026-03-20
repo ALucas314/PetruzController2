@@ -549,7 +549,6 @@ function Producao() {
   }, [documentsForSelectedDate, gridFilialFilterApplied, gridFilterNumeroDocApplied, allRecords]);
 
   // OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status)
-  const [octpInicio, setOctpInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
   /** Quando o usuário altera a hora final manualmente, guardamos o timestamp para contar a partir da hora selecionada até status Concluída */
   const [horaFinalBaseSetAt, setHoraFinalBaseSetAt] = useState<Record<number, number>>({});
@@ -1135,7 +1134,7 @@ function Producao() {
     setReprocessos(reprocessos.filter((r) => r.id !== id));
   };
 
-  // Carregar OCTP por data (início) + documento (dataCabecalhoSelecionada + filial)
+  // Carregar OCTP pelo documento: data_dia + filial (não usar "hoje" como filtro de inicio)
   const loadOCTP = useCallback(async () => {
     const dataDocumento = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
     const filialNome = filialSelecionadaObj?.nome ?? null;
@@ -1143,7 +1142,7 @@ function Producao() {
     setOctpLoading(true);
     try {
       const rows = await getOCTPByInicio(
-        octpInicio,
+        dataDocumento,
         dataDocumento,
         filialNome || undefined
       );
@@ -1155,7 +1154,7 @@ function Producao() {
           acao: r.acao ?? "",
           responsavel: r.responsavel ?? "",
           hora: r.hora ?? null,
-          inicio: r.inicio ?? octpInicio,
+          inicio: r.inicio ?? dataDocumento,
           horaInicio: r.hora_inicio != null ? String(r.hora_inicio).slice(0, 5) : "",
           horaFinal: r.hora_final != null ? String(r.hora_final).slice(0, 5) : "",
           duracaoMinutos: r.duracao_minutos ?? null,
@@ -1169,7 +1168,7 @@ function Producao() {
     } finally {
       setOctpLoading(false);
     }
-  }, [octpInicio, dataCabecalhoSelecionada, filialSelecionada, filiais, toast]);
+  }, [dataCabecalhoSelecionada, filialSelecionada, filiais, toast]);
 
 
   useEffect(() => {
@@ -1262,7 +1261,7 @@ function Producao() {
         problema: "",
         acao: "",
         responsavel: "",
-        inicio: octpInicio,
+        inicio: dataDocumento,
         descricao_status: "",
         dataDia: dataDocumento,
         filialNome: filialNome,
@@ -1276,7 +1275,7 @@ function Producao() {
           acao: inserted.acao ?? "",
           responsavel: inserted.responsavel ?? "",
           hora: inserted.hora ?? null,
-          inicio: inserted.inicio ?? octpInicio,
+          inicio: inserted.inicio ?? dataDocumento,
           horaInicio: inserted.hora_inicio != null ? String(inserted.hora_inicio).slice(0, 5) : "",
           horaFinal: inserted.hora_final != null ? String(inserted.hora_final).slice(0, 5) : "",
           duracaoMinutos: inserted.duracao_minutos ?? null,
