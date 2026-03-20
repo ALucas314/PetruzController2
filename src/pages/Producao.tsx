@@ -53,6 +53,7 @@ import {
   updateOCTP,
   deleteOCTP,
   computeDuracaoMinutos,
+  parseBrazilNumber,
   type OCTPRow,
 } from "@/services/supabaseData";
 import { useToast } from "@/hooks/use-toast";
@@ -118,6 +119,38 @@ const OCTP_STATUS_RELOGIO_PARADO = ["Concluída", "Concluída com atraso", "Não
 
 function isOCTPStatusRelogioParado(status: string | null | undefined): boolean {
   return status != null && (OCTP_STATUS_RELOGIO_PARADO as readonly string[]).includes(status);
+}
+
+/**
+ * Hora final de previsão (OCPD) que já passou no relógio, mas ainda há trabalho restante → valor antigo do banco
+ * ou cálculo desatualizado; deve ser substituída por hora atual + restante.
+ */
+function isOcpdHoraFinalPrevisaoObsoleta(
+  horaFinalStr: string,
+  agora: Date,
+  dataDia: string | undefined,
+  restanteHorasLabel: string | undefined
+): boolean {
+  const rest = (restanteHorasLabel ?? "").trim();
+  if (!rest || rest === "00:00" || /^0h\s*0m$/i.test(rest)) return false;
+  const t = String(horaFinalStr).trim();
+  if (!t) return false;
+  const normalized = t.slice(0, 8);
+  const parts = normalized.split(":").map((x) => parseInt(x, 10));
+  if (parts.length < 2 || parts.some((n) => Number.isNaN(n))) return false;
+  const hh = parts[0];
+  const mm = parts[1];
+  const ss = parts.length > 2 ? parts[2] : 0;
+  const rawDay = dataDia != null ? String(dataDia).split("T")[0] : "";
+  const ymd =
+    /^\d{4}-\d{2}-\d{2}$/.test(rawDay)
+      ? rawDay
+      : `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, "0")}-${String(agora.getDate()).padStart(2, "0")}`;
+  const target = new Date(
+    `${ymd}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
+  );
+  if (Number.isNaN(target.getTime())) return false;
+  return target.getTime() < agora.getTime();
 }
 
 /** Opções de status do OCTP com cor da bolinha */
@@ -611,10 +644,8 @@ function Producao() {
 
   // Calcular horas restantes para um item específico
   const calculateRestanteHorasForItem = useCallback((item: ProductionItem) => {
-    // Verificar se há valor em Calculo 1 Horas
-    const calculo1HorasValue = item.horasTrabalhadas
-      ? parseFloat(item.horasTrabalhadas.replace(",", "."))
-      : 0;
+    // Verificar se há valor em Calculo 1 Horas (formato BR: "1.500" = 1500, não 1,5)
+    const calculo1HorasValue = item.horasTrabalhadas ? parseBrazilNumber(item.horasTrabalhadas) : 0;
 
     if (calculo1HorasValue && calculo1HorasValue > 0) {
       try {
@@ -723,13 +754,19 @@ function Producao() {
       });
   }, [toast]);
 
-  // Atualizar horas restantes e hora final para cada item quando necessário (só preenche hora final se o usuário não tiver definido)
+  // Atualizar horas restantes e hora final para cada item quando necessário.
+  // Se hora_final do banco já passou mas ainda há restante, usar previsão dinâmica (agora + restante), não o valor fixo antigo.
   useEffect(() => {
     setItems((prevItems) =>
       prevItems.map((item) => {
         const restanteHoras = calculateRestanteHorasForItem(item);
         const horaFinalCalculada = calculateHoraFinalForItem({ ...item, restanteHoras });
-        const horaFinal = (item.horaFinal != null && String(item.horaFinal).trim() !== "") ? item.horaFinal : horaFinalCalculada;
+        const stored = item.horaFinal != null && String(item.horaFinal).trim() !== "";
+        const previsaoObsoleta =
+          stored &&
+          isOcpdHoraFinalPrevisaoObsoleta(item.horaFinal, currentTime, item.dataDia, restanteHoras);
+        const horaFinal =
+          !stored || previsaoObsoleta ? horaFinalCalculada : item.horaFinal;
         if (item.restanteHoras !== restanteHoras || item.horaFinal !== horaFinal) {
           return {
             ...item,
@@ -1717,6 +1754,10 @@ function Producao() {
               : new Date(dbItem.data_dia).toISOString().split("T")[0];
           }
 
+          /** Mesma regra do salvamento: evita parseFloat("8.300") === 8,3; diferença sempre planejada − realizada */
+          const planejada = parseFormattedNumber(dbItem.qtd_planejada);
+          const realizada = parseFormattedNumber(dbItem.qtd_realizada);
+
           return {
             id: dbItem.id ?? index + 1,
             ocpdId: dbItem.id != null ? Number(dbItem.id) : undefined,
@@ -1726,9 +1767,9 @@ function Producao() {
             codigoItem: dbItem.codigo_item || "",
             descricaoItem: dbItem.descricao_item || "",
             linha: dbItem.linha || "",
-            quantidadePlanejada: parseFloat(dbItem.qtd_planejada) || 0,
-            quantidadeRealizada: parseFloat(dbItem.qtd_realizada) || 0,
-            diferenca: parseFloat(dbItem.diferenca) || 0,
+            quantidadePlanejada: planejada,
+            quantidadeRealizada: realizada,
+            diferenca: planejada - realizada,
             horasTrabalhadas: dbItem.calculo_1_horas
               ? dbItem.calculo_1_horas.toString().replace(".", ",")
               : "",
@@ -3810,9 +3851,18 @@ function Producao() {
                         <Input
                           id={`horaFinal - ${item.id} `}
                           type="time"
-                          value={(item.horaFinal != null && String(item.horaFinal).trim() !== "")
-                            ? String(item.horaFinal).slice(0, 5)
-                            : calculateHoraFinalForItem(item).slice(0, 5)}
+                          value={(() => {
+                            const rest = item.restanteHoras ?? calculateRestanteHorasForItem(item);
+                            const calc = calculateHoraFinalForItem({ ...item, restanteHoras: rest });
+                            const stored = item.horaFinal != null && String(item.horaFinal).trim() !== "";
+                            if (
+                              stored &&
+                              !isOcpdHoraFinalPrevisaoObsoleta(item.horaFinal, currentTime, item.dataDia, rest)
+                            ) {
+                              return String(item.horaFinal).slice(0, 5);
+                            }
+                            return calc.slice(0, 5);
+                          })()}
                           onChange={(e) => updateItem(item.id, "horaFinal", e.target.value)}
                           className="h-9 sm:h-10 text-xs sm:text-sm font-mono font-semibold bg-primary/10 border-input text-primary"
                           title="Hora atual em tempo real quando vazio; altere se quiser definir outra hora"

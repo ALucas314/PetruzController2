@@ -487,6 +487,18 @@ export async function getProductionLines(params: { dataInicio: string; dataFim: 
   }));
 }
 
+/** Converte valor de quantidade no formato BR (ex.: "8.300" = 8300; "1.234,5") para número.
+ * Evita parseFloat("8.300") === 8.3, que corrompia OCPD ao salvar strings formatadas do front. */
+export function parseBrazilNumber(value: unknown): number {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number" && !Number.isNaN(value)) return value;
+  const s = String(value).trim();
+  if (!s) return 0;
+  const cleaned = s.replace(/\./g, "").replace(",", ".");
+  const n = Number.parseFloat(cleaned);
+  return Number.isNaN(n) ? 0 : n;
+}
+
 // --- Produção (OCPD) load ---
 /** docId: quando informado, carrega só as linhas desse documento. Quando null/undefined, carrega documento "legado" (doc_id IS NULL). docOrdemGlobal: quando docId é null, filtra por doc_ordem_global para identificar qual documento legado carregar. */
 export async function loadProducao(params: { data?: string; filialNome?: string; docId?: string | null; docOrdemGlobal?: number | null }) {
@@ -555,8 +567,12 @@ export async function saveProducao(payload: {
   totalReprocesso?: number | string;
 }) {
   const { dataDia, filialNome, docId, items, existingIds, reprocessos, latasPrevista = 0, latasRealizadas = 0, latasBatidas = 0, totalCortado = 0, percentualMeta: pctMeta = 0, totalReprocesso: totalRep = 0 } = payload;
-  const totalReprocesso = (reprocessos || []).reduce((s, r) => s + parseFloat(String(r.quantidade ?? 0)), 0);
-  const pct = items.length ? (items.reduce((s, i) => s + parseFloat(String(i.quantidadeRealizada ?? i.qtd_realizada ?? 0)), 0) / (items.reduce((s, i) => s + parseFloat(String(i.quantidadePlanejada ?? i.qtd_planejada ?? 0)), 0) || 1)) * 100 : parseFloat(String(pctMeta));
+  const totalReprocesso = (reprocessos || []).reduce((s, r) => s + parseBrazilNumber(r.quantidade ?? 0), 0);
+  const pct = items.length
+    ? (items.reduce((s, i) => s + parseBrazilNumber(i.quantidadeRealizada ?? i.qtd_realizada ?? 0), 0) /
+        (items.reduce((s, i) => s + parseBrazilNumber(i.quantidadePlanejada ?? i.qtd_planejada ?? 0), 0) || 1)) *
+      100
+    : parseBrazilNumber(pctMeta);
   const firstRep = reprocessos && reprocessos.length > 0 ? reprocessos[0] : null;
 
   // OCPD exige line_id (BIGINT NOT NULL): mapear código da linha (linha) para id da OCLP
@@ -621,9 +637,11 @@ export async function saveProducao(payload: {
     codigo_item: item.codigoItem ?? item.codigo ?? null,
     descricao_item: item.descricaoItem ?? item.descricao ?? null,
     linha: item.linha ?? null,
-    qtd_planejada: parseFloat(String(item.quantidadePlanejada ?? item.qtd_planejada ?? 0)),
-    qtd_realizada: parseFloat(String(item.quantidadeRealizada ?? item.qtd_realizada ?? 0)),
-    diferenca: parseFloat(String(item.diferenca ?? 0)),
+    qtd_planejada: parseBrazilNumber(item.quantidadePlanejada ?? item.qtd_planejada ?? 0),
+    qtd_realizada: parseBrazilNumber(item.quantidadeRealizada ?? item.qtd_realizada ?? 0),
+    diferenca:
+      parseBrazilNumber(item.quantidadePlanejada ?? item.qtd_planejada ?? 0) -
+      parseBrazilNumber(item.quantidadeRealizada ?? item.qtd_realizada ?? 0),
     calculo_1_horas: (() => {
       const v = item.horasTrabalhadas ?? item.calculo_1_horas ?? null;
       if (v == null || v === "") return null;
