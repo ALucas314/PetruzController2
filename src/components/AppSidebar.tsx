@@ -56,7 +56,7 @@ const menuItems: MenuItem[] = [
 // LOGO COMPONENT
 // ============================================================================
 
-const SidebarLogo = memo(({ collapsed }: { collapsed: boolean }) => (
+const SidebarLogo = memo(({ collapsed, showLabels }: { collapsed: boolean; showLabels: boolean }) => (
   <div className={cn(
     "relative flex h-20 items-center border-b border-sidebar-border/60 bg-gradient-to-br from-sidebar/95 via-sidebar to-sidebar/90 transition-all duration-300 shadow-sm",
     collapsed ? "justify-center px-0" : "gap-3 px-4"
@@ -68,8 +68,8 @@ const SidebarLogo = memo(({ collapsed }: { collapsed: boolean }) => (
       <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-white/20 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300" />
       <BarChart3 className="relative h-5 w-5 text-sidebar-primary-foreground transition-transform duration-300 hover:rotate-12 drop-shadow-sm" />
     </div>
-    {!collapsed && (
-      <div className="flex-1 min-w-0 relative z-10">
+    {!collapsed && showLabels && (
+      <div className="flex-1 min-w-0 relative z-10 animate-in fade-in duration-200">
         <div className="space-y-0.5">
           <span className="text-base font-bold text-sidebar-accent-foreground tracking-tight leading-tight block whitespace-nowrap">
             ERP Controladoria
@@ -91,12 +91,13 @@ SidebarLogo.displayName = "SidebarLogo";
 interface SubNavItemProps {
   subItem: SubMenuItem;
   isActive: boolean;
-  collapsed: boolean;
+  /** Ícone só + tooltip (sidebar fechada ou ainda abrindo) */
+  iconOnly: boolean;
   onNavigate: () => void;
   currentPath: string; // Adicionar path atual como prop
 }
 
-const SubNavItem = memo(({ subItem, isActive, collapsed, onNavigate, currentPath }: SubNavItemProps) => {
+const SubNavItem = memo(({ subItem, isActive, iconOnly, onNavigate, currentPath }: SubNavItemProps) => {
   const Icon = subItem.icon;
   const [isHovered, setIsHovered] = useState(false);
 
@@ -119,7 +120,7 @@ const SubNavItem = memo(({ subItem, isActive, collapsed, onNavigate, currentPath
         "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium min-w-0",
         "ml-6 transition-all duration-300 ease-out",
         "hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground hover:translate-x-1 hover:shadow-md",
-        collapsed && "justify-center px-2 ml-0 hover:translate-x-0",
+        iconOnly && "justify-center px-2 ml-0 hover:translate-x-0",
         effectiveIsActive && "bg-gradient-to-r from-sidebar-accent to-sidebar-accent/90 text-sidebar-accent-foreground shadow-lg shadow-sidebar-primary/20"
       )}
       activeClassName="bg-gradient-to-r from-sidebar-accent to-sidebar-accent/90 text-sidebar-accent-foreground shadow-lg shadow-sidebar-primary/20"
@@ -136,8 +137,8 @@ const SubNavItem = memo(({ subItem, isActive, collapsed, onNavigate, currentPath
         isHovered && "scale-110 rotate-3"
       )} />
 
-      {!collapsed && (
-        <span className="flex-1 min-w-0 whitespace-normal break-words text-left leading-snug transition-all duration-300">
+      {!iconOnly && (
+        <span className="flex-1 min-w-0 whitespace-normal break-words text-left leading-snug animate-in fade-in duration-200">
           {subItem.title}
         </span>
       )}
@@ -147,7 +148,7 @@ const SubNavItem = memo(({ subItem, isActive, collapsed, onNavigate, currentPath
     </NavLink>
   );
 
-  if (collapsed) {
+  if (iconOnly) {
     return (
       <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>
@@ -174,7 +175,7 @@ const SubNavItem = memo(({ subItem, isActive, collapsed, onNavigate, currentPath
 
   return (
     prevProps.subItem.url === nextProps.subItem.url &&
-    prevProps.collapsed === nextProps.collapsed
+    prevProps.iconOnly === nextProps.iconOnly
   );
 });
 SubNavItem.displayName = "SubNavItem";
@@ -186,7 +187,7 @@ SubNavItem.displayName = "SubNavItem";
 interface NavItemWithSubmenuProps {
   item: MenuItem;
   isActive: boolean;
-  collapsed: boolean;
+  iconOnly: boolean;
   onNavigate: () => void;
   location: { pathname: string };
   isExpanded: boolean;
@@ -196,7 +197,7 @@ interface NavItemWithSubmenuProps {
 const NavItemWithSubmenu = memo(({
   item,
   isActive,
-  collapsed,
+  iconOnly,
   onNavigate,
   location,
   isExpanded,
@@ -217,14 +218,14 @@ const NavItemWithSubmenu = memo(({
 
   const handleItemClick = useCallback((e: React.MouseEvent) => {
     // Para itens com subitens, alterna a expansão
-    if (hasSubItems && !collapsed) {
+    if (hasSubItems && !iconOnly) {
       e.preventDefault();
       e.stopPropagation();
       onToggleExpand();
     } else {
       onNavigate();
     }
-  }, [hasSubItems, collapsed, onToggleExpand, onNavigate]);
+  }, [hasSubItems, iconOnly, onToggleExpand, onNavigate]);
 
   // Para itens com subitens, usa o primeiro subitem como URL se não houver URL próprio
   const getNavLinkTo = () => {
@@ -245,7 +246,7 @@ const NavItemWithSubmenu = memo(({
         "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold min-w-0",
         "transition-all duration-300 ease-out",
         "hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground hover:translate-x-1 hover:shadow-md",
-        collapsed && "justify-center px-2 hover:translate-x-0",
+        iconOnly && "justify-center px-2 hover:translate-x-0",
         (isActive || isSubItemActive) && "bg-gradient-to-r from-sidebar-accent to-sidebar-accent/90 text-sidebar-accent-foreground shadow-lg shadow-sidebar-primary/20"
       )}
       activeClassName="bg-sidebar-accent text-sidebar-accent-foreground shadow-md"
@@ -262,9 +263,9 @@ const NavItemWithSubmenu = memo(({
         isHovered && "scale-110 rotate-3"
       )} />
 
-      {!collapsed && (
+      {!iconOnly && (
         <>
-          <span className="flex-1 min-w-0 whitespace-normal break-words text-left leading-snug transition-all duration-300">
+          <span className="flex-1 min-w-0 whitespace-normal break-words text-left leading-snug animate-in fade-in duration-200">
             {item.title}
           </span>
           {hasSubItems && (
@@ -282,7 +283,7 @@ const NavItemWithSubmenu = memo(({
     </NavLink>
   );
 
-  if (collapsed) {
+  if (iconOnly) {
     return (
       <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>
@@ -315,7 +316,7 @@ const NavItemWithSubmenu = memo(({
                   key={subItem.url}
                   subItem={subItem}
                   isActive={isSubActive}
-                  collapsed={collapsed}
+                  iconOnly={iconOnly}
                   onNavigate={onNavigate}
                   currentPath={location.pathname}
                 />
@@ -329,7 +330,7 @@ const NavItemWithSubmenu = memo(({
 }, (prevProps, nextProps) => {
   if (
     prevProps.item.title !== nextProps.item.title ||
-    prevProps.collapsed !== nextProps.collapsed ||
+    prevProps.iconOnly !== nextProps.iconOnly ||
     prevProps.isExpanded !== nextProps.isExpanded
   ) {
     return false;
@@ -356,11 +357,11 @@ NavItemWithSubmenu.displayName = "NavItemWithSubmenu";
 interface NavItemProps {
   item: MenuItem;
   isActive: boolean;
-  collapsed: boolean;
+  iconOnly: boolean;
   onNavigate: () => void;
 }
 
-const NavItem = memo(({ item, isActive, collapsed, onNavigate }: NavItemProps) => {
+const NavItem = memo(({ item, isActive, iconOnly, onNavigate }: NavItemProps) => {
   const Icon = item.icon;
   const [isHovered, setIsHovered] = useState(false);
 
@@ -375,7 +376,7 @@ const NavItem = memo(({ item, isActive, collapsed, onNavigate }: NavItemProps) =
         "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold min-w-0",
         "transition-all duration-300 ease-out",
         "hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground hover:translate-x-1 hover:shadow-md",
-        collapsed && "justify-center px-2 hover:translate-x-0",
+        iconOnly && "justify-center px-2 hover:translate-x-0",
         isActive && "bg-gradient-to-r from-sidebar-accent to-sidebar-accent/90 text-sidebar-accent-foreground shadow-lg shadow-sidebar-primary/20"
       )}
       activeClassName="bg-sidebar-accent text-sidebar-accent-foreground shadow-md"
@@ -392,8 +393,8 @@ const NavItem = memo(({ item, isActive, collapsed, onNavigate }: NavItemProps) =
         isHovered && "scale-110 rotate-3"
       )} />
 
-      {!collapsed && (
-        <span className="flex-1 min-w-0 whitespace-normal break-words text-left leading-snug transition-all duration-300">
+      {!iconOnly && (
+        <span className="flex-1 min-w-0 whitespace-normal break-words text-left leading-snug animate-in fade-in duration-200">
           {item.title}
         </span>
       )}
@@ -403,7 +404,7 @@ const NavItem = memo(({ item, isActive, collapsed, onNavigate }: NavItemProps) =
     </NavLink>
   );
 
-  if (collapsed) {
+  if (iconOnly) {
     return (
       <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>
@@ -425,7 +426,7 @@ const NavItem = memo(({ item, isActive, collapsed, onNavigate }: NavItemProps) =
 
   return (
     prevProps.item.url === nextProps.item.url &&
-    prevProps.collapsed === nextProps.collapsed
+    prevProps.iconOnly === nextProps.iconOnly
   );
 });
 NavItem.displayName = "NavItem";
@@ -436,6 +437,10 @@ NavItem.displayName = "NavItem";
 
 interface SidebarContentProps {
   collapsed: boolean;
+  /** Textos do menu só depois da animação de largura (evita texto espremido ao expandir) */
+  showExpandedLabels: boolean;
+  /** Drawer mobile: sempre ícone + texto (não herdar `collapsed` do desktop) */
+  isInMobileSheet?: boolean;
   location: { pathname: string };
   onNavigate: () => void;
   onToggleCollapse: () => void;
@@ -445,12 +450,17 @@ interface SidebarContentProps {
 
 const SidebarContent = memo(({
   collapsed,
+  showExpandedLabels,
+  isInMobileSheet = false,
   location,
   onNavigate,
   onToggleCollapse,
   expandedItems,
   onToggleExpand
 }: SidebarContentProps) => {
+  const iconOnly = isInMobileSheet ? false : collapsed || !showExpandedLabels;
+  const logoCollapsed = isInMobileSheet ? false : collapsed;
+  const logoShowLabels = isInMobileSheet ? true : showExpandedLabels;
   const expandedItemsKey = useMemo(() => {
     return Array.from(expandedItems).sort().join(',');
   }, [expandedItems]);
@@ -472,7 +482,7 @@ const SidebarContent = memo(({
 
   return (
     <>
-      <SidebarLogo collapsed={collapsed} />
+      <SidebarLogo collapsed={logoCollapsed} showLabels={logoShowLabels} />
 
       <nav className="flex-1 space-y-2 py-4 overflow-y-auto overflow-x-hidden min-w-0 px-3 scrollbar-thin scrollbar-thumb-sidebar-accent/50 scrollbar-track-transparent hover:scrollbar-thumb-sidebar-accent transition-colors">
         {navItems.map(({ item, isActive, isExpanded }) => {
@@ -482,7 +492,7 @@ const SidebarContent = memo(({
                 key={item.title}
                 item={item}
                 isActive={isActive}
-                collapsed={collapsed}
+                iconOnly={iconOnly}
                 onNavigate={onNavigate}
                 location={location}
                 isExpanded={isExpanded}
@@ -495,7 +505,7 @@ const SidebarContent = memo(({
               key={item.title}
               item={item}
               isActive={isActive}
-              collapsed={collapsed}
+              iconOnly={iconOnly}
               onNavigate={onNavigate}
             />
           );
@@ -534,6 +544,8 @@ const SidebarContent = memo(({
 
   return (
     prevProps.collapsed === nextProps.collapsed &&
+    prevProps.showExpandedLabels === nextProps.showExpandedLabels &&
+    prevProps.isInMobileSheet === nextProps.isInMobileSheet &&
     prevExpanded === nextExpanded
   );
 });
@@ -543,10 +555,31 @@ SidebarContent.displayName = "SidebarContent";
 // MAIN SIDEBAR COMPONENT
 // ============================================================================
 
+/** Igual à transição `duration-300` da largura do aside desktop */
+const SIDEBAR_WIDTH_TRANSITION_MS = 320;
+
 export const AppSidebar = memo(function AppSidebar() {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebarContext();
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [showExpandedLabels, setShowExpandedLabels] = useState(!collapsed);
+  /** Primeira vez já expandida no mount: não atrasar rótulos com timeout */
+  const skipExpandLabelDelayRef = useRef(!collapsed);
   const location = useLocation();
+
+  // Ao expandir a sidebar (desktop), só mostrar textos depois da animação de largura
+  useEffect(() => {
+    if (collapsed) {
+      setShowExpandedLabels(false);
+      return;
+    }
+    if (skipExpandLabelDelayRef.current) {
+      skipExpandLabelDelayRef.current = false;
+      setShowExpandedLabels(true);
+      return;
+    }
+    const id = window.setTimeout(() => setShowExpandedLabels(true), SIDEBAR_WIDTH_TRANSITION_MS);
+    return () => window.clearTimeout(id);
+  }, [collapsed]);
 
   // Expandir automaticamente itens que têm subitens ativos
   useEffect(() => {
@@ -587,12 +620,13 @@ export const AppSidebar = memo(function AppSidebar() {
 
   const sidebarContentProps = useMemo(() => ({
     collapsed,
+    showExpandedLabels,
     location,
     onNavigate: handleMobileNavigate,
     onToggleCollapse: toggleCollapsed,
     expandedItems,
     onToggleExpand: handleToggleExpand,
-  }), [collapsed, location, handleMobileNavigate, toggleCollapsed, expandedItemsKey, handleToggleExpand]);
+  }), [collapsed, showExpandedLabels, location, handleMobileNavigate, toggleCollapsed, expandedItemsKey, handleToggleExpand]);
 
   return (
     <>
@@ -607,7 +641,7 @@ export const AppSidebar = memo(function AppSidebar() {
           }}
         >
           <div className="flex h-full flex-col">
-            <SidebarContent {...sidebarContentProps} />
+            <SidebarContent {...sidebarContentProps} isInMobileSheet />
           </div>
         </SheetContent>
       </Sheet>

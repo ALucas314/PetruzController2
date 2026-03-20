@@ -1,4 +1,5 @@
 import { useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { toPng } from "html-to-image";
 import { Button } from "@/components/ui/button";
 import { ImageDown, Loader2 } from "lucide-react";
@@ -27,6 +28,23 @@ export interface ExportToPngProps {
 }
 
 type RestoreStyle = { el: HTMLElement; styles: Record<string, string> };
+
+/**
+ * Remove temporariamente a classe `dark` do `<html>` durante a captura.
+ * No modo escuro, o fundo do PNG é branco mas o DOM ainda usava cores `dark:` / variáveis escuras — texto claro em fundo branco.
+ */
+export async function runWithLightThemeForCapture<T>(work: () => Promise<T>): Promise<T> {
+  const root = document.documentElement;
+  const hadDark = root.classList.contains("dark");
+  if (hadDark) root.classList.remove("dark");
+  try {
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    await new Promise((r) => setTimeout(r, 120));
+    return await work();
+  } finally {
+    if (hadDark) root.classList.add("dark");
+  }
+}
 
 /** Expande temporariamente overflow e tamanhos para capturar conteúdo completo (ex.: tabela inteira no celular). */
 function expandScrollableContainers(root: HTMLElement): RestoreStyle[] {
@@ -229,15 +247,17 @@ export async function captureElementToPngBlob(
       await new Promise((r) => setTimeout(r, 150));
     }
 
-    const dataUrl = await toPng(element, {
-      backgroundColor: "#ffffff",
-      pixelRatio: 2,
-      quality: 1.0,
-      cacheBust: true,
-      skipAutoScale: false,
-      skipFonts: false,
-      filter: () => true,
-    });
+    const dataUrl = await runWithLightThemeForCapture(() =>
+      toPng(element, {
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+        quality: 1.0,
+        cacheBust: true,
+        skipAutoScale: false,
+        skipFonts: false,
+        filter: () => true,
+      })
+    );
 
     const img = new Image();
     img.src = dataUrl;
@@ -330,15 +350,17 @@ export function ExportToPng({
         await new Promise((r) => setTimeout(r, 150));
       }
 
-      const dataUrl = await toPng(element, {
-        backgroundColor: "#ffffff",
-        pixelRatio: 2,
-        quality: 1.0,
-        cacheBust: true,
-        skipAutoScale: false,
-        skipFonts: false,
-        filter: () => true,
-      });
+      const dataUrl = await runWithLightThemeForCapture(() =>
+        toPng(element, {
+          backgroundColor: "#ffffff",
+          pixelRatio: 2,
+          quality: 1.0,
+          cacheBust: true,
+          skipAutoScale: false,
+          skipFonts: false,
+          filter: () => true,
+        })
+      );
 
       const img = new Image();
       img.src = dataUrl;
@@ -401,21 +423,37 @@ export function ExportToPng({
   };
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      onClick={handleExport}
-      disabled={disabled || exporting}
-      className={`gap-2 ${className ?? ""}`}
-      title={title ?? "Baixar histórico como imagem PNG"}
-    >
-      {exporting ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : (
-        <ImageDown className="h-4 w-4 shrink-0" />
-      )}
-      <span className="hidden min-[791px]:inline">{label}</span>
-    </Button>
+    <>
+      {exporting &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 backdrop-blur-[2px]"
+            aria-hidden
+          >
+            <div className="flex items-center gap-3 rounded-xl border border-border/80 bg-card px-5 py-3 shadow-lg">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <span className="text-sm font-medium text-foreground">Gerando imagem…</span>
+            </div>
+          </div>,
+          document.body
+        )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={handleExport}
+        disabled={disabled || exporting}
+        className={`gap-2 ${className ?? ""}`}
+        title={title ?? "Baixar histórico como imagem PNG"}
+      >
+        {exporting ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <ImageDown className="h-4 w-4 shrink-0" />
+        )}
+        <span className="hidden min-[791px]:inline">{label}</span>
+      </Button>
+    </>
   );
 }

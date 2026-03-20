@@ -14,6 +14,7 @@ import {
 import { getItemByCode } from "@/services/supabaseData";
 import { Plus, Trash2, Factory, Download, Calendar, FileText, Clock } from "lucide-react";
 import { toPng } from "html-to-image";
+import { runWithLightThemeForCapture } from "@/components/ExportToPng";
 
 interface PlanejamentoItem {
     id: number;
@@ -254,18 +255,18 @@ export default function PlanejamentoPCP() {
 
             const element = planejamentoCardRef.current;
 
-            // Capturar o elemento usando html-to-image
-            const dataUrl = await toPng(element, {
-                backgroundColor: "#ffffff",
-                pixelRatio: 2,
-                quality: 1.0,
-                cacheBust: true,
-                skipAutoScale: false,
-                skipFonts: false,
-                filter: (node) => {
-                    return true;
-                },
-            });
+            // Captura com tema claro momentâneo (evita PNG com fundo branco e texto/cores do modo escuro)
+            const dataUrl = await runWithLightThemeForCapture(() =>
+                toPng(element, {
+                    backgroundColor: "#ffffff",
+                    pixelRatio: 2,
+                    quality: 1.0,
+                    cacheBust: true,
+                    skipAutoScale: false,
+                    skipFonts: false,
+                    filter: () => true,
+                })
+            );
 
             // Criar imagem a partir do data URL
             const img = new Image();
