@@ -405,7 +405,7 @@ export async function getItemByCode(code: string) {
 export async function getDashboardStats(params: { dataInicio: string; dataFim: string; filialNome?: string }) {
   let query = supabase
     .from("OCPD")
-    .select("qtd_planejada, qtd_realizada, diferenca, percentual_meta, data_dia")
+    .select("qtd_planejada, qtd_realizada, diferenca, data_dia")
     .gte("data_dia", params.dataInicio)
     .lte("data_dia", params.dataFim);
   if (params.filialNome) query = query.eq("filial_nome", params.filialNome);
@@ -414,8 +414,8 @@ export async function getDashboardStats(params: { dataInicio: string; dataFim: s
   const totalPlanejado = (data || []).reduce((s, i) => s + parseFloat(String(i.qtd_planejada || 0)), 0);
   const totalRealizado = (data || []).reduce((s, i) => s + parseFloat(String(i.qtd_realizada || 0)), 0);
   const diferenca = totalPlanejado - totalRealizado;
-  const percentuais = (data || []).map((i) => parseFloat(String(i.percentual_meta || 0))).filter((p) => p > 0);
-  const percentualMeta = percentuais.length > 0 ? percentuais.reduce((a, b) => a + b, 0) / percentuais.length : 0;
+  // Mesmo critério do gráfico "Status de Produção" e da Produção: total realizado ÷ total planejado (não média por linha)
+  const percentualMeta = totalPlanejado > 0 ? (totalRealizado / totalPlanejado) * 100 : 0;
   const variacaoPercentual = totalPlanejado > 0 ? ((totalRealizado - totalPlanejado) / totalPlanejado) * 100 : 0;
   return {
     totalPlanejado: totalPlanejado.toFixed(2),

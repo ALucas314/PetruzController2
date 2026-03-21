@@ -15,12 +15,6 @@ export interface DocumentNavState {
   onNewDocument: () => void;
   /** Texto opcional: "3 de 12" */
   navLabel?: string;
-  /** Estado de salvamento (para botão Salvar no header) */
-  saving?: boolean;
-  /** Pode salvar (ex.: há itens para salvar; desabilita igual ao botão principal) */
-  canSave?: boolean;
-  /** Ação de salvar documento atual (para botão Salvar no header) */
-  onSave?: () => void;
 }
 
 type DocumentNavStateNullable = DocumentNavState | null;

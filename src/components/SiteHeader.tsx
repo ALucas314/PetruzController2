@@ -1,11 +1,12 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, CircleUser, LogOut, Menu, Moon, Sun } from "lucide-react";
+import { BarChart3, Bell, ChevronLeft, ChevronRight, CircleUser, LogOut, Menu, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSidebarContext } from "@/contexts/SidebarContext";
+import { useLoadNotifications, formatLoadNotificationDocLabel } from "@/contexts/LoadNotificationsContext";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -21,6 +22,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const routeTitles: Record<string, string> = {
   "/dashboard": "Painel de Controle",
@@ -33,6 +36,14 @@ const routeTitles: Record<string, string> = {
   "/relatorios": "Relatórios",
 };
 
+function formatDataDiaBR(iso: string): string {
+  const day = iso.split("T")[0];
+  const parts = day.split("-");
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts;
+  return `${d}/${m}/${y}`;
+}
+
 export function SiteHeader() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -42,6 +53,8 @@ export function SiteHeader() {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const { setMobileOpen } = useSidebarContext();
+  const { notifications, clearLoadNotifications } = useLoadNotifications();
+  const notifCount = notifications.length;
   const headerRef = useRef<HTMLElement>(null);
 
   const hasDocNav = !!documentNav?.showNav;
@@ -144,6 +157,107 @@ export function SiteHeader() {
         )}
 
         <div className="flex-1 min-w-0" />
+
+        <Popover>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "relative h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 shrink-0 rounded-xl border transition-all duration-300",
+                      "border-border/60 bg-background/80 backdrop-blur-sm hover:border-primary/40 hover:bg-primary/5",
+                      notifCount > 0 && "border-primary/35 bg-primary/5"
+                    )}
+                    aria-label={
+                      notifCount > 0
+                        ? `Notificações de carregamento, ${notifCount} evento(s)`
+                        : "Notificações de carregamento"
+                    }
+                  >
+                    <Bell className="h-4 w-4 text-primary" />
+                    {notifCount > 0 ? (
+                      <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground">
+                        {notifCount > 99 ? "99+" : notifCount}
+                      </span>
+                    ) : null}
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Carregamentos do banco (Produção)</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <PopoverContent
+            align="end"
+            className="z-[100] w-[min(22rem,calc(100vw-2rem))] p-0"
+            sideOffset={8}
+          >
+            <div className="border-b border-border/60 px-3 py-2.5">
+              <p className="text-sm font-semibold leading-tight">Carregamentos</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Documento e quantidade de itens OCPD carregados
+              </p>
+            </div>
+            <ScrollArea className="h-[min(20rem,50vh)]">
+              {notifications.length === 0 ? (
+                <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  Nenhum carregamento nesta sessão.
+                </p>
+              ) : (
+                <ul className="space-y-1.5 p-2">
+                  {notifications.map((n) => (
+                    <li
+                      key={n.id}
+                      className="rounded-lg border border-border/50 bg-muted/25 px-2.5 py-2 text-sm"
+                    >
+                      <div className="font-medium text-foreground leading-snug">
+                        {formatLoadNotificationDocLabel(n)}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground leading-snug">
+                        <span className="font-medium text-foreground/90">{n.itemCount}</span>
+                        {n.itemCount === 1 ? " item" : " itens"}
+                        {" · "}
+                        {formatDataDiaBR(n.dataDia)}
+                        {n.filialNome ? (
+                          <>
+                            {" · "}
+                            <span className="break-words" title={n.filialNome}>
+                              {n.filialNome.length > 40 ? `${n.filialNome.slice(0, 38)}…` : n.filialNome}
+                            </span>
+                          </>
+                        ) : null}
+                      </div>
+                      <div className="mt-1 text-[10px] text-muted-foreground/85 tabular-nums">
+                        {new Date(n.at).toLocaleString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </ScrollArea>
+            {notifications.length > 0 ? (
+              <div className="border-t border-border/60 p-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-full text-xs text-muted-foreground hover:text-foreground"
+                  onClick={clearLoadNotifications}
+                >
+                  Limpar lista
+                </Button>
+              </div>
+            ) : null}
+          </PopoverContent>
+        </Popover>
 
         {/* Toggle modo escuro — estilo dashboard futurista */}
         <TooltipProvider delayDuration={300}>

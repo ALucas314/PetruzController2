@@ -58,6 +58,7 @@ import {
 } from "@/services/supabaseData";
 import { useToast } from "@/hooks/use-toast";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
+import { useLoadNotifications } from "@/contexts/LoadNotificationsContext";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface ProductionItem {
@@ -303,6 +304,7 @@ function Producao() {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { addLoadNotification } = useLoadNotifications();
   const { user } = useAuth();
   const { setDocumentNav, documentNav } = useDocumentNav();
   const producaoCardRef = useRef<HTMLDivElement>(null);
@@ -1840,10 +1842,32 @@ function Producao() {
 
         // Adicionar a data ao conjunto de datas disponíveis
         setAvailableDates(prev => new Set([...prev, dataToLoad]));
-        toast({
-          title: "Dados carregados",
-          description: `${result.count} item(ns) carregado(s) do banco!`,
-          variant: "default",
+        const firstDb = result.data[0] as Record<string, unknown>;
+        const docNumero =
+          firstDb.doc_numero != null && firstDb.doc_numero !== ""
+            ? Number(firstDb.doc_numero)
+            : null;
+        const docOrdemGlobal =
+          firstDb.doc_ordem_global != null && firstDb.doc_ordem_global !== ""
+            ? Number(firstDb.doc_ordem_global)
+            : null;
+        const dataDiaNotif =
+          loadedItems[0]?.dataDia ??
+          (firstDb.data_dia
+            ? typeof firstDb.data_dia === "string"
+              ? firstDb.data_dia.split("T")[0]
+              : new Date(firstDb.data_dia as string).toISOString().split("T")[0]
+            : dataToLoad);
+        const filialNome =
+          firstDb.filial_nome != null && String(firstDb.filial_nome).trim() !== ""
+            ? String(firstDb.filial_nome)
+            : null;
+        addLoadNotification({
+          dataDia: dataDiaNotif,
+          docNumero: docNumero != null && !Number.isNaN(docNumero) ? docNumero : null,
+          docOrdemGlobal: docOrdemGlobal != null && !Number.isNaN(docOrdemGlobal) ? docOrdemGlobal : null,
+          itemCount: result.count,
+          filialNome,
         });
       }
     } catch (error: any) {
@@ -2518,16 +2542,10 @@ function Producao() {
         createNewCadastro();
       },
       navLabel: isCadastroView && total > 0 ? (curIdx >= 0 ? `${curIdx + 1} de ${total}` : `Novo · ${total} doc.`) : undefined,
-      saving,
-      canSave: items.length > 0,
-      onSave: () => {
-        if (saving || items.length === 0) return;
-        void saveToDatabaseRef.current?.();
-      },
     });
     return () => setDocumentNav(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentView, currentRecordIndex, currentRecordId, allRecords.length, dataCabecalhoSelecionada, saving, items.length, filialSelecionada]);
+  }, [currentView, currentRecordIndex, currentRecordId, allRecords.length, dataCabecalhoSelecionada, items.length, filialSelecionada]);
 
   // Exporta os 4 blocos (Status de Produção, Planejado vs Realizado, Reprocesso, Histórico) como PNGs separados,
   // com dados filtrados pela filial e data do documento aberto. No mobile oferece compartilhar (ex.: WhatsApp).

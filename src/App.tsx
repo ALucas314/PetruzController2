@@ -12,6 +12,7 @@ import {
 } from "react-router-dom";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import { DocumentNavProvider } from "@/contexts/DocumentNavContext";
+import { LoadNotificationsProvider } from "@/contexts/LoadNotificationsContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -88,11 +89,13 @@ const App = () => (
       <ThemeProvider>
         <AuthProvider>
           <SidebarProvider>
-            <DocumentNavProvider>
-              <Toaster />
-              <Sonner />
-              <RouterProvider router={router} />
-            </DocumentNavProvider>
+            <LoadNotificationsProvider>
+              <DocumentNavProvider>
+                <Toaster />
+                <Sonner />
+                <RouterProvider router={router} />
+              </DocumentNavProvider>
+            </LoadNotificationsProvider>
           </SidebarProvider>
         </AuthProvider>
       </ThemeProvider>

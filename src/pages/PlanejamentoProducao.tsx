@@ -954,12 +954,9 @@ export default function PlanejamentoProducao() {
       },
       onNewDocument: createNewDocument,
       navLabel: `${current} de ${total}`,
-      saving: savingAll,
-      canSave: registrosExibidos.length > 0,
-      onSave: handleSaveAll,
     });
     return () => setDocumentNav(null);
-  }, [documentosDoPeriodo, selectedDocKey, newDocumentIndex, registrosExibidos.length, savingAll, handleSaveAll, createNewDocument, setDocumentNav]);
+  }, [documentosDoPeriodo, selectedDocKey, newDocumentIndex, registrosExibidos.length, createNewDocument, setDocumentNav]);
 
   useEffect(() => {
     return () => {
