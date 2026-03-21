@@ -4855,7 +4855,7 @@ function Producao() {
                         </div>
                         <div className="min-w-0">
                           <h3 className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-card-foreground">Status de Produção</h3>
-                          <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Mesmo percentual do quadro "Percentual Meta" (total realizado ÷ total planejado)</p>
+                          <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">Mesmo percentual do quadro &quot;Percentual Meta&quot;. Acima de 100% aparece fatia de excedente (azul).</p>
                         </div>
                       </div>
                       <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="grafico-status-producao" expandScrollable={false} className="shrink-0" />
@@ -4868,16 +4868,34 @@ function Producao() {
                             const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
                             const successFill = "url(#producao-pie-success)";
                             const dangerFill = "url(#producao-pie-danger)";
+                            const excessFill = "url(#producao-pie-excess)";
                             const mutedColor = "hsl(var(--muted-foreground))";
+                            /** Fatias somam o “peso” do gráfico; com perc > 100 usa 100 + (perc−100)=perc para mostrar excedente proporcional */
                             const statusData =
                               totalPlanejada === 0
                                 ? [{ name: "Sem meta definida", value: 100, color: mutedColor, fill: mutedColor }]
+                                : perc > 100
+                                  ? [
+                                      {
+                                        name: `Até a meta (100% do planejado)`,
+                                        value: 100,
+                                        color: "hsl(var(--success))",
+                                        fill: successFill,
+                                      },
+                                      {
+                                        name: `${perc.toFixed(2).replace(".", ",")}% do planejado`,
+                                        value: perc - 100,
+                                        color: "hsl(var(--primary))",
+                                        fill: excessFill,
+                                      },
+                                    ]
                                 : perc >= 100
-                                  ? [{ name: "Meta atingida (≥100%)", value: 100, color: "hsl(var(--success))", fill: successFill }]
+                                  ? [{ name: "Meta atingida (100%)", value: 100, color: "hsl(var(--success))", fill: successFill }]
                                   : [
-                                      { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "hsl(var(--success))", fill: successFill },
+                                      { name: `Realizado (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "hsl(var(--success))", fill: successFill },
                                       { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "hsl(var(--destructive))", fill: dangerFill },
                                     ];
+                            const totalPie = statusData.reduce((s, x) => s + x.value, 0);
                             return (
                               <>
                                 <defs>
@@ -4890,6 +4908,11 @@ function Producao() {
                                     <stop offset="0%" stopColor="hsl(0 72% 58%)" stopOpacity={1} />
                                     <stop offset="70%" stopColor="hsl(var(--destructive))" stopOpacity={1} />
                                     <stop offset="100%" stopColor="hsl(0 62% 28%)" stopOpacity={0.95} />
+                                  </radialGradient>
+                                  <radialGradient id="producao-pie-excess" cx="0.35" cy="0.35" r="0.65">
+                                    <stop offset="0%" stopColor="hsl(217 91% 72%)" stopOpacity={1} />
+                                    <stop offset="70%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                                    <stop offset="100%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
                                   </radialGradient>
                                 </defs>
                                 <Pie
@@ -4913,19 +4936,36 @@ function Producao() {
                                   ))}
                                 </Pie>
                                 <Tooltip
-                                  contentStyle={{
-                                    backgroundColor: "hsl(var(--card) / 0.98)",
-                                    backdropFilter: "blur(12px)",
-                                    WebkitBackdropFilter: "blur(12px)",
-                                    border: "1px solid hsl(var(--border) / 0.8)",
-                                    borderRadius: "14px",
-                                    padding: "16px 20px",
-                                    boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
-                                    fontSize: "13px",
-                                    fontWeight: 500,
+                                  content={({ active, payload }) => {
+                                    if (!active || !payload?.length) return null;
+                                    return (
+                                      <div
+                                        className="rounded-xl border border-border/80 bg-card/98 px-4 py-3 shadow-lg text-sm font-medium"
+                                        style={{
+                                          backdropFilter: "blur(12px)",
+                                          WebkitBackdropFilter: "blur(12px)",
+                                          boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
+                                        }}
+                                      >
+                                        {totalPlanejada > 0 && (
+                                          <p className="font-bold text-foreground mb-2 border-b border-border/60 pb-2">
+                                            % Meta (realizado ÷ planejado): {perc.toFixed(2).replace(".", ",")}%
+                                          </p>
+                                        )}
+                                        {payload.map((item: { name?: string; value?: number; color?: string }, idx: number) => (
+                                          <p key={idx} className="text-muted-foreground mt-1 first:mt-0">
+                                            <span style={{ color: item.color ?? "inherit" }}>{item.name}</span>
+                                            {totalPie > 0 && item.value != null && (
+                                              <span className="tabular-nums">
+                                                {" "}
+                                                — {((Number(item.value) / totalPie) * 100).toFixed(1).replace(".", ",")}% do gráfico
+                                              </span>
+                                            )}
+                                          </p>
+                                        ))}
+                                      </div>
+                                    );
                                   }}
-                                  formatter={(value: number) => [`${value.toFixed(1).replace(".", ",")}%`, ""]}
-                                  itemStyle={{ fontWeight: 600 }}
                                 />
                                 <Legend
                                   wrapperStyle={{ paddingTop: 18 }}
@@ -5480,8 +5520,74 @@ function Producao() {
                           const kgPorHora = record.calculo_1_horas != null && record.calculo_1_horas !== ""
                             ? String(record.calculo_1_horas).replace(".", ",")
                             : "-";
-                          const restante = record.restante_horas || "-";
-                          const horaFinalStr = formatHoraFinal(record.hora_final);
+
+                          // Mesma lógica do Acompanhamento diário: restante e hora final ao vivo (hora atual + restante)
+                          // quando a previsão salva já passou e ainda há trabalho — evita valores congelados no histórico.
+                          const dataDiaRaw = record.data_dia || record.data_cabecalho;
+                          const dataDiaStr =
+                            dataDiaRaw != null && String(dataDiaRaw).trim() !== ""
+                              ? String(dataDiaRaw).includes("T")
+                                ? String(dataDiaRaw).split("T")[0]
+                                : String(dataDiaRaw).slice(0, 10)
+                              : undefined;
+                          const planejadaH = parseFormattedNumber(record.qtd_planejada);
+                          const realizadaH = parseFormattedNumber(record.qtd_realizada);
+                          const difHistorico =
+                            record.diferenca != null && String(record.diferenca).trim() !== ""
+                              ? parseFormattedNumber(record.diferenca)
+                              : planejadaH - realizadaH;
+                          let horaFinalSalvaParaCalc = "";
+                          if (record.hora_final) {
+                            try {
+                              const d = new Date(record.hora_final as string);
+                              if (!Number.isNaN(d.getTime())) {
+                                horaFinalSalvaParaCalc = formatTime(d);
+                              }
+                            } catch {
+                              /* ignore */
+                            }
+                          }
+                          const calculoHistoricoStr =
+                            record.calculo_1_horas != null && record.calculo_1_horas !== ""
+                              ? String(record.calculo_1_horas).replace(".", ",")
+                              : "";
+                          const itemHistoricoCalc: ProductionItem = {
+                            id: Number(record.id) || index + 1,
+                            numero: index + 1,
+                            dataDia: dataDiaStr,
+                            op: String(record.op ?? ""),
+                            codigoItem: String(record.codigo_item ?? ""),
+                            descricaoItem: String(record.descricao_item ?? ""),
+                            linha: linhaStr,
+                            quantidadePlanejada: record.qtd_planejada ?? planejadaH,
+                            quantidadeRealizada: record.qtd_realizada ?? realizadaH,
+                            diferenca: difHistorico,
+                            horasTrabalhadas: calculoHistoricoStr,
+                            restanteHoras: "",
+                            horaFinal: horaFinalSalvaParaCalc,
+                            calculo1HorasEditMode: false,
+                          };
+                          const restanteCalc = calculateRestanteHorasForItem(itemHistoricoCalc);
+                          const horaFinalCalculadaHist = calculateHoraFinalForItem({
+                            ...itemHistoricoCalc,
+                            restanteHoras: restanteCalc,
+                          });
+                          const temHoraSalva = horaFinalSalvaParaCalc.trim() !== "";
+                          const previsaoHistoricoObsoleta =
+                            temHoraSalva &&
+                            isOcpdHoraFinalPrevisaoObsoleta(
+                              horaFinalSalvaParaCalc,
+                              currentTime,
+                              dataDiaStr,
+                              restanteCalc
+                            );
+                          const restante = restanteCalc && restanteCalc.trim() !== "" ? restanteCalc : "-";
+                          const horaFinalStr =
+                            !temHoraSalva || previsaoHistoricoObsoleta
+                              ? horaFinalCalculadaHist && horaFinalCalculadaHist.trim() !== ""
+                                ? horaFinalCalculadaHist
+                                : "-"
+                              : formatHoraFinal(record.hora_final);
 
                           return (
                             <TableRow

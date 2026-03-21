@@ -208,25 +208,40 @@ const Index = () => {
   })();
 
   // Gráfico de pizza: mesmo critério da Análise de produção — percentual de meta (total realizado ÷ total planejado)
-  const statusData = (() => {
-    const totalPlanejada = stats ? parseFloat(stats.totalPlanejado || "0") : 0;
-    const totalRealizada = stats ? parseFloat(stats.totalRealizado || "0") : 0;
+  const statusPieInfo = (() => {
+    const totalPlanejada = stats ? parseFloat(String(stats.totalPlanejado || "0").replace(",", ".")) : 0;
+    const totalRealizada = stats ? parseFloat(String(stats.totalRealizado || "0").replace(",", ".")) : 0;
     const perc = totalPlanejada > 0 ? (totalRealizada / totalPlanejada) * 100 : 0;
     const successFill = "url(#dashboard-pie-success)";
     const dangerFill = "url(#dashboard-pie-danger)";
+    const excessFill = "url(#dashboard-pie-excess)";
     const mutedColor = "hsl(var(--muted-foreground))";
 
+    let statusData: Array<{ name: string; value: number; color: string; fill: string }>;
     if (totalPlanejada === 0) {
-      return [{ name: "Sem meta definida", value: 100, color: mutedColor, fill: mutedColor }];
+      statusData = [{ name: "Sem meta definida", value: 100, color: mutedColor, fill: mutedColor }];
+    } else if (perc > 100) {
+      statusData = [
+        { name: "Até a meta (100% do planejado)", value: 100, color: "hsl(var(--success))", fill: successFill },
+        {
+          name: `${perc.toFixed(2).replace(".", ",")}% do planejado`,
+          value: perc - 100,
+          color: "hsl(var(--primary))",
+          fill: excessFill,
+        },
+      ];
+    } else if (perc >= 100) {
+      statusData = [{ name: "Meta atingida (100%)", value: 100, color: "hsl(var(--success))", fill: successFill }];
+    } else {
+      statusData = [
+        { name: `Realizado (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "hsl(var(--success))", fill: successFill },
+        { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "hsl(var(--destructive))", fill: dangerFill },
+      ];
     }
-    if (perc >= 100) {
-      return [{ name: "Meta atingida (≥100%)", value: 100, color: "hsl(var(--success))", fill: successFill }];
-    }
-    return [
-      { name: `Meta atingida (${perc.toFixed(1).replace(".", ",")}%)`, value: perc, color: "hsl(var(--success))", fill: successFill },
-      { name: `Faltando (${(100 - perc).toFixed(1).replace(".", ",")}%)`, value: 100 - perc, color: "hsl(var(--destructive))", fill: dangerFill },
-    ];
+    const totalPie = statusData.reduce((s, x) => s + x.value, 0);
+    return { statusData, perc, totalPlanejada, totalPie };
   })();
+  const { statusData, perc: percStatusPie, totalPlanejada: totalPlanejadaStatus, totalPie: totalPieStatus } = statusPieInfo;
 
   return (
     <AppLayout>
@@ -388,7 +403,7 @@ const Index = () => {
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-base sm:text-lg font-bold tracking-tight text-card-foreground">Status de Produção</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground/90">Mesmo percentual do quadro “Percentual Meta” (total realizado ÷ total planejado)</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground/90">Mesmo percentual do quadro “Percentual Meta”. Acima de 100% aparece fatia de excedente.</p>
                     </div>
                   </div>
                   <ExportToPng targetRef={chartStatusProducaoRef} filenamePrefix="dashboard-status-producao" expandScrollable={false} className="shrink-0" />
@@ -406,6 +421,11 @@ const Index = () => {
                           <stop offset="0%" stopColor="hsl(0 72% 58%)" stopOpacity={1} />
                           <stop offset="70%" stopColor="hsl(var(--destructive))" stopOpacity={1} />
                           <stop offset="100%" stopColor="hsl(0 62% 28%)" stopOpacity={0.95} />
+                        </radialGradient>
+                        <radialGradient id="dashboard-pie-excess" cx="0.35" cy="0.35" r="0.65">
+                          <stop offset="0%" stopColor="hsl(217 91% 72%)" stopOpacity={1} />
+                          <stop offset="70%" stopColor="hsl(var(--primary))" stopOpacity={1} />
+                          <stop offset="100%" stopColor="hsl(217 71% 32%)" stopOpacity={0.95} />
                         </radialGradient>
                       </defs>
                       <Pie
@@ -429,19 +449,36 @@ const Index = () => {
                         ))}
                       </Pie>
                       <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card) / 0.98)",
-                          backdropFilter: "blur(12px)",
-                          WebkitBackdropFilter: "blur(12px)",
-                          border: "1px solid hsl(var(--border) / 0.8)",
-                          borderRadius: "14px",
-                          padding: "16px 20px",
-                          boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
-                          fontSize: "13px",
-                          fontWeight: 500,
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          return (
+                            <div
+                              className="rounded-xl border border-border/80 bg-card/98 px-4 py-3 shadow-lg text-sm font-medium"
+                              style={{
+                                backdropFilter: "blur(12px)",
+                                WebkitBackdropFilter: "blur(12px)",
+                                boxShadow: "0 20px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)",
+                              }}
+                            >
+                              {totalPlanejadaStatus > 0 && (
+                                <p className="font-bold text-foreground mb-2 border-b border-border/60 pb-2">
+                                  % Meta (realizado ÷ planejado): {percStatusPie.toFixed(2).replace(".", ",")}%
+                                </p>
+                              )}
+                              {payload.map((item: { name?: string; value?: number; color?: string }, idx: number) => (
+                                <p key={idx} className="text-muted-foreground mt-1 first:mt-0">
+                                  <span style={{ color: item.color ?? "inherit" }}>{item.name}</span>
+                                  {totalPieStatus > 0 && item.value != null && (
+                                    <span className="tabular-nums">
+                                      {" "}
+                                      — {((Number(item.value) / totalPieStatus) * 100).toFixed(1).replace(".", ",")}% do gráfico
+                                    </span>
+                                  )}
+                                </p>
+                              ))}
+                            </div>
+                          );
                         }}
-                        formatter={(value: number) => [`${value.toFixed(1).replace(".", ",")}%`, ""]}
-                        itemStyle={{ fontWeight: 600 }}
                       />
                       <Legend
                         wrapperStyle={{ paddingTop: 18 }}
