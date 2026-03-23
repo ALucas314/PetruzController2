@@ -74,8 +74,6 @@ interface ProductionItem {
   quantidadePlanejada: number | string;
   quantidadeRealizada: number | string;
   diferenca: number;
-  /** Opcional; coluna removida da UI — persistida vazia (null no OCPD) */
-  biHoraria: string;
   horasTrabalhadas: string;
   restanteHoras: string;
   horaFinal: string;
@@ -660,7 +658,6 @@ function Producao() {
       quantidadePlanejada: 0,
       quantidadeRealizada: 0,
       diferenca: 0,
-      biHoraria: "",
       horasTrabalhadas: "",
       restanteHoras: "",
       horaFinal: "",
@@ -1071,7 +1068,6 @@ function Producao() {
       quantidadePlanejada: 0,
       quantidadeRealizada: 0,
       diferenca: 0,
-      biHoraria: "",
       horasTrabalhadas: "",
       restanteHoras: "",
       horaFinal: "",
@@ -1789,7 +1785,7 @@ function Producao() {
           const hoje = new Date().toISOString().split("T")[0];
           setDataCabecalhoSelecionada(hoje);
           setCurrentDocId(null);
-          setItems([{ id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, biHoraria: "", horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" }]);
+          setItems([{ id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" }]);
           setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]); setBiHorariaRegistros([]);
         }
       } else if (!wasUpdate) {
@@ -1798,7 +1794,7 @@ function Producao() {
         setDataCabecalhoSelecionada(hoje);
         setCurrentDocId(null);
         setItems([
-          { id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, biHoraria: "", horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" },
+          { id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" },
         ]);
         setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]); setBiHorariaRegistros([]);
       }
@@ -1895,7 +1891,6 @@ function Producao() {
             quantidadePlanejada: planejada,
             quantidadeRealizada: realizada,
             diferenca: planejada - realizada,
-            biHoraria: dbItem["Bi- Horária"] != null ? String(dbItem["Bi- Horária"]).slice(0, 64) : "",
             horasTrabalhadas: dbItem.calculo_1_horas
               ? dbItem.calculo_1_horas.toString().replace(".", ",")
               : "",
@@ -2018,12 +2013,7 @@ function Producao() {
       if (d.filialSelecionada != null) setFilialSelecionada(String(d.filialSelecionada));
       if (d.currentDocId != null) setCurrentDocId(String(d.currentDocId));
       if (Array.isArray(d.items) && d.items.length > 0) {
-        setItems(
-          (d.items as Array<Partial<ProductionItem> & { id: number }>).map((it) => ({
-            ...it,
-            biHoraria: it.biHoraria ?? "",
-          })) as ProductionItem[]
-        );
+        setItems(d.items as ProductionItem[]);
       }
       if (Array.isArray(d.reprocessos)) {
         setReprocessos(d.reprocessos as ReprocessoItem[]);
@@ -2395,7 +2385,6 @@ function Producao() {
         quantidadePlanejada: 0,
         quantidadeRealizada: 0,
         diferenca: 0,
-        biHoraria: "",
         horasTrabalhadas: "",
         restanteHoras: "",
         horaFinal: "",
@@ -5711,8 +5700,6 @@ function Producao() {
                             quantidadePlanejada: record.qtd_planejada ?? planejadaH,
                             quantidadeRealizada: record.qtd_realizada ?? realizadaH,
                             diferenca: difHistorico,
-                            biHoraria:
-                              record["Bi- Horária"] != null ? String(record["Bi- Horária"]).slice(0, 64) : "",
                             horasTrabalhadas: calculoHistoricoStr,
                             restanteHoras: "",
                             horaFinal: horaFinalSalvaParaCalc,

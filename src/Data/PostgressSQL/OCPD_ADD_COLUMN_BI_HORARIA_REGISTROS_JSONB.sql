@@ -7,9 +7,9 @@
 -- Execute no SQL Editor do Supabase (PostgreSQL).
 -- ============================================================================
 
-ALTER TABLE "OCPD"
+ALTER TABLE public."OCPD"
   ADD COLUMN IF NOT EXISTS bi_horaria_registros JSONB DEFAULT '[]'::jsonb;
 
-CREATE INDEX IF NOT EXISTS idx_ocpd_bi_horaria_registros ON "OCPD" USING GIN (bi_horaria_registros);
+CREATE INDEX IF NOT EXISTS idx_ocpd_bi_horaria_registros ON public."OCPD" USING GIN (bi_horaria_registros);
 
-COMMENT ON COLUMN "OCPD".bi_horaria_registros IS 'Array JSON: [{"numero": 1, "periodo": "Manhã"|"Tarde"|"Noite"|"Madrugada", "codigo_item": "...", "descricao_item": "...", "qtd_planejada": 0, "qtd_realizada": 0}, ...]';
+COMMENT ON COLUMN public."OCPD".bi_horaria_registros IS 'Array JSON: [{"numero": 1, "periodo": "Manhã"|"Tarde"|"Noite"|"Madrugada", "codigo_item": "...", "descricao_item": "...", "qtd_planejada": 0, "qtd_realizada": 0}, ...]';
