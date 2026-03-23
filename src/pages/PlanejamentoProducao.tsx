@@ -14,7 +14,27 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, ArrowRight, Plus, Trash2, Loader2, Factory, Save, Clock, FilePlus, Filter } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Plus,
+  Trash2,
+  Loader2,
+  Factory,
+  Save,
+  Clock,
+  FilePlus,
+  Filter,
+  Package,
+  ClipboardList,
+  Layers,
+  Weight,
+  Box,
+  LayoutGrid,
+  Scissors,
+  ArrowDownToLine,
+} from "lucide-react";
+import { KpiCard } from "@/components/dashboard/KpiCard";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   getOcppByDateRange,
@@ -765,6 +785,67 @@ export default function PlanejamentoProducao() {
     return list;
   })();
 
+  /**
+   * Totais para os KPIs do planejamento: mesma regra da linha de totais do dashboard PCP (Personalizado),
+   * aplicada às linhas exibidas (data, filial, documento selecionado e filtros do card).
+   */
+  const planejamentoKpiTotals = useMemo(() => {
+    let list = registrosBaseFilial;
+    if (selectedDocKey) list = list.filter((r) => getDocKey(r) === selectedDocKey);
+    const codigoTrim = (filtroCodigo ?? "").trim().toLowerCase();
+    if (codigoTrim) list = list.filter((r) => String(r.Code ?? "").toLowerCase().includes(codigoTrim));
+    const tipoLinhaTrim = (filtroTipoLinha ?? "").trim();
+    if (tipoLinhaTrim) list = list.filter((r) => (r.tipo_linha ?? "").trim().toLowerCase() === tipoLinhaTrim.toLowerCase());
+    if (filtroSolidos !== "" && filtroSolidos != null) list = list.filter((r) => r.solidos === filtroSolidos);
+
+    if (list.length === 0) {
+      return {
+        quantidade: 0,
+        quantidade_latas: 0,
+        previsao_latas: 0,
+        quantidade_kg: 0,
+        quantidade_basqueta: 0,
+        quantidade_chapa: 0,
+        t_cort: 0,
+        quantidade_kg_tuneo: 0,
+      };
+    }
+    let quantidade = 0,
+      quantidade_latas = 0,
+      previsao_latas = 0,
+      quantidade_kg = 0,
+      quantidade_basqueta = 0,
+      quantidade_chapa = 0,
+      t_cort = 0,
+      quantidade_kg_tuneo = 0;
+    list.forEach((r) => {
+      quantidade += r.quantidade ?? 0;
+      const tf = (r.tipo_fruto ?? "").trim();
+      const kg = r.quantidade_kg ?? 0;
+      const isCalculado = (tf === "Açaí" || tf === "Fruto") && kg > 0;
+      previsao_latas += r.previsao_latas ?? 0;
+      const qtdLatasRow = isCalculado
+        ? ((r.quantidade_latas ?? 0) !== 0 ? (r.quantidade_latas ?? 0) : calcPrevisaoLatasFromTipoFruto(kg, tf))
+        : (r.quantidade_latas ?? 0);
+      quantidade_latas += qtdLatasRow;
+      quantidade_kg += kg;
+      quantidade_basqueta += r.quantidade_basqueta ?? 0;
+      quantidade_chapa += r.quantidade_chapa ?? 0;
+      quantidade_kg_tuneo += r.quantidade_kg_tuneo ?? 0;
+      t_cort += parseCortSolidValue(r.t_cort);
+    });
+    return {
+      quantidade,
+      quantidade_latas,
+      previsao_latas,
+      quantidade_kg,
+      quantidade_basqueta,
+      quantidade_chapa,
+      t_cort,
+      quantidade_kg_tuneo,
+    };
+  }, [registrosBaseFilial, selectedDocKey, filtroCodigo, filtroTipoLinha, filtroSolidos, getDocKey]);
+
   /** Atualiza um registro no banco e no estado local (sem recarregar a tabela nem mostrar loading). Preserva zeros à esquerda do código. */
   const updateRow = async (id: number, payload: Partial<OCPPInsertPayload>) => {
     lastLocalChangeAtRef.current = Date.now();
@@ -1485,6 +1566,56 @@ export default function PlanejamentoProducao() {
                 )}
               </div>
             </div>
+
+            {/* KPIs — mesma lógica da linha de totais do dashboard Planejamento PCP Personalizado (documento, data e filtros) */}
+            <div className="mb-5 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Totais do documento e período filtrados (alinhados ao dashboard PCP personalizado).
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <KpiCard
+                  title="Total produto acabado"
+                  value={formatNumberFixed(planejamentoKpiTotals.quantidade, 2) || "0,00"}
+                  icon={Package}
+                />
+                <KpiCard
+                  title="Total Previsão em latas"
+                  value={formatNumberFixed(planejamentoKpiTotals.previsao_latas, 2) || "0,00"}
+                  icon={ClipboardList}
+                />
+                <KpiCard
+                  title="Quantidade de Latas"
+                  value={formatNumberFixed(planejamentoKpiTotals.quantidade_latas, 2) || "0,00"}
+                  icon={Layers}
+                />
+                <KpiCard
+                  title="Quantidade em Kg"
+                  value={formatNumberFixed(planejamentoKpiTotals.quantidade_kg, 2) || "0,00"}
+                  icon={Weight}
+                />
+                <KpiCard
+                  title="Quantidade de Basqueta"
+                  value={formatNumberFixed(planejamentoKpiTotals.quantidade_basqueta, 0) || "0"}
+                  icon={Box}
+                />
+                <KpiCard
+                  title="Quantidade de Chapa"
+                  value={formatNumberFixed(planejamentoKpiTotals.quantidade_chapa, 0) || "0"}
+                  icon={LayoutGrid}
+                />
+                <KpiCard
+                  title="Total cortado (T. Cort)"
+                  value={formatNumberFixed(planejamentoKpiTotals.t_cort, 3) || "0,000"}
+                  icon={Scissors}
+                />
+                <KpiCard
+                  title="Entrada no Túnel (Kg)"
+                  value={formatNumberFixed(planejamentoKpiTotals.quantidade_kg_tuneo, 2) || "0,00"}
+                  icon={ArrowDownToLine}
+                />
+              </div>
+            </div>
+
             {showDocumentGridForRange ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {documentosDoPeriodo.length === 0 ? (
