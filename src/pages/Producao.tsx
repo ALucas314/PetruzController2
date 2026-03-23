@@ -74,6 +74,7 @@ interface ProductionItem {
   quantidadePlanejada: number | string;
   quantidadeRealizada: number | string;
   diferenca: number;
+  /** Faixa de 2h (ex.: 00:00 às 02:00), persistida na coluna "Bi- Horária" do OCPD */
   biHoraria: string;
   horasTrabalhadas: string;
   restanteHoras: string;
@@ -87,6 +88,27 @@ const BI_HORARIA_OPTIONS = Array.from({ length: 12 }, (_, i) => {
   const end = String((i + 1) * 2).padStart(2, "0");
   return `${start}:00 às ${end}:00`;
 });
+
+/** Turnos para agregar produção por bi-horária (independente das linhas principais) */
+export type PeriodoBiHoraria = "Manhã" | "Tarde" | "Noite" | "Madrugada";
+
+const PERIODOS_BI_HORARIA: PeriodoBiHoraria[] = ["Manhã", "Tarde", "Noite", "Madrugada"];
+
+function parsePeriodoBiHoraria(v: unknown): PeriodoBiHoraria {
+  const s = String(v ?? "");
+  if (s === "Manhã" || s === "Tarde" || s === "Noite" || s === "Madrugada") return s;
+  return "Manhã";
+}
+
+interface BiHorariaRegistroItem {
+  id: number;
+  numero: number;
+  periodo: PeriodoBiHoraria;
+  codigoItem: string;
+  descricaoItem: string;
+  quantidadePlanejada: number | string;
+  quantidadeRealizada: number | string;
+}
 
 interface ProductionLine {
   id: number;
@@ -458,6 +480,8 @@ function Producao() {
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   // Reprocessos
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
+  /** Registros agregados por turno (Manhã/Tarde/Noite/Madrugada) — não substituem as linhas da tabela principal */
+  const [biHorariaRegistros, setBiHorariaRegistros] = useState<BiHorariaRegistroItem[]>([]);
   // Filtros do card de reprocesso (tipo, linha, grupo, código) — valores do formulário
   const [reprocessoFiltroTipo, setReprocessoFiltroTipo] = useState<"" | "Cortado" | "Usado">("");
   const [reprocessoFiltroLinha, setReprocessoFiltroLinha] = useState<string>("");
@@ -1145,6 +1169,98 @@ function Producao() {
     setReprocessos(reprocessos.filter((r) => r.id !== id));
   };
 
+  const addBiHorariaRegistro = () => {
+    const newNumero = biHorariaRegistros.length > 0 ? Math.max(...biHorariaRegistros.map((r) => r.numero)) + 1 : 1;
+    setBiHorariaRegistros([
+      ...biHorariaRegistros,
+      {
+        id: Date.now(),
+        numero: newNumero,
+        periodo: "Manhã",
+        codigoItem: "",
+        descricaoItem: "",
+        quantidadePlanejada: "",
+        quantidadeRealizada: "",
+      },
+    ]);
+  };
+
+  const updateBiHorariaRegistro = (id: number, field: keyof BiHorariaRegistroItem, value: string | number) => {
+    setBiHorariaRegistros(
+      biHorariaRegistros.map((r) => {
+        if (r.id !== id) return r;
+        const updated = { ...r, [field]: value };
+        if (field === "codigoItem" && typeof value === "string") {
+          const code = value.trim();
+          if (!code) {
+            updated.descricaoItem = "";
+          } else {
+            let catalogItem = itemCatalog[code];
+            if (!catalogItem) {
+              const normalizedCode = code.replace(/^0+/, "") || code;
+              catalogItem = itemCatalog[normalizedCode];
+            }
+            if (catalogItem?.nome_item) {
+              updated.descricaoItem = catalogItem.nome_item;
+            } else {
+              (async () => {
+                try {
+                  const result = await getItemByCode(code);
+                  if (result && result.nome_item) {
+                    const nome = result.nome_item as string;
+                    const codigoBanco = String(result.codigo_item || code).trim();
+                    setItemCatalog((prev) => ({
+                      ...prev,
+                      [codigoBanco]: { nome_item: nome },
+                      [codigoBanco.replace(/^0+/, "") || codigoBanco]: { nome_item: nome },
+                    }));
+                    setBiHorariaRegistros((prev) =>
+                      prev.map((row) => (row.id === id ? { ...row, descricaoItem: nome } : row))
+                    );
+                  }
+                } catch (e) {
+                  console.error("Erro ao buscar item por código (bi-horária):", e);
+                }
+              })();
+            }
+          }
+        }
+        return updated;
+      })
+    );
+  };
+
+  const removeBiHorariaRegistro = (id: number) => {
+    setBiHorariaRegistros(biHorariaRegistros.filter((r) => r.id !== id));
+  };
+
+  /** Uma linha por item com código na tabela principal; ajuste turno e quantidades por bi-horária */
+  const preencherBiHorariaComItensDaTabela = () => {
+    const comCodigo = items.filter((i) => String(i.codigoItem || "").trim() !== "");
+    if (comCodigo.length === 0) {
+      toast({
+        title: "Nenhum código",
+        description: "Preencha o código do item nas linhas de produção antes de usar esta opção.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const rows: BiHorariaRegistroItem[] = comCodigo.map((i, idx) => ({
+      id: Date.now() + idx,
+      numero: idx + 1,
+      periodo: "Manhã",
+      codigoItem: String(i.codigoItem).trim(),
+      descricaoItem: String(i.descricaoItem || ""),
+      quantidadePlanejada: "",
+      quantidadeRealizada: "",
+    }));
+    setBiHorariaRegistros(rows);
+    toast({
+      title: "Registros criados",
+      description: `${rows.length} linha(s) com código copiado da tabela principal. Ajuste o turno e as quantidades por bi-horária.`,
+    });
+  };
+
   // Carregar OCTP pelo documento: data_dia + filial (não usar "hoje" como filtro de inicio)
   const loadOCTP = useCallback(async () => {
     const dataDocumento = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
@@ -1615,7 +1731,6 @@ function Producao() {
         docId: currentDocId,
         items: items.map((i) => ({
           ...i,
-          biHoraria: i.biHoraria || "",
           quantidadePlanejada: parseFormattedNumber(i.quantidadePlanejada),
           quantidadeRealizada: parseFormattedNumber(i.quantidadeRealizada),
         })),
@@ -1623,6 +1738,11 @@ function Producao() {
         reprocessos: reprocessos.map((r) => ({
           ...r,
           quantidade: parseFormattedNumber(r.quantidade),
+        })),
+        biHorariaRegistros: biHorariaRegistros.map((r) => ({
+          ...r,
+          quantidadePlanejada: parseFormattedNumber(r.quantidadePlanejada),
+          quantidadeRealizada: parseFormattedNumber(r.quantidadeRealizada),
         })),
         latasPrevista: parseFormattedNumber(latasPrevista),
         latasRealizadas: parseFormattedNumber(latasRealizadas),
@@ -1676,7 +1796,7 @@ function Producao() {
           setDataCabecalhoSelecionada(hoje);
           setCurrentDocId(null);
           setItems([{ id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, biHoraria: "", horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" }]);
-          setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]);
+          setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]); setBiHorariaRegistros([]);
         }
       } else if (!wasUpdate) {
         // Insert sem doc_id (legado): reseta para novo cadastro
@@ -1686,7 +1806,7 @@ function Producao() {
         setItems([
           { id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, biHoraria: "", horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" },
         ]);
-        setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]);
+        setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]); setBiHorariaRegistros([]);
       }
 
       // Sempre atualizar ocpdId nos itens inseridos (para o botão Excluir fazer DELETE no banco)
@@ -1781,7 +1901,7 @@ function Producao() {
             quantidadePlanejada: planejada,
             quantidadeRealizada: realizada,
             diferenca: planejada - realizada,
-            biHoraria: dbItem["Bi- Horária"] != null ? String(dbItem["Bi- Horária"]).slice(0, 16) : "",
+            biHoraria: dbItem["Bi- Horária"] != null ? String(dbItem["Bi- Horária"]).slice(0, 64) : "",
             horasTrabalhadas: dbItem.calculo_1_horas
               ? dbItem.calculo_1_horas.toString().replace(".", ",")
               : "",
@@ -1904,7 +2024,12 @@ function Producao() {
       if (d.filialSelecionada != null) setFilialSelecionada(String(d.filialSelecionada));
       if (d.currentDocId != null) setCurrentDocId(String(d.currentDocId));
       if (Array.isArray(d.items) && d.items.length > 0) {
-        setItems(d.items as ProductionItem[]);
+        setItems(
+          (d.items as Array<Partial<ProductionItem> & { id: number }>).map((it) => ({
+            ...it,
+            biHoraria: it.biHoraria ?? "",
+          })) as ProductionItem[]
+        );
       }
       if (Array.isArray(d.reprocessos)) {
         setReprocessos(d.reprocessos as ReprocessoItem[]);
@@ -5611,6 +5736,8 @@ function Producao() {
                             quantidadePlanejada: record.qtd_planejada ?? planejadaH,
                             quantidadeRealizada: record.qtd_realizada ?? realizadaH,
                             diferenca: difHistorico,
+                            biHoraria:
+                              record["Bi- Horária"] != null ? String(record["Bi- Horária"]).slice(0, 64) : "",
                             horasTrabalhadas: calculoHistoricoStr,
                             restanteHoras: "",
                             horaFinal: horaFinalSalvaParaCalc,

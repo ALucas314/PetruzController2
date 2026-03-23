@@ -44,6 +44,12 @@ DROP POLICY IF EXISTS "ocpp_authenticated_all" ON "OCPP";
 CREATE POLICY "ocpp_authenticated_all" ON "OCPP"
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- OCPH (histórico / registro por item: data, código, qtds, bi-horária, observações)
+ALTER TABLE "OCPH" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ocph_authenticated_all" ON "OCPH";
+CREATE POLICY "ocph_authenticated_all" ON "OCPH"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- OCTU_DRAFT_AUTH (rascunho por usuário logado)
 ALTER TABLE "OCTU_DRAFT_AUTH" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "octu_draft_auth_own" ON "OCTU_DRAFT_AUTH";

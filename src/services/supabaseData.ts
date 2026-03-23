@@ -598,7 +598,33 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
       quantidade: parseFloat(String(first.reprocesso_quantidade ?? 0)),
     });
   }
-  return { data: rows, count: rows.length, reprocessos };
+
+  /** Registros de bi-horária por turno (JSONB no primeiro registro OCPD do documento) */
+  const biHorariaRegistros: Array<{
+    numero: number;
+    periodo: string;
+    codigo_item: string | null;
+    descricao_item: string | null;
+    qtd_planejada: number;
+    qtd_realizada: number;
+  }> = [];
+  const rawBi = first?.bi_horaria_registros;
+  if (rawBi && Array.isArray(rawBi) && rawBi.length > 0) {
+    const arr = rawBi as Array<Record<string, unknown>>;
+    for (let idx = 0; idx < arr.length; idx++) {
+      const r = arr[idx];
+      biHorariaRegistros.push({
+        numero: Number(r.numero ?? idx + 1),
+        periodo: String(r.periodo ?? "Manhã"),
+        codigo_item: r.codigo_item != null ? String(r.codigo_item) : null,
+        descricao_item: r.descricao_item != null ? String(r.descricao_item) : null,
+        qtd_planejada: parseBrazilNumber(r.qtd_planejada ?? 0),
+        qtd_realizada: parseBrazilNumber(r.qtd_realizada ?? 0),
+      });
+    }
+  }
+
+  return { data: rows, count: rows.length, reprocessos, biHorariaRegistros };
 }
 
 // --- Produção save (payload no formato do frontend: quantidadePlanejada, codigoItem, etc.) ---
@@ -615,8 +641,10 @@ export async function saveProducao(payload: {
   totalCortado?: number | string;
   percentualMeta?: number | string;
   totalReprocesso?: number | string;
+  /** Registros agregados por turno (Manhã/Tarde/Noite/Madrugada) — gravados no primeiro OCPD */
+  biHorariaRegistros?: Array<Record<string, unknown>>;
 }) {
-  const { dataDia, filialNome, docId, items, existingIds, reprocessos, latasPrevista = 0, latasRealizadas = 0, latasBatidas = 0, totalCortado = 0, percentualMeta: pctMeta = 0, totalReprocesso: totalRep = 0 } = payload;
+  const { dataDia, filialNome, docId, items, existingIds, reprocessos, biHorariaRegistros, latasPrevista = 0, latasRealizadas = 0, latasBatidas = 0, totalCortado = 0, percentualMeta: pctMeta = 0, totalReprocesso: totalRep = 0 } = payload;
   const totalReprocesso = (reprocessos || []).reduce((s, r) => s + parseBrazilNumber(r.quantidade ?? 0), 0);
   const pct = items.length
     ? (items.reduce((s, i) => s + parseBrazilNumber(i.quantidadeRealizada ?? i.qtd_realizada ?? 0), 0) /
@@ -672,6 +700,18 @@ export async function saveProducao(payload: {
         }))
       : null;
 
+  const biHorariaPayload =
+    (biHorariaRegistros?.length ?? 0) > 0
+      ? (biHorariaRegistros || []).map((r: Record<string, unknown>, idx: number) => ({
+          numero: Number(r.numero ?? idx + 1),
+          periodo: String(r.periodo ?? "Manhã").trim() || "Manhã",
+          codigo_item: r.codigoItem != null && String(r.codigoItem).trim() !== "" ? String(r.codigoItem).trim() : null,
+          descricao_item: r.descricaoItem != null && String(r.descricaoItem).trim() !== "" ? String(r.descricaoItem).trim() : null,
+          qtd_planejada: parseBrazilNumber(r.quantidadePlanejada ?? r.qtd_planejada ?? 0),
+          qtd_realizada: parseBrazilNumber(r.quantidadeRealizada ?? r.qtd_realizada ?? 0),
+        }))
+      : null;
+
   const buildRow = (item: Record<string, unknown>, index: number) => {
     const linhaCode = String(item.linha ?? "").trim();
     const lineId = lineIdByCode[linhaCode] ?? (item.line_id != null ? Number(item.line_id) : 0);
@@ -700,7 +740,8 @@ export async function saveProducao(payload: {
     })(),
     restante_horas: item.restanteHoras ?? item.restante ?? null,
     hora_final: horaFinalTimestamp,
-    "Bi- Horária": item.biHoraria != null && String(item.biHoraria).trim() !== "" ? String(item.biHoraria).trim() : null,
+    "Bi- Horária":
+      item.biHoraria != null && String(item.biHoraria).trim() !== "" ? String(item.biHoraria).trim() : null,
     percentual_meta: parseFloat(String(item.percentualMeta ?? item.percentual_meta ?? pct)),
     observacao: item.observacao != null && String(item.observacao).trim() !== "" ? String(item.observacao).trim() : null,
     total_qtd_planejada: 0,
@@ -722,6 +763,9 @@ export async function saveProducao(payload: {
   };
     if (index === 0 && reprocessosPayload && reprocessosPayload.length > 0) {
       row.reprocessos = reprocessosPayload;
+    }
+    if (index === 0) {
+      row.bi_horaria_registros = biHorariaPayload && biHorariaPayload.length > 0 ? biHorariaPayload : [];
     }
     return row;
   };

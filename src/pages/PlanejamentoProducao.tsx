@@ -125,16 +125,19 @@ const PEND_OK_OPCOES = [
   { value: "OK", label: "OK" },
 ] as const;
 
-/** Calcula Qtd. Liq. Prev. = Qtd. Latas × Solid (arredondado 3 decimais; ex.: 309,39 × 6,5 = 2011,035). */
+/** Qtd. Liq. Prev. = Qtd. Latas × Solid, arredondado ao kg inteiro (ex.: 14999,936 → 15.000). */
 function calcQtdLiqPrev(latas: number, solid: number | null): number {
   const s = solid ?? 0;
-  return Math.round((latas * s) * 1000) / 1000;
+  return Math.round(latas * s);
 }
 
-/** Calcula Cort Solid = Previsão Latas × Solid (arredondado 2 decimais). */
-function calcCortSolid(previsaoLatas: number, solid: number | null): number {
+/**
+ * Cort Solid (igual ao Excel): =SEERRO([@[Prev. Latas]]*[@Solid];" ")
+ * Coluna da planilha = `previsao_latas` × Solid; arredondamento em kg inteiro como Qtd. Liq. Prev.
+ */
+function calcCortSolid(prevLatasColuna: number, solid: number | null): number {
   const s = solid ?? 0;
-  return Math.round((previsaoLatas * s) * 100) / 100;
+  return Math.round(prevLatasColuna * s);
 }
 
 /** Calcula Previsão Latas a partir de Qtd. Kg e Tipo fruto: Açaí = Qtd. Kg / 14, Fruto = Qtd. Kg / 1. */
@@ -147,14 +150,6 @@ function calcPrevisaoLatasFromTipoFruto(quantidadeKg: number, tipoFruto: string)
   return 0;
 }
 
-/** Valor de latas efetivo para Cort Solid: quando Açaí/Fruto com Qtd. Kg, o valor calculado fica em quantidade_latas (Qtd. Latas); senão usa previsao_latas. */
-function getEffectivePrevisaoLatasForCortSolid(row: { previsao_latas?: number | null; quantidade_latas?: number | null; quantidade_kg?: number | null; tipo_fruto?: string | null }): number {
-  const tf = (row.tipo_fruto ?? "").trim();
-  const kg = row.quantidade_kg ?? 0;
-  if ((tf === "Açaí" || tf === "Fruto") && kg > 0) return (row.quantidade_latas ?? 0) !== 0 ? (row.quantidade_latas ?? 0) : calcPrevisaoLatasFromTipoFruto(kg, tf);
-  return row.previsao_latas ?? 0;
-}
-
 /** Converte valor de Cort Solid (string "385,6" ou "385.6") em número. */
 function parseCortSolidValue(stored: string | null | undefined): number {
   const s = (stored ?? "").trim();
@@ -162,22 +157,22 @@ function parseCortSolidValue(stored: string | null | undefined): number {
   return s.includes(",") ? parseFormattedNumber(s) : parseFloat(s) || 0;
 }
 
-/** Calcula T. Cort = Cort Solid - Qtd. Liq. Prev. (arredondado 3 decimais; ex.: 2010,97 - 2011,035 = -0,065). */
+/** T. Cort = Cort Solid − Qtd. Liq. Prev. (2 decimais). */
 function calcTCort(cortSolid: number, qtdLiqPrev: number): number {
-  return Math.round((cortSolid - qtdLiqPrev) * 1000) / 1000;
+  return Number((cortSolid - qtdLiqPrev).toFixed(2));
 }
 
-/** Calcula Qtd. Basqueta = Qtd. Kg Túneo / Uni. Basqueta (arredondado 2 decimais). Uni. Basqueta é string (ex.: "9"). */
+/** Calcula Qtd. Basqueta = Qtd. Kg Túneo / Uni. Basqueta (inteiro, arredondamento para cima). Uni. Basqueta é string (ex.: "22"). */
 function calcQtdBasqueta(quantidadeKgTuneo: number, unidadeBase: string | null | undefined): number {
   const uni = parseFormattedNumber(unidadeBase ?? "");
   if (uni === 0) return 0;
-  return Math.round((quantidadeKgTuneo / uni) * 100) / 100;
+  return Math.ceil(quantidadeKgTuneo / uni);
 }
 
-/** Calcula Qtd. Chapa = Qtd. Basqueta × Uni. Chapa (arredondado 2 decimais). Uni. Chapa é string (ex.: "8"). */
+/** Calcula Qtd. Chapa = Qtd. Basqueta × Uni. Chapa (inteiro, arredondamento para cima). Uni. Chapa é string (ex.: "8"). */
 function calcQtdChapa(quantidadeBasqueta: number, unidadeChapa: string | null | undefined): number {
   const uni = parseFormattedNumber(unidadeChapa ?? "");
-  return Math.round((quantidadeBasqueta * uni) * 100) / 100;
+  return Math.ceil(quantidadeBasqueta * uni);
 }
 
 /** Verifica se o tipo de linha indica 100 gramas (ex.: "100G", "100G Simples", "100gramas"). */
@@ -965,22 +960,25 @@ export default function PlanejamentoProducao() {
     quantidade_liquida_prevista: (() => {
       const hasFormula = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
       if (hasFormula) return calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
-      return (row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
+      const stored = row.quantidade_liquida_prevista ?? 0;
+      const storedNum = typeof stored === "number" ? stored : parseFormattedNumber(String(stored));
+      if (storedNum !== 0) return Number(storedNum.toFixed(2));
+      return calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
     })(),
     cort_solid: (() => {
       const tf = (row.tipo_fruto ?? "").trim();
       const kg = row.quantidade_kg ?? 0;
-      if ((tf === "Açaí" || tf === "Fruto") && kg > 0) return formatNumber(calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null)) || null;
-      return (row.cort_solid ?? "").trim() !== "" ? row.cort_solid : (formatNumber(calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null)) || null);
+      if ((tf === "Açaí" || tf === "Fruto") && kg > 0) return formatNumberFixed(calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null), 2) || null;
+      return (row.cort_solid ?? "").trim() !== "" ? row.cort_solid : (formatNumberFixed(calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null), 2) || null);
     })(),
     t_cort: (() => {
       const tf = (row.tipo_fruto ?? "").trim();
       const kg = row.quantidade_kg ?? 0;
       const useCalculatedCort = (tf === "Açaí" || tf === "Fruto") && kg > 0;
-      const cortNum = useCalculatedCort ? calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null) : ((row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null));
+      const cortNum = useCalculatedCort ? calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null) : ((row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null));
       const hasFormulaLiq = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
       const liqPrev = hasFormulaLiq ? calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null) : ((row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null));
-      return formatNumber(calcTCort(cortNum, liqPrev)) || null;
+      return formatNumberFixed(calcTCort(cortNum, liqPrev), 2) || null;
     })(),
     quantidade_basqueta: calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, row.unidade_base ?? ""),
     quantidade_chapa: calcQtdChapa(calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, row.unidade_base ?? ""), row.unidade_chapa ?? ""),
@@ -1696,7 +1694,7 @@ export default function PlanejamentoProducao() {
                                 setEditingNumeric(null);
                                 const cortSolid = calcCortSolid(prevLatas, row.solid ?? null);
                                 const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
-                                updateRow(row.id, { previsao_latas: prevLatas, cort_solid: formatNumber(cortSolid) || "", quantidade_liquida_prevista: liqPrev, t_cort: formatNumber(calcTCort(cortSolid, liqPrev)) || "" });
+                                updateRow(row.id, { previsao_latas: prevLatas, cort_solid: formatNumberFixed(cortSolid, 2) || "", quantidade_liquida_prevista: liqPrev, t_cort: formatNumberFixed(calcTCort(cortSolid, liqPrev), 2) || "" });
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
                               placeholder="0"
@@ -1729,8 +1727,8 @@ export default function PlanejamentoProducao() {
                                 const latasVal = parseFormattedNumber(isEditing(row.id, "quantidade_latas") ? editingNumeric?.value : e.target.value) || 0;
                                 setEditingNumeric(null);
                                 const liqPrev = calcQtdLiqPrev(latasVal, row.solid ?? null);
-                                const cortNum = (row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null);
-                                updateRow(row.id, { quantidade_latas: latasVal, quantidade_liquida_prevista: liqPrev, t_cort: formatNumber(calcTCort(cortNum, liqPrev)) || "" });
+                                const cortNum = (row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null);
+                                updateRow(row.id, { quantidade_latas: latasVal, quantidade_liquida_prevista: liqPrev, t_cort: formatNumberFixed(calcTCort(cortNum, liqPrev), 2) || "" });
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center min-w-[7rem]"
                               placeholder="0"
@@ -1755,11 +1753,11 @@ export default function PlanejamentoProducao() {
                                   payload.quantidade_latas = latasCalculado;
                                   payload.previsao_latas = 0;
                                   if (latasCalculado !== 0) {
-                                    const cortSolid = calcCortSolid(latasCalculado, row.solid ?? null);
+                                    const cortSolid = calcCortSolid(0, row.solid ?? null);
                                     const liqPrev = calcQtdLiqPrev(latasCalculado, row.solid ?? null);
                                     payload.quantidade_liquida_prevista = liqPrev;
-                                    payload.cort_solid = formatNumber(cortSolid) || "";
-                                    payload.t_cort = formatNumber(calcTCort(cortSolid, liqPrev)) || "";
+                                    payload.cort_solid = formatNumberFixed(cortSolid, 2) || "";
+                                    payload.t_cort = formatNumberFixed(calcTCort(cortSolid, liqPrev), 2) || "";
                                   }
                                 }
                                 updateRow(row.id, payload);
@@ -1818,15 +1816,15 @@ export default function PlanejamentoProducao() {
                                 payload.quantidade_latas = latasCalculado;
                                 payload.previsao_latas = 0;
                                 if (latasCalculado !== 0) {
-                                  const cortSolid = calcCortSolid(latasCalculado, row.solid ?? null);
+                                  const cortSolid = calcCortSolid(0, row.solid ?? null);
                                   const liqPrev = calcQtdLiqPrev(latasCalculado, row.solid ?? null);
                                   payload.quantidade_liquida_prevista = liqPrev;
-                                  payload.cort_solid = formatNumber(cortSolid) || "";
-                                  payload.t_cort = formatNumber(calcTCort(cortSolid, liqPrev)) || "";
+                                  payload.cort_solid = formatNumberFixed(cortSolid, 2) || "";
+                                  payload.t_cort = formatNumberFixed(calcTCort(cortSolid, liqPrev), 2) || "";
                                   setRowField(row.id, "quantidade_latas", latasCalculado);
                                   setRowField(row.id, "previsao_latas", 0);
-                                  setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
-                                  setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
+                                  setRowField(row.id, "cort_solid", formatNumberFixed(cortSolid, 2) || "");
+                                  setRowField(row.id, "t_cort", formatNumberFixed(calcTCort(cortSolid, liqPrev), 2) || "");
                                 } else {
                                   setRowField(row.id, "quantidade_latas", 0);
                                   setRowField(row.id, "previsao_latas", 0);
@@ -2006,15 +2004,15 @@ export default function PlanejamentoProducao() {
                                 const payload: Partial<OCPPInsertPayload> = { solidos: solidosVal };
                                 const solidVal = solidosVal === 1 ? 9.64 : solidosVal === 2 ? 6.5 : solidosVal === 3 ? 5.15 : solidosVal === 4 ? 1 : 0;
                                 const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal === 0 ? null : solidVal);
-                                const cortSolid = calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), solidVal === 0 ? null : solidVal);
+                                const cortSolid = calcCortSolid(row.previsao_latas ?? 0, solidVal === 0 ? null : solidVal);
                                 payload.solid = solidVal;
                                 payload.quantidade_liquida_prevista = liqPrev;
-                                payload.cort_solid = formatNumber(cortSolid) || "";
-                                payload.t_cort = formatNumber(calcTCort(cortSolid, liqPrev)) || "";
+                                payload.cort_solid = formatNumberFixed(cortSolid, 2) || "";
+                                payload.t_cort = formatNumberFixed(calcTCort(cortSolid, liqPrev), 2) || "";
                                 setRowField(row.id, "solid", solidVal);
                                 setRowField(row.id, "quantidade_liquida_prevista", liqPrev);
-                                setRowField(row.id, "cort_solid", formatNumber(cortSolid) || "");
-                                setRowField(row.id, "t_cort", formatNumber(calcTCort(cortSolid, liqPrev)) || "");
+                                setRowField(row.id, "cort_solid", formatNumberFixed(cortSolid, 2) || "");
+                                setRowField(row.id, "t_cort", formatNumberFixed(calcTCort(cortSolid, liqPrev), 2) || "");
                                 updateRow(row.id, payload);
                               }}
                             >
@@ -2044,8 +2042,8 @@ export default function PlanejamentoProducao() {
                                 const solidVal = raw === "" ? null : parseFormattedNumber(raw);
                                 setEditingNumeric(null);
                                 const liqPrev = calcQtdLiqPrev(row.quantidade_latas ?? 0, solidVal);
-                                const cortSolid = calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), solidVal);
-                                updateRow(row.id, { solid: solidVal, quantidade_liquida_prevista: liqPrev, cort_solid: formatNumber(cortSolid) || "", t_cort: formatNumber(calcTCort(cortSolid, liqPrev)) || "" });
+                                const cortSolid = calcCortSolid(row.previsao_latas ?? 0, solidVal);
+                                updateRow(row.id, { solid: solidVal, quantidade_liquida_prevista: liqPrev, cort_solid: formatNumberFixed(cortSolid, 2) || "", t_cort: formatNumberFixed(calcTCort(cortSolid, liqPrev), 2) || "" });
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[7rem]"
                               placeholder="—"
@@ -2079,23 +2077,24 @@ export default function PlanejamentoProducao() {
                                 const calculated = calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
                                 const hasFormula = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
                                 const toShow = hasFormula ? (calculated !== 0 ? calculated : null) : ((row.quantidade_liquida_prevista ?? 0) !== 0 ? row.quantidade_liquida_prevista : calculated !== 0 ? calculated : null);
-                                return toShow != null && toShow !== 0 ? formatNumber(toShow) : "";
+                                return toShow != null && toShow !== 0 ? formatNumberFixed(toShow, 3) : "";
                               })()}
                               onFocus={() => {
                                 const calculated = calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null);
                                 const hasFormula = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
                                 const toShow = hasFormula ? (calculated !== 0 ? calculated : null) : ((row.quantidade_liquida_prevista ?? 0) !== 0 ? row.quantidade_liquida_prevista : calculated !== 0 ? calculated : null);
-                                setEditingNumeric({ rowId: row.id, field: "quantidade_liquida_prevista", value: toShow != null && toShow !== 0 ? formatNumber(toShow) : "" });
+                                setEditingNumeric({ rowId: row.id, field: "quantidade_liquida_prevista", value: toShow != null && toShow !== 0 ? formatNumberFixed(toShow, 3) : "" });
                               }}
                               onChange={(e) => {
                                 const v = e.target.value;
                                 if (v === "" || /^[\d.,]*$/.test(v)) setEditingNumeric((p) => (p?.rowId === row.id && p?.field === "quantidade_liquida_prevista" ? { ...p, value: v } : { rowId: row.id, field: "quantidade_liquida_prevista", value: v }));
                               }}
                               onBlur={(e) => {
-                                const newVal = parseFormattedNumber(isEditing(row.id, "quantidade_liquida_prevista") ? editingNumeric?.value : e.target.value) || 0;
+                                const raw = parseFormattedNumber(isEditing(row.id, "quantidade_liquida_prevista") ? editingNumeric?.value : e.target.value) || 0;
+                                const newVal = Number(raw.toFixed(3));
                                 setEditingNumeric(null);
                                 const cortNum = parseCortSolidValue(row.cort_solid ?? "");
-                                updateRow(row.id, { quantidade_liquida_prevista: newVal, t_cort: formatNumber(calcTCort(cortNum, newVal)) || "" });
+                                updateRow(row.id, { quantidade_liquida_prevista: newVal, t_cort: formatNumberFixed(calcTCort(cortNum, newVal), 2) || "" });
                               }}
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem]"
                               placeholder="Qtd. Latas × Solid"
@@ -2108,19 +2107,19 @@ export default function PlanejamentoProducao() {
                                 const tf = (row.tipo_fruto ?? "").trim();
                                 const kg = row.quantidade_kg ?? 0;
                                 const useCalculated = (tf === "Açaí" || tf === "Fruto") && kg > 0;
-                                const calculated = calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null);
-                                if (useCalculated && calculated !== 0) return formatNumber(calculated);
+                                const calculated = calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null);
+                                if (useCalculated && calculated !== 0) return formatNumberFixed(calculated, 2);
                                 const stored = row.cort_solid ?? "";
                                 if (stored.trim() !== "") {
                                   const num = parseCortSolidValue(stored);
-                                  return formatNumber(num);
+                                  return formatNumberFixed(num, 2);
                                 }
-                                return calculated !== 0 ? formatNumber(calculated) : "";
+                                return calculated !== 0 ? formatNumberFixed(calculated, 2) : "";
                               })()}
                               readOnly
                               className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-[8rem] bg-muted/50"
-                              placeholder="Previsão Latas × Solid"
-                              title="Cort Solid = Previsão Latas × Solid"
+                              placeholder="Prev. Latas × Solid (Excel)"
+                              title='Excel: =SEERRO([@[Prev. Latas]]*[@Solid];" ")'
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4">
@@ -2130,12 +2129,12 @@ export default function PlanejamentoProducao() {
                                 const kg = row.quantidade_kg ?? 0;
                                 const useCalculatedCort = (tf === "Açaí" || tf === "Fruto") && kg > 0;
                                 const cortNum = useCalculatedCort
-                                  ? calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null)
-                                  : ((row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(getEffectivePrevisaoLatasForCortSolid(row), row.solid ?? null));
+                                  ? calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null)
+                                  : ((row.cort_solid ?? "").trim() !== "" ? parseCortSolidValue(row.cort_solid!) : calcCortSolid(row.previsao_latas ?? 0, row.solid ?? null));
                                 const hasFormulaLiq = (row.quantidade_latas != null && row.quantidade_latas !== 0) && (row.solid != null && row.solid !== 0);
                                 const liqPrev = hasFormulaLiq ? calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null) : ((row.quantidade_liquida_prevista ?? 0) !== 0 ? (row.quantidade_liquida_prevista ?? 0) : calcQtdLiqPrev(row.quantidade_latas ?? 0, row.solid ?? null));
                                 const calculated = calcTCort(cortNum, liqPrev);
-                                return formatNumber(calculated) || "0";
+                                return formatNumberFixed(calculated, 3) || "0";
                               })()}
                               readOnly
                               className="h-8 sm:h-9 text-xs sm:text-sm w-full min-w-[8rem] bg-muted/50"
@@ -2152,8 +2151,8 @@ export default function PlanejamentoProducao() {
                               })()}
                               readOnly
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem] bg-muted/50"
-                              placeholder="Qtd. Kg Túneo ÷ Uni. Basqueta"
-                              title="Qtd. Basqueta = Qtd. Kg Túneo ÷ Uni. Basqueta"
+                              placeholder="Qtd. Kg Túneo ÷ Uni. Basqueta (inteiro)"
+                              title="Qtd. Basqueta = arredondar para cima (inteiro): Qtd. Kg Túneo ÷ Uni. Basqueta"
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4 text-center">
@@ -2165,8 +2164,8 @@ export default function PlanejamentoProducao() {
                               })()}
                               readOnly
                               className="h-8 sm:h-9 text-xs sm:text-sm text-center w-full min-w-[8rem] bg-muted/50"
-                              placeholder="Qtd. Basqueta × Uni. Chapa"
-                              title="Qtd. Chapa = Qtd. Basqueta × Uni. Chapa"
+                              placeholder="Qtd. Basqueta × Uni. Chapa (inteiro)"
+                              title="Qtd. Chapa = arredondar para cima (inteiro): Qtd. Basqueta × Uni. Chapa"
                             />
                           </TableCell>
                           <TableCell className="p-2 sm:p-4 text-center">
@@ -2697,8 +2696,8 @@ export default function PlanejamentoProducao() {
                             if (col.id === "previsao_latas") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.previsao_latas, 2)}</TableCell>;
                             if (col.id === "qtd_latas") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_latas, 2)}</TableCell>;
                             if (col.id === "qtd_kg") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg, 2)}</TableCell>;
-                            if (col.id === "qtd_basq") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_basqueta, 2)}</TableCell>;
-                            if (col.id === "qtd_chapa") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_chapa, 2)}</TableCell>;
+                            if (col.id === "qtd_basq") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_basqueta, 0)}</TableCell>;
+                            if (col.id === "qtd_chapa") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_chapa, 0)}</TableCell>;
                             if (col.id === "t_cort") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.t_cort, 3)}</TableCell>;
                             if (col.id === "entrada_tunel") return <TableCell key={col.id} className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_kg_tuneo, 2)}</TableCell>;
                             return <TableCell key={col.id} className="text-xs text-right"></TableCell>;
