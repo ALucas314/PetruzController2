@@ -74,12 +74,19 @@ interface ProductionItem {
   quantidadePlanejada: number | string;
   quantidadeRealizada: number | string;
   diferenca: number;
+  biHoraria: string;
   horasTrabalhadas: string;
   restanteHoras: string;
   horaFinal: string;
   calculo1HorasEditMode: boolean;
   observacao?: string;
 }
+
+const BI_HORARIA_OPTIONS = Array.from({ length: 12 }, (_, i) => {
+  const start = String(i * 2).padStart(2, "0");
+  const end = String((i + 1) * 2).padStart(2, "0");
+  return `${start}:00 às ${end}:00`;
+});
 
 interface ProductionLine {
   id: number;
@@ -635,6 +642,7 @@ function Producao() {
       quantidadePlanejada: 0,
       quantidadeRealizada: 0,
       diferenca: 0,
+      biHoraria: "",
       horasTrabalhadas: "",
       restanteHoras: "",
       horaFinal: "",
@@ -1045,6 +1053,7 @@ function Producao() {
       quantidadePlanejada: 0,
       quantidadeRealizada: 0,
       diferenca: 0,
+      biHoraria: "",
       horasTrabalhadas: "",
       restanteHoras: "",
       horaFinal: "",
@@ -1606,6 +1615,7 @@ function Producao() {
         docId: currentDocId,
         items: items.map((i) => ({
           ...i,
+          biHoraria: i.biHoraria || "",
           quantidadePlanejada: parseFormattedNumber(i.quantidadePlanejada),
           quantidadeRealizada: parseFormattedNumber(i.quantidadeRealizada),
         })),
@@ -1665,7 +1675,7 @@ function Producao() {
           const hoje = new Date().toISOString().split("T")[0];
           setDataCabecalhoSelecionada(hoje);
           setCurrentDocId(null);
-          setItems([{ id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" }]);
+          setItems([{ id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, biHoraria: "", horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" }]);
           setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]);
         }
       } else if (!wasUpdate) {
@@ -1674,7 +1684,7 @@ function Producao() {
         setDataCabecalhoSelecionada(hoje);
         setCurrentDocId(null);
         setItems([
-          { id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" },
+          { id: 1, numero: 1, dataDia: hoje, op: "", codigoItem: "", descricaoItem: "", linha: "", quantidadePlanejada: 0, quantidadeRealizada: 0, diferenca: 0, biHoraria: "", horasTrabalhadas: "", restanteHoras: "", horaFinal: "", calculo1HorasEditMode: false, observacao: "" },
         ]);
         setLatasPrevista(""); setLatasRealizadas(""); setLatasBatidas(""); setTotalCortado(""); setPercentualMeta(""); setTotalReprocesso(""); setObservacao(""); setReprocessos([]);
       }
@@ -1771,6 +1781,7 @@ function Producao() {
             quantidadePlanejada: planejada,
             quantidadeRealizada: realizada,
             diferenca: planejada - realizada,
+            biHoraria: dbItem["Bi- Horária"] != null ? String(dbItem["Bi- Horária"]).slice(0, 16) : "",
             horasTrabalhadas: dbItem.calculo_1_horas
               ? dbItem.calculo_1_horas.toString().replace(".", ",")
               : "",
@@ -2265,6 +2276,7 @@ function Producao() {
         quantidadePlanejada: 0,
         quantidadeRealizada: 0,
         diferenca: 0,
+        biHoraria: "",
         horasTrabalhadas: "",
         restanteHoras: "",
         horaFinal: "",
@@ -3579,6 +3591,7 @@ function Producao() {
                           <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Qtd. Planejada</TableHead>
                           <TableHead className="min-w-[140px] sm:min-w-[160px] text-xs sm:text-sm">Qtd. Realizada</TableHead>
                           <TableHead className="min-w-[120px] sm:min-w-[140px] text-xs sm:text-sm">Diferença</TableHead>
+                          <TableHead className="min-w-[130px] sm:min-w-[150px] text-xs sm:text-sm">Bi-horária</TableHead>
                           <TableHead className="min-w-[160px] sm:min-w-[200px] text-xs sm:text-sm">Observações</TableHead>
                           <TableHead className="w-12 sm:w-16"></TableHead>
                         </TableRow>
@@ -3687,6 +3700,24 @@ function Producao() {
                                 <Calculator className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
                                 <span className="truncate">{Math.abs(item.diferenca).toFixed(2)}</span>
                               </div>
+                            </TableCell>
+                            <TableCell className="p-2 sm:p-4">
+                              <Select
+                                value={item.biHoraria ? String(item.biHoraria) : "__vazio__"}
+                                onValueChange={(value) => updateItem(item.id, "biHoraria", value === "__vazio__" ? "" : value)}
+                              >
+                                <SelectTrigger className="h-8 sm:h-9 text-xs sm:text-sm min-w-[130px] sm:min-w-[150px]">
+                                  <SelectValue placeholder="Bi-horária" />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-72 text-xs sm:text-sm">
+                                  <SelectItem value="__vazio__">—</SelectItem>
+                                  {BI_HORARIA_OPTIONS.map((option) => (
+                                    <SelectItem key={option} value={option}>
+                                      {option}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </TableCell>
                             <TableCell className="p-2 sm:p-4">
                               <Input

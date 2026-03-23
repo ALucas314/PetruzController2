@@ -700,6 +700,7 @@ export async function saveProducao(payload: {
     })(),
     restante_horas: item.restanteHoras ?? item.restante ?? null,
     hora_final: horaFinalTimestamp,
+    "Bi- Horária": item.biHoraria != null && String(item.biHoraria).trim() !== "" ? String(item.biHoraria).trim() : null,
     percentual_meta: parseFloat(String(item.percentualMeta ?? item.percentual_meta ?? pct)),
     observacao: item.observacao != null && String(item.observacao).trim() !== "" ? String(item.observacao).trim() : null,
     total_qtd_planejada: 0,
