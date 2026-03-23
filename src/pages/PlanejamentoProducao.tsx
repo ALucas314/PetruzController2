@@ -18,7 +18,9 @@ import { ArrowLeft, ArrowRight, Plus, Trash2, Loader2, Factory, Save, Clock, Fil
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   getOcppByDateRange,
+  getOcppDateBounds,
   createOcpp,
+  getNextOcppDocIdentity,
   updateOcpp,
   deleteOcpp,
   getFiliais,
@@ -231,6 +233,22 @@ const formatTotal = (value: number): string => {
   return `${formattedInteger},${decimalPart}`;
 };
 
+const MIN_ITEM_CODE_LENGTH = 5;
+
+function normalizeItemCode(value: string | number | null | undefined): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (/^\d+$/.test(raw) && raw.length < MIN_ITEM_CODE_LENGTH) {
+    return raw.padStart(MIN_ITEM_CODE_LENGTH, "0");
+  }
+  return raw;
+}
+
+function isValidItemCode(value: string | number | null | undefined): boolean {
+  const code = normalizeItemCode(value);
+  return code.length === 0 || code.length >= MIN_ITEM_CODE_LENGTH;
+}
+
 const emptyPayload = (data: string): OCPPInsertPayload => ({
   data,
   op: "",
@@ -271,6 +289,39 @@ const emptyPayload = (data: string): OCPPInsertPayload => ({
 
 type LineOption = { id: number; code: string; name: string };
 
+function getLinhaRuleUnitsFor(tipoLinha: string | null | undefined, productionLines: LineOption[]): { unidadeBase: string; unidadeChapa: string } | null {
+  const tipoLinhaVal = (tipoLinha ?? "").trim();
+  if (!tipoLinhaVal) return null;
+  const lineByName = productionLines.find((l) => (l.code?.trim() || l.name?.trim() || `line-${l.id}`) === tipoLinhaVal);
+  const nomeLinhaParaRegra = lineByName?.name ?? tipoLinhaVal;
+  if (is100Gramas(nomeLinhaParaRegra)) return { unidadeBase: "6", unidadeChapa: "4" };
+  if (is1Kg(nomeLinhaParaRegra)) return { unidadeBase: "12", unidadeChapa: "2" };
+  if (is5Kg(nomeLinhaParaRegra)) return { unidadeBase: "10", unidadeChapa: "0" };
+  if (isCubos(nomeLinhaParaRegra)) return { unidadeBase: "22", unidadeChapa: "0" };
+  if (isSticker(nomeLinhaParaRegra)) return { unidadeBase: "10", unidadeChapa: "3" };
+  return null;
+}
+
+function normalizeRowUnitsAndDerivedFor(row: OCPPRow, productionLines: LineOption[]): OCPPRow {
+  const rule = getLinhaRuleUnitsFor(row.tipo_linha, productionLines);
+  const unidadeBaseAtual = (row.unidade_base ?? "").trim();
+  const unidadeChapaAtual = (row.unidade_chapa ?? "").trim();
+  const unidadeBaseNumerica = parseFormattedNumber(unidadeBaseAtual) > 0;
+  const unidadeChapaNumerica = parseFormattedNumber(unidadeChapaAtual) > 0 || unidadeChapaAtual === "0";
+  const unidadeBase = unidadeBaseNumerica ? unidadeBaseAtual : (rule?.unidadeBase ?? unidadeBaseAtual);
+  const unidadeChapa = unidadeChapaNumerica ? unidadeChapaAtual : (rule?.unidadeChapa ?? unidadeChapaAtual);
+  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, unidadeBase);
+  const qtdChapa = calcQtdChapa(qtdBasqueta, unidadeChapa);
+  return {
+    ...row,
+    Code: normalizeItemCode(row.Code),
+    unidade_base: unidadeBase,
+    unidade_chapa: unidadeChapa,
+    quantidade_basqueta: qtdBasqueta,
+    quantidade_chapa: qtdChapa,
+  };
+}
+
 /** Colunas da tabela do dashboard PCP: id, label e função que indica se a célula está "vazia" (para filtrar itens). */
 const DASHBOARD_TABLE_COLUMNS: Array<{ id: string; label: string; isEmpty: (row: OCPPRow) => boolean }> = [
   { id: "op", label: "OP", isEmpty: (r) => !(r.op ?? "").toString().trim() },
@@ -310,7 +361,7 @@ export default function PlanejamentoProducao() {
   const [filtrosCardOpen, setFiltrosCardOpen] = useState(false);
   /** View do card: grid de documentos (true) ou tabela do documento (false). */
   const [showDocumentGridForRange, setShowDocumentGridForRange] = useState(true);
-  /** Documento selecionado no grid (chave composta por doc_ordem_global/doc_numero/filial). */
+  /** Documento selecionado no grid (chave: data + doc_ordem_global + doc_numero + filial). */
   const [selectedDocKey, setSelectedDocKey] = useState<string | null>(null);
   /** Valores dos filtros dentro do card (só aplicados ao clicar em "Filtrar"). */
   const [dataFiltroPending, setDataFiltroPending] = useState(hoje);
@@ -332,6 +383,7 @@ export default function PlanejamentoProducao() {
   /** Filial do novo documento (ao clicar em "Novo documento"); alterar aqui não dispara filtro. */
   const [filialNovoDocumento, setFilialNovoDocumento] = useState<string>("");
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestCodeByRowRef = useRef<Record<number, string>>({});
   const isMobile = useIsMobile();
   /** Ao entrar na aba PCP, abrir direto o último documento (só uma vez por carga). */
   const hasAutoOpenedLastDocRef = useRef(false);
@@ -339,6 +391,8 @@ export default function PlanejamentoProducao() {
   const lastLocalChangeAtRef = useRef(0);
   /** Timeout do debounce do realtime para não recarregar a cada tecla. */
   const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** doc_numero/doc_ordem_global reutilizados em todas as linhas do mesmo "Novo documento" até recarregar. */
+  const pendingNovoDocIdentityRef = useRef<{ doc_numero: number; doc_ordem_global: number } | null>(null);
   const { setDocumentNav } = useDocumentNav();
 
   // --- Estado do Dashboard PCP (acima do card) ---
@@ -403,7 +457,17 @@ export default function PlanejamentoProducao() {
     setNewDocumentIndex(null);
     try {
       const list = await getOcppByDateRange(dataInicio, dataFim, filialFiltro || undefined);
-      setRegistros(list);
+      if (list.length === 0) {
+        const bounds = await getOcppDateBounds(filialFiltro || undefined);
+        if (bounds.minDate && bounds.maxDate && (bounds.minDate !== dataInicio || bounds.maxDate !== dataFim)) {
+          setDataFiltro(bounds.minDate);
+          setDataFiltroPara(bounds.maxDate);
+          setDataFiltroPending(bounds.minDate);
+          setDataFiltroParaPending(bounds.maxDate);
+          return;
+        }
+      }
+      setRegistros(list.map((row) => normalizeRowUnitsAndDerivedFor(row, productionLines)));
     } catch (e) {
       console.error("Erro ao carregar OCPP:", e);
       toastRef.current({
@@ -413,13 +477,19 @@ export default function PlanejamentoProducao() {
       });
       setRegistros([]);
     } finally {
+      pendingNovoDocIdentityRef.current = null;
       setLoading(false);
     }
-  }, [dataFiltro, dataFiltroPara, filialFiltro]);
+  }, [dataFiltro, dataFiltroPara, filialFiltro, productionLines]);
 
   useEffect(() => {
     loadRegistros();
   }, [loadRegistros]);
+
+  useEffect(() => {
+    if (registros.length === 0 || productionLines.length === 0) return;
+    setRegistros((prev) => prev.map((row) => normalizeRowUnitsAndDerivedFor(row, productionLines)));
+  }, [productionLines]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Sincronização em tempo real: quando outro usuário alterar a OCPP, recarrega após debounce. Ignora eventos logo após nossa própria alteração para não interromper o cadastro. */
   useEffect(() => {
@@ -606,22 +676,38 @@ export default function PlanejamentoProducao() {
     ? registros.filter((r) => (r.filial_nome || "").trim() === filialFiltro)
     : registros ?? [];
 
+  /** Documento = data + identificadores SAP + filial. Sem a data, linhas de dias diferentes com o mesmo doc_numero/null viravam um único documento. */
   const getDocKey = useCallback((r: OCPPRow) => {
+    const day =
+      r.data != null && String(r.data).trim() !== "" ? String(r.data).split("T")[0] : "null";
     const ord = r.doc_ordem_global != null ? String(r.doc_ordem_global) : "null";
     const num = r.doc_numero != null ? String(r.doc_numero) : "null";
     const filial = (r.filial_nome || "").trim() || "null";
-    return `${ord}|${num}|${filial}`;
+    return `${day}|${ord}|${num}|${filial}`;
   }, []);
 
   const documentosDoPeriodo = useMemo(() => {
-    const map = new Map<string, { key: string; doc_numero: number | null; doc_ordem_global: number | null; filial_nome: string | null; rows: OCPPRow[] }>();
+    const map = new Map<
+      string,
+      {
+        key: string;
+        data_dia: string;
+        doc_numero: number | null;
+        doc_ordem_global: number | null;
+        filial_nome: string | null;
+        rows: OCPPRow[];
+      }
+    >();
     registrosBaseFilial.forEach((r) => {
       const key = getDocKey(r);
+      const day =
+        r.data != null && String(r.data).trim() !== "" ? String(r.data).split("T")[0] : "";
       const existing = map.get(key);
       if (existing) existing.rows.push(r);
       else {
         map.set(key, {
           key,
+          data_dia: day,
           doc_numero: r.doc_numero ?? null,
           doc_ordem_global: r.doc_ordem_global ?? null,
           filial_nome: r.filial_nome ?? null,
@@ -632,6 +718,8 @@ export default function PlanejamentoProducao() {
 
     const list = Array.from(map.values());
     list.sort((a, b) => {
+      const cmpData = (a.data_dia || "").localeCompare(b.data_dia || "");
+      if (cmpData !== 0) return cmpData;
       const an = a.doc_numero ?? 0;
       const bn = b.doc_numero ?? 0;
       if (an !== bn) return an - bn;
@@ -708,7 +796,11 @@ export default function PlanejamentoProducao() {
   /** Busca item na OCTI pelo código e preenche descrição, unidade, grupo, Uni. Basqueta e Uni. Chapa (a partir da unidade do item). Atualiza a UI na hora e persiste no banco. */
   const fetchItemAndFillRow = useCallback(
     async (rowId: number, codeVal: string) => {
-      const payload: Partial<OCPPInsertPayload> = { Code: codeVal || null };
+      const normalizedCode = normalizeItemCode(codeVal);
+      const latestCode = latestCodeByRowRef.current[rowId] ?? "";
+      if (normalizedCode !== latestCode) return;
+      if (!isValidItemCode(normalizedCode)) return;
+      const payload: Partial<OCPPInsertPayload> = { Code: normalizedCode || null };
       if (codeVal) {
         let item: Awaited<ReturnType<typeof getItemByCode>> = null;
         try {
@@ -722,6 +814,16 @@ export default function PlanejamentoProducao() {
           });
         }
         if (item) {
+          const currentRow = registros.find((r) => r.id === rowId);
+          const rule = getLinhaRuleUnitsFor(currentRow?.tipo_linha, productionLines);
+          let unidadeBase = (currentRow?.unidade_base ?? "").trim();
+          let unidadeChapa = (currentRow?.unidade_chapa ?? "").trim();
+          if (rule) {
+            unidadeBase = rule.unidadeBase;
+            unidadeChapa = rule.unidadeChapa;
+          }
+          const qtdBasqueta = calcQtdBasqueta(currentRow?.quantidade_kg_tuneo ?? 0, unidadeBase);
+          const qtdChapa = calcQtdChapa(qtdBasqueta, unidadeChapa);
           const unidade = (item as { unidade_medida?: string; U_Uom?: string; u_uom?: string }).unidade_medida
             ?? (item as { U_Uom?: string }).U_Uom
             ?? (item as { u_uom?: string }).u_uom
@@ -729,13 +831,24 @@ export default function PlanejamentoProducao() {
           payload.descricao = (item as { nome_item?: string; Name?: string }).nome_item ?? (item as { Name?: string }).Name ?? "";
           payload.unidade = unidade;
           payload.grupo = (item as { grupo_itens?: string; U_ItemGroup?: string }).grupo_itens ?? (item as { U_ItemGroup?: string }).U_ItemGroup ?? "";
-          payload.unidade_base = unidade;
-          payload.unidade_chapa = unidade;
+          payload.unidade_base = unidadeBase;
+          payload.unidade_chapa = unidadeChapa;
+          payload.quantidade_basqueta = qtdBasqueta;
+          payload.quantidade_chapa = qtdChapa;
           // Atualizar a UI imediatamente (antes de salvar)
           setRegistros((prev) =>
             prev.map((r) =>
               r.id === rowId
-                ? { ...r, descricao: payload.descricao ?? "", unidade: payload.unidade ?? "", grupo: payload.grupo ?? "", unidade_base: payload.unidade_base ?? "", unidade_chapa: payload.unidade_chapa ?? "" }
+                ? {
+                    ...r,
+                    descricao: payload.descricao ?? "",
+                    unidade: payload.unidade ?? "",
+                    grupo: payload.grupo ?? "",
+                    unidade_base: payload.unidade_base ?? "",
+                    unidade_chapa: payload.unidade_chapa ?? "",
+                    quantidade_basqueta: payload.quantidade_basqueta ?? 0,
+                    quantidade_chapa: payload.quantidade_chapa ?? 0,
+                  }
                 : r
             )
           );
@@ -763,10 +876,12 @@ export default function PlanejamentoProducao() {
       lastLocalChangeAtRef.current = Date.now();
       try {
         const updated = await updateOcpp(rowId, payload);
+        const currentLatest = latestCodeByRowRef.current[rowId] ?? "";
+        if (normalizeItemCode(codeVal) !== currentLatest) return;
         setRegistros((prev) =>
           prev.map((r) =>
             r.id === rowId
-              ? { ...updated, Code: prev.find((x) => x.id === rowId)?.Code ?? (codeVal || updated.Code) }
+              ? { ...updated, Code: (normalizedCode || prev.find((x) => x.id === rowId)?.Code) ?? updated.Code }
               : r
           )
         );
@@ -778,7 +893,7 @@ export default function PlanejamentoProducao() {
         });
       }
     },
-    [toast]
+    [toast, registros, productionLines]
   );
 
   const CODE_LOOKUP_DEBOUNCE_MS = 500;
@@ -787,6 +902,7 @@ export default function PlanejamentoProducao() {
   const handleCodeChange = useCallback(
     (row: OCPPRow, value: string) => {
       setRowField(row.id, "Code", value || null);
+      latestCodeByRowRef.current[row.id] = normalizeItemCode(value);
       if (codeLookupTimeoutRef.current) {
         clearTimeout(codeLookupTimeoutRef.current);
         codeLookupTimeoutRef.current = null;
@@ -807,7 +923,17 @@ export default function PlanejamentoProducao() {
   /** Ao sair do campo Código: cancela o debounce e busca na OCTI na hora. */
   const handleCodeBlur = useCallback(
     (row: OCPPRow, codeStr: string) => {
-      const codeVal = (codeStr ?? "").trim();
+      const codeVal = normalizeItemCode(codeStr);
+      if (!isValidItemCode(codeVal)) {
+        toast({
+          title: "Código inválido",
+          description: `O código do item deve ter no mínimo ${MIN_ITEM_CODE_LENGTH} caracteres.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      setRowField(row.id, "Code", codeVal || null);
+      latestCodeByRowRef.current[row.id] = codeVal;
       if (codeLookupTimeoutRef.current) {
         clearTimeout(codeLookupTimeoutRef.current);
         codeLookupTimeoutRef.current = null;
@@ -821,7 +947,7 @@ export default function PlanejamentoProducao() {
   const rowToPayload = useCallback((row: OCPPRow): Partial<OCPPInsertPayload> => ({
     data: row.data ?? "",
     op: row.op ?? null,
-    Code: row.Code ?? null,
+    Code: normalizeItemCode(row.Code),
     descricao: row.descricao ?? null,
     unidade: row.unidade ?? null,
     grupo: row.grupo ?? null,
@@ -879,6 +1005,15 @@ export default function PlanejamentoProducao() {
       toast({ title: "Nada para salvar", description: "Não há linhas para salvar.", variant: "destructive" });
       return;
     }
+    const invalidCodeRow = rowsToSave.find((r) => !isValidItemCode(r.Code));
+    if (invalidCodeRow) {
+      toast({
+        title: "Código inválido",
+        description: `Código do item deve ter no mínimo ${MIN_ITEM_CODE_LENGTH} caracteres.`,
+        variant: "destructive",
+      });
+      return;
+    }
     lastLocalChangeAtRef.current = Date.now();
     setSavingAll(true);
     try {
@@ -904,6 +1039,7 @@ export default function PlanejamentoProducao() {
   /** Criar novo documento: limpa a lista; usa filial atual (ou filial do filtro) para o novo doc; alterar filial no header não filtra. */
   const createNewDocument = useCallback(() => {
     const totalDocs = documentosDoPeriodo.length;
+    pendingNovoDocIdentityRef.current = null;
     setNewDocumentIndex(totalDocs + 1);
     setFilialNovoDocumento(filialFiltro || "");
     setRegistros([]);
@@ -981,10 +1117,48 @@ export default function PlanejamentoProducao() {
       payload.filial_nome = (first?.filial_nome ?? doc?.filial_nome ?? filialFiltro) || null;
       if (first?.doc_numero != null) payload.doc_numero = first.doc_numero;
       if (first?.doc_ordem_global != null) payload.doc_ordem_global = first.doc_ordem_global;
-    } else {
+    } else if (isNovoDoc) {
       payload = emptyPayload(dataFiltro.split("T")[0]);
-      const filial = isNovoDoc ? filialNovoDocumento : filialFiltro;
+      const filial = filialNovoDocumento || filialFiltro;
+      payload.filial_nome = filial ? filial : null;
+      try {
+        if (pendingNovoDocIdentityRef.current == null) {
+          pendingNovoDocIdentityRef.current = await getNextOcppDocIdentity(payload.data, payload.filial_nome);
+        }
+        const idn = pendingNovoDocIdentityRef.current;
+        payload.doc_numero = idn.doc_numero;
+        payload.doc_ordem_global = idn.doc_ordem_global;
+      } catch (e) {
+        toast({
+          title: "Erro",
+          description: e instanceof Error ? e.message : "Não foi possível obter o número do documento.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } else if (documentosDoPeriodo.length === 0) {
+      payload = emptyPayload(dataFiltro.split("T")[0]);
+      const filial = filialFiltro;
       if (filial) payload.filial_nome = filial;
+      try {
+        const idn = await getNextOcppDocIdentity(payload.data, payload.filial_nome);
+        payload.doc_numero = idn.doc_numero;
+        payload.doc_ordem_global = idn.doc_ordem_global;
+      } catch (e) {
+        toast({
+          title: "Erro",
+          description: e instanceof Error ? e.message : "Não foi possível obter o número do documento.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } else {
+      toast({
+        title: "Selecione um documento",
+        description: "Escolha um documento na lista, use Novo documento ou ajuste o filtro de filial.",
+        variant: "destructive",
+      });
+      return;
     }
     lastLocalChangeAtRef.current = Date.now();
     try {

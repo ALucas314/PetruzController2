@@ -196,6 +196,28 @@ export async function getOcppByDateRange(
   return rows.map((r) => mapOcppRow(r));
 }
 
+/** Retorna menor e maior data com registros na OCPP, opcionalmente por filial. */
+export async function getOcppDateBounds(
+  filialNome?: string | null
+): Promise<{ minDate: string | null; maxDate: string | null }> {
+  const filialTrim = filialNome != null && String(filialNome).trim() !== "" ? String(filialNome).trim() : null;
+
+  let minQ = supabase.from("OCPP").select("data").not("data", "is", null).order("data", { ascending: true }).limit(1);
+  let maxQ = supabase.from("OCPP").select("data").not("data", "is", null).order("data", { ascending: false }).limit(1);
+  if (filialTrim) {
+    minQ = minQ.eq("filial_nome", filialTrim);
+    maxQ = maxQ.eq("filial_nome", filialTrim);
+  }
+
+  const [{ data: minData, error: minErr }, { data: maxData, error: maxErr }] = await Promise.all([minQ, maxQ]);
+  if (minErr) throw minErr;
+  if (maxErr) throw maxErr;
+
+  const minDate = minData?.[0]?.data ? String(minData[0].data).split("T")[0] : null;
+  const maxDate = maxData?.[0]?.data ? String(maxData[0].data).split("T")[0] : null;
+  return { minDate, maxDate };
+}
+
 export type OCPPInsertPayload = {
   data: string;
   op?: string | null;
@@ -284,6 +306,34 @@ export async function createOcpp(payload: OCPPInsertPayload): Promise<OCPPRow> {
   const { data, error } = await supabase.from("OCPP").insert(row).select(OCPP_SELECT_BASE).single();
   if (error) throw error;
   return mapOcppRow(data as Record<string, unknown>);
+}
+
+/**
+ * Próximo doc_numero e doc_ordem_global para uma data + filial, a partir dos máximos já gravados na OCPP.
+ * Valores null no banco contam como 0, para novos documentos ganharem números explícitos e não colarem no bucket legado null|null.
+ */
+export async function getNextOcppDocIdentity(
+  data: string,
+  filialNome: string | null | undefined
+): Promise<{ doc_numero: number; doc_ordem_global: number }> {
+  const day = String(data).split("T")[0];
+  if (!day) return { doc_numero: 1, doc_ordem_global: 1 };
+  const f = filialNome != null ? String(filialNome).trim() : "";
+  let query = supabase.from("OCPP").select("doc_numero, doc_ordem_global").eq("data", day);
+  if (f) query = query.eq("filial_nome", f);
+  else query = query.is("filial_nome", null);
+  const { data: rows, error } = await query;
+  if (error) throw error;
+  let maxNum = 0;
+  let maxOrd = 0;
+  for (const r of rows || []) {
+    const row = r as Record<string, unknown>;
+    const n = row.doc_numero != null && row.doc_numero !== "" ? Number(row.doc_numero) : 0;
+    const o = row.doc_ordem_global != null && row.doc_ordem_global !== "" ? Number(row.doc_ordem_global) : 0;
+    if (Number.isFinite(n) && n > maxNum) maxNum = n;
+    if (Number.isFinite(o) && o > maxOrd) maxOrd = o;
+  }
+  return { doc_numero: maxNum + 1, doc_ordem_global: maxOrd + 1 };
 }
 
 /** Converte campo do payload para nome da coluna no Supabase: code, "Previsão_Latas" */
