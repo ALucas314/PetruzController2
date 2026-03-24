@@ -505,6 +505,11 @@
     letter-spacing: 0.02em;
     fill: hsl(var(--foreground)) !important;
   }
+  /* Rótulo % dentro da barra (Realizado por turno) — não usar foreground */
+  .dashboard-linha-chart .recharts-label-list text.bihoraria-label-percent,
+  .dashboard-linha-chart .recharts-label-list g.bihoraria-label-percent text {
+    fill: #ffffff !important;
+  }
   .dashboard-linha-chart-wrap {
     background: linear-gradient(160deg, hsl(var(--primary) / 0.04) 0%, transparent 50%, hsl(var(--muted) / 0.06) 100%);
     box-shadow: inset 0 1px 0 0 hsl(var(--border) / 0.5), 0 1px 2px rgba(0, 0, 0, 0.04);

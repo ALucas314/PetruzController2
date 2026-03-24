@@ -599,32 +599,120 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
     });
   }
 
-  /** Registros de bi-horária por turno (JSONB no primeiro registro OCPD do documento) */
-  const biHorariaRegistros: Array<{
-    numero: number;
-    periodo: string;
-    codigo_item: string | null;
-    descricao_item: string | null;
-    qtd_planejada: number;
-    qtd_realizada: number;
-  }> = [];
-  const rawBi = first?.bi_horaria_registros;
-  if (rawBi && Array.isArray(rawBi) && rawBi.length > 0) {
-    const arr = rawBi as Array<Record<string, unknown>>;
-    for (let idx = 0; idx < arr.length; idx++) {
-      const r = arr[idx];
-      biHorariaRegistros.push({
-        numero: Number(r.numero ?? idx + 1),
-        periodo: String(r.periodo ?? "Manhã"),
-        codigo_item: r.codigo_item != null ? String(r.codigo_item) : null,
-        descricao_item: r.descricao_item != null ? String(r.descricao_item) : null,
-        qtd_planejada: parseBrazilNumber(r.qtd_planejada ?? 0),
-        qtd_realizada: parseBrazilNumber(r.qtd_realizada ?? 0),
-      });
-    }
-  }
+  /** Bi-horária fica só na OCPH (não na OCPD). */
+  const biHorariaRegistros = await loadBiHorariaFromOcph({
+    dataDia,
+    filialNome: params.filialNome,
+    docId: params.docId,
+    });
 
   return { data: rows, count: rows.length, reprocessos, biHorariaRegistros };
+}
+
+type BiHorariaPayloadRow = { numero: number; data: string; hora: string; qtd_realizada: number };
+
+/** Mesma ordem das 5 linhas fixas no front: turno 1,2,1,2,3 na coluna OCPH.turno */
+const BI_HORARIA_TURNO_OCPH = [1, 2, 1, 2, 3] as const;
+
+/** Registros bi-horária gravados apenas em OCPH (sem vínculo com OCPD). */
+async function loadBiHorariaFromOcph(params: {
+  dataDia: string;
+  filialNome?: string | null;
+  docId?: string | null;
+}): Promise<
+  Array<{
+    numero: number;
+    data: string;
+    hora: string;
+    qtd_realizada: number;
+  }>
+> {
+  const filial = params.filialNome && String(params.filialNome).trim() !== "" ? String(params.filialNome).trim() : null;
+  const day = params.dataDia.split("T")[0];
+
+  let q = supabase.from("OCPH").select("*").like("observacoes", "Bi-horária nº%").order("id", { ascending: true });
+  if (filial) q = q.eq("filial_nome", filial);
+
+  if (params.docId != null && params.docId !== "") {
+    q = q.eq("doc_id", String(params.docId).trim());
+  } else {
+    q = q.is("doc_id", null).eq("data_dia", day);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  const rows = data || [];
+  return rows.map((row: Record<string, unknown>, idx: number) => {
+    const obs = String(row.observacoes ?? "");
+    const m = obs.match(/(\d+)/);
+    const num = m ? parseInt(m[1], 10) : idx + 1;
+    return {
+      numero: Number.isFinite(num) ? num : idx + 1,
+      data: String(row.data_dia ?? day).split("T")[0],
+      hora: row.bi_horaria != null ? String(row.bi_horaria) : "",
+      qtd_realizada: parseBrazilNumber(row.qtd_realizada ?? 0),
+    };
+  });
+}
+
+/**
+ * Bi-horária: só OCPH. Remove linhas deste documento (doc_id + filial + prefixo observações) e reinsere. ocpd_id não é usado.
+ */
+async function syncBiHorariaToOcph(params: {
+  filialNome: string | null;
+  docId: string | null;
+  dataDay: string;
+  biHorariaPayload: BiHorariaPayloadRow[] | null;
+}) {
+  const { filialNome, docId, dataDay, biHorariaPayload } = params;
+  const filial = filialNome && String(filialNome).trim() !== "" ? String(filialNome).trim() : null;
+  const day = dataDay.split("T")[0];
+
+  let delQ = supabase.from("OCPH").delete().like("observacoes", "Bi-horária nº%");
+  if (filial) delQ = delQ.eq("filial_nome", filial);
+  if (docId != null && String(docId).trim() !== "") {
+    delQ = delQ.eq("doc_id", String(docId).trim());
+  } else {
+    delQ = delQ.is("doc_id", null).eq("data_dia", day);
+  }
+  const { error: delErr } = await delQ;
+  if (delErr) throw delErr;
+
+  if (!biHorariaPayload || biHorariaPayload.length === 0) return;
+
+  const docUuid = docId != null && String(docId).trim() !== "" ? String(docId).trim() : null;
+  const rows = biHorariaPayload.map((r, idx) => {
+    const dday = String(r.data ?? "").split("T")[0];
+    const hora = r.hora != null && String(r.hora).trim() !== "" ? String(r.hora).trim() : null;
+    const turno =
+      idx >= 0 && idx < BI_HORARIA_TURNO_OCPH.length ? BI_HORARIA_TURNO_OCPH[idx] : 1;
+    return {
+      data_dia: dday,
+      codigo_item: null,
+      descricao_item: null,
+      qtd_planejada: 0,
+      qtd_realizada: r.qtd_realizada,
+      bi_horaria: hora,
+      observacoes: `Bi-horária nº ${r.numero}`,
+      filial_nome: filial,
+      doc_id: docUuid,
+      ocpd_id: null,
+      turno,
+    };
+  });
+  const { error: insErr } = await supabase.from("OCPH").insert(rows);
+  if (insErr) throw insErr;
+}
+
+/** doc_ids que possuem ao menos um registro bi-horária na OCPH (navegação / filtro). */
+export async function getOcphDocIdsComBiHoraria(): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("OCPH")
+    .select("doc_id")
+    .not("doc_id", "is", null)
+    .like("observacoes", "Bi-horária nº%");
+  if (error) throw error;
+  return new Set((data ?? []).map((r: { doc_id: string | null }) => String(r.doc_id ?? "")).filter(Boolean));
 }
 
 // --- Produção save (payload no formato do frontend: quantidadePlanejada, codigoItem, etc.) ---
@@ -641,7 +729,7 @@ export async function saveProducao(payload: {
   totalCortado?: number | string;
   percentualMeta?: number | string;
   totalReprocesso?: number | string;
-  /** Registros agregados por turno (Manhã/Tarde/Noite/Madrugada) — gravados no primeiro OCPD */
+  /** Registros bi-horária — apenas tabela OCPH (não grava na OCPD) */
   biHorariaRegistros?: Array<Record<string, unknown>>;
 }) {
   const { dataDia, filialNome, docId, items, existingIds, reprocessos, biHorariaRegistros, latasPrevista = 0, latasRealizadas = 0, latasBatidas = 0, totalCortado = 0, percentualMeta: pctMeta = 0, totalReprocesso: totalRep = 0 } = payload;
@@ -704,10 +792,8 @@ export async function saveProducao(payload: {
     (biHorariaRegistros?.length ?? 0) > 0
       ? (biHorariaRegistros || []).map((r: Record<string, unknown>, idx: number) => ({
           numero: Number(r.numero ?? idx + 1),
-          periodo: String(r.periodo ?? "Manhã").trim() || "Manhã",
-          codigo_item: r.codigoItem != null && String(r.codigoItem).trim() !== "" ? String(r.codigoItem).trim() : null,
-          descricao_item: r.descricaoItem != null && String(r.descricaoItem).trim() !== "" ? String(r.descricaoItem).trim() : null,
-          qtd_planejada: parseBrazilNumber(r.quantidadePlanejada ?? r.qtd_planejada ?? 0),
+          data: String(r.dataDia ?? r.data ?? dataDia).split("T")[0],
+          hora: String(r.hora ?? "").trim(),
           qtd_realizada: parseBrazilNumber(r.quantidadeRealizada ?? r.qtd_realizada ?? 0),
         }))
       : null;
@@ -761,10 +847,6 @@ export async function saveProducao(payload: {
   };
     if (index === 0 && reprocessosPayload && reprocessosPayload.length > 0) {
       row.reprocessos = reprocessosPayload;
-    }
-    // Só envia se houver dados — evita erro em bancos sem a coluna bi_horaria_registros; com coluna, use migração OCPD_ADD_COLUMN_BI_HORARIA_REGISTROS_JSONB.sql
-    if (index === 0 && biHorariaPayload && biHorariaPayload.length > 0) {
-      row.bi_horaria_registros = biHorariaPayload;
     }
     return row;
   };
@@ -834,7 +916,9 @@ export async function saveProducao(payload: {
       const { data: insertedData, error: inErr } = await supabase.from("OCPD").insert(row).select("id").single();
       if (inErr) throw inErr;
       inserted++;
-      if (insertedData?.id) insertedRows.push({ id: insertedData.id as number });
+      if (insertedData?.id) {
+        insertedRows.push({ id: insertedData.id as number });
+      }
     }
   }
   const toDelete = existingIds.slice(items.length).filter((id) => id != null && Number.isInteger(Number(id)));
@@ -849,6 +933,16 @@ export async function saveProducao(payload: {
       "Nenhum registro foi gravado. Execute no Supabase o script RLS_TODAS_TABELAS_FRONTEND.sql (políticas de segurança da tabela OCPD)."
     );
   }
+
+  if (items.length > 0) {
+    await syncBiHorariaToOcph({
+      filialNome: filialFilter,
+      docId: docId && docId.trim() !== "" ? docId.trim() : null,
+      dataDay,
+      biHorariaPayload: biHorariaPayload as BiHorariaPayloadRow[] | null,
+    });
+  }
+
   return { success: true, inserted, updated, total: items.length, data: insertedRows };
 }
 
