@@ -8,9 +8,12 @@ import {
   LucideIcon,
   TrendingUp,
   ChevronDown,
-  CalendarCheck,
   FileSpreadsheet,
   FileText,
+  Package,
+  Thermometer,
+  Tags,
+  ArrowLeftRight,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -44,9 +47,19 @@ const menuItems: MenuItem[] = [
     icon: Factory,
     subItems: [
       { title: "Acompanhamento diário da produção", url: "/analise-producao", icon: TrendingUp },
-      // { title: "Planejamento (PCP)", url: "/planejamento-pcp", icon: CalendarCheck }, // oculto por enquanto
+      // { title: "Planejamento (PCP)", url: "/planejamento-pcp", icon: Factory }, // oculto por enquanto
       { title: "Cadastro de Linhas", url: "/cadastro-linhas", icon: Factory }
     ]
+  },
+  {
+    title: "Estoque",
+    url: "/estoque",
+    icon: Package,
+    subItems: [
+      { title: "Cadastro de Túneis", url: "/estoque/cadastro-tuneis", icon: Thermometer },
+      { title: "Cadastro de tipo de produtos", url: "/estoque/cadastro-tipo-produto", icon: Tags },
+      { title: "Movimentação de Túneis", url: "/estoque/movimentacao-tuneis", icon: ArrowLeftRight },
+    ],
   },
   { title: "Relatórios", url: "/relatorios", icon: FileText },
   { title: "Importar Excel", url: "/importar-excel", icon: FileSpreadsheet },

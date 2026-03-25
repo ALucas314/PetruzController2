@@ -33,6 +33,9 @@ import ImportarExcel from "./pages/ImportarExcel";
 import CadastroLinhas from "./pages/CadastroLinhas";
 import Relatorios from "./pages/Relatorios";
 import GuiaDesenvolvedor from "./pages/GuiaDesenvolvedor";
+import ControleTuneis from "./pages/ControleTuneis";
+import CadastroTipoProduto from "./pages/CadastroTipoProduto";
+import MovimentacaoTuneis from "./pages/MovimentacaoTuneis";
 
 const queryClient = new QueryClient();
 
@@ -77,6 +80,10 @@ const router = createBrowserRouter([
       { path: "guia-desenvolvedor", element: <ProtectedRoute><GuiaDesenvolvedor /></ProtectedRoute> },
       { path: "financeiro", element: <ProtectedRoute><PlaceholderPage title="Financeiro" /></ProtectedRoute> },
       { path: "estoque", element: <ProtectedRoute><PlaceholderPage title="Estoque" /></ProtectedRoute> },
+      { path: "estoque/cadastro-tuneis", element: <ProtectedRoute><ControleTuneis /></ProtectedRoute> },
+      { path: "estoque/cadastro-tipo-produto", element: <ProtectedRoute><CadastroTipoProduto /></ProtectedRoute> },
+      { path: "estoque/movimentacao-tuneis", element: <ProtectedRoute><MovimentacaoTuneis /></ProtectedRoute> },
+      { path: "estoque/controle-tuneis", element: <Navigate to="/estoque/cadastro-tuneis" replace /> },
       { path: "configuracoes", element: <ProtectedRoute><PlaceholderPage title="Configurações" /></ProtectedRoute> },
       { path: "*", element: <NotFound /> },
     ],

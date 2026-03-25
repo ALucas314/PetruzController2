@@ -34,6 +34,10 @@ const routeTitles: Record<string, string> = {
   "/itens": "Itens",
   "/importar-excel": "Importar Excel",
   "/relatorios": "Relatórios",
+  "/estoque": "Estoque",
+  "/estoque/cadastro-tuneis": "Cadastro de Túneis",
+  "/estoque/cadastro-tipo-produto": "Cadastro de tipo de produtos",
+  "/estoque/movimentacao-tuneis": "Movimentação de Túneis",
 };
 
 function formatDataDiaBR(iso: string): string {

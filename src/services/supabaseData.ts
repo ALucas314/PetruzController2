@@ -66,6 +66,12 @@ export async function deleteLine(id: number) {
   if (error) throw error;
 }
 
+export type { OCTTRow } from "./octt";
+export { getTuneis, createTunel, updateTunel, deleteTunel } from "./octt";
+
+export type { CDTPRow } from "./cdtp";
+export { getTiposProduto, createTipoProduto, updateTipoProduto, deleteTipoProduto } from "./cdtp";
+
 // --- OCPP (Planejamento de Produção) ---
 // Schema real no Supabase: code (minúsculo), "Previsão_Latas" (com acento), filial_nome, doc_ordem_global, doc_numero
 const OCPP_SELECT_BASE =

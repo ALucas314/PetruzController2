@@ -32,6 +32,24 @@ DROP POLICY IF EXISTS "octi_authenticated_all" ON "OCTI";
 CREATE POLICY "octi_authenticated_all" ON "OCTI"
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- OCTT (cadastro de túneis)
+ALTER TABLE "OCTT" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "octt_authenticated_all" ON "OCTT";
+CREATE POLICY "octt_authenticated_all" ON "OCTT"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- CDTP (cadastro de tipo de produtos — estoque)
+ALTER TABLE "CDTP" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "cdtp_authenticated_all" ON "CDTP";
+CREATE POLICY "cdtp_authenticated_all" ON "CDTP"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- OCMT (movimentação de túneis)
+ALTER TABLE "OCMT" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ocmt_authenticated_all" ON "OCMT";
+CREATE POLICY "ocmt_authenticated_all" ON "OCMT"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- OCTP (problemas e ações / status)
 ALTER TABLE "OCTP" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "octp_authenticated_all" ON "OCTP";
