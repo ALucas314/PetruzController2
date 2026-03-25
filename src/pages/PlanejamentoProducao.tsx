@@ -1399,7 +1399,7 @@ export default function PlanejamentoProducao() {
                 </div>
               </div>
               {/* Desktop: botões à direita */}
-              <div className="hidden min-[892px]:flex flex-wrap items-center gap-2 order-2">
+              <div className="hidden min-[892px]:flex items-center gap-2 order-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => createNewDocument()}
@@ -1537,33 +1537,6 @@ export default function PlanejamentoProducao() {
                 </DialogContent>
               </Dialog>
               <div className="flex flex-col sm:flex-row sm:ml-auto items-stretch sm:items-center gap-2 w-full sm:w-auto">
-                {!showDocumentGridForRange && documentosDoPeriodo.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewDocumentIndex(null);
-                      setSelectedDocKey(null);
-                      setShowDocumentGridForRange(true);
-                    }}
-                    className="inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0 w-full sm:w-auto"
-                    aria-label="Ver documentos"
-                    title="Ver documentos"
-                  >
-                    <span>Documentos</span>
-                  </button>
-                )}
-
-                {!showDocumentGridForRange && (
-                  <button
-                    type="button"
-                    onClick={addLinha}
-                    disabled={savingId === -1}
-                    className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 h-9 rounded-md px-3 w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
-                  >
-                    {savingId === -1 ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Plus className="h-4 w-4 shrink-0" />}
-                    <span className="truncate">Adicionar Linha</span>
-                  </button>
-                )}
               </div>
             </div>
 
@@ -1679,6 +1652,17 @@ export default function PlanejamentoProducao() {
               </div>
             ) : (
               <>
+              <div className="mb-5 flex w-full justify-end">
+                <button
+                  type="button"
+                  onClick={addLinha}
+                  disabled={savingId === -1}
+                  className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 h-9 rounded-md px-3 w-full sm:w-auto shrink-0 gap-2 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-md hover:shadow-lg transition-all duration-300 z-10 relative"
+                >
+                  {savingId === -1 ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Plus className="h-4 w-4 shrink-0" />}
+                  <span className="truncate">Adicionar Linha</span>
+                </button>
+              </div>
               <div className="overflow-x-auto -mx-2 sm:mx-0 rounded-lg border border-border/40 [&::-webkit-scrollbar]:h-2" style={{ WebkitOverflowScrolling: "touch" }}>
                 <div className="inline-block min-w-full align-middle">
                   <Table className="min-w-[2200px] sm:min-w-0">

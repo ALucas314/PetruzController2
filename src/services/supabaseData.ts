@@ -704,6 +704,33 @@ async function syncBiHorariaToOcph(params: {
   if (insErr) throw insErr;
 }
 
+/** Salva somente a Bi-horária (tabela OCPH), sem gravar linhas na OCPD. */
+export async function saveBiHorariaDocumento(params: {
+  dataDia: string;
+  filialNome?: string | null;
+  docId?: string | null;
+  biHorariaRegistros?: Array<Record<string, unknown>>;
+}) {
+  const day = String(params.dataDia || "").split("T")[0];
+  if (!day) throw new Error("Data da bi-horária inválida.");
+
+  const payload = (params.biHorariaRegistros ?? []).map((r, idx) => ({
+    numero: Number(r.numero ?? idx + 1),
+    data: String(r.dataDia ?? r.data ?? day).split("T")[0],
+    hora: String(r.hora ?? ""),
+    qtd_realizada: parseBrazilNumber(r.quantidadeRealizada ?? r.qtd_realizada ?? 0),
+  }));
+
+  await syncBiHorariaToOcph({
+    filialNome: params.filialNome ?? null,
+    docId: params.docId ?? null,
+    dataDay: day,
+    biHorariaPayload: payload,
+  });
+
+  return { success: true };
+}
+
 /** doc_ids que possuem ao menos um registro bi-horária na OCPH (navegação / filtro). */
 export async function getOcphDocIdsComBiHoraria(): Promise<Set<string>> {
   const { data, error } = await supabase
@@ -729,10 +756,8 @@ export async function saveProducao(payload: {
   totalCortado?: number | string;
   percentualMeta?: number | string;
   totalReprocesso?: number | string;
-  /** Registros bi-horária — apenas tabela OCPH (não grava na OCPD) */
-  biHorariaRegistros?: Array<Record<string, unknown>>;
 }) {
-  const { dataDia, filialNome, docId, items, existingIds, reprocessos, biHorariaRegistros, latasPrevista = 0, latasRealizadas = 0, latasBatidas = 0, totalCortado = 0, percentualMeta: pctMeta = 0, totalReprocesso: totalRep = 0 } = payload;
+  const { dataDia, filialNome, docId, items, existingIds, reprocessos, latasPrevista = 0, latasRealizadas = 0, latasBatidas = 0, totalCortado = 0, percentualMeta: pctMeta = 0, totalReprocesso: totalRep = 0 } = payload;
   const totalReprocesso = (reprocessos || []).reduce((s, r) => s + parseBrazilNumber(r.quantidade ?? 0), 0);
   const pct = items.length
     ? (items.reduce((s, i) => s + parseBrazilNumber(i.quantidadeRealizada ?? i.qtd_realizada ?? 0), 0) /
@@ -785,16 +810,6 @@ export async function saveProducao(payload: {
           codigo: r.codigo != null ? String(r.codigo) : null,
           descricao: r.descricao != null ? String(r.descricao) : null,
           quantidade: parseFloat(String(r.quantidade ?? 0).replace(",", ".")) || 0,
-        }))
-      : null;
-
-  const biHorariaPayload =
-    (biHorariaRegistros?.length ?? 0) > 0
-      ? (biHorariaRegistros || []).map((r: Record<string, unknown>, idx: number) => ({
-          numero: Number(r.numero ?? idx + 1),
-          data: String(r.dataDia ?? r.data ?? dataDia).split("T")[0],
-          hora: String(r.hora ?? "").trim(),
-          qtd_realizada: parseBrazilNumber(r.quantidadeRealizada ?? r.qtd_realizada ?? 0),
         }))
       : null;
 
@@ -934,15 +949,6 @@ export async function saveProducao(payload: {
     );
   }
 
-  if (items.length > 0) {
-    await syncBiHorariaToOcph({
-      filialNome: filialFilter,
-      docId: docId && docId.trim() !== "" ? docId.trim() : null,
-      dataDay,
-      biHorariaPayload: biHorariaPayload as BiHorariaPayloadRow[] | null,
-    });
-  }
-
   return { success: true, inserted, updated, total: items.length, data: insertedRows };
 }
 
@@ -950,6 +956,84 @@ export async function saveProducao(payload: {
 export async function deleteProducaoRecord(id: number) {
   const { error } = await supabase.from("OCPD").delete().eq("id", Number(id));
   if (error) throw error;
+}
+
+/** Exclui um documento inteiro da Produção (linhas OCPD + bi-horária OCPH). */
+export async function deleteProducaoDocumento(params: {
+  docId?: string | null;
+  dataDia?: string | null;
+  filialNome?: string | null;
+  ocpdIds?: Array<number | null | undefined>;
+}) {
+  const docId = params.docId != null && String(params.docId).trim() !== "" ? String(params.docId).trim() : null;
+  const dataDia = params.dataDia != null && String(params.dataDia).trim() !== "" ? String(params.dataDia).trim() : null;
+  const filialNome = params.filialNome != null && String(params.filialNome).trim() !== "" ? String(params.filialNome).trim() : null;
+  const ocpdIds = (params.ocpdIds ?? [])
+    .map((v) => Number(v))
+    .filter((v) => Number.isInteger(v) && v > 0);
+
+  // OCPD (linhas do documento)
+  if (ocpdIds.length > 0) {
+    let delOcpd = supabase.from("OCPD").delete().in("id", ocpdIds);
+    if (filialNome) delOcpd = delOcpd.eq("filial_nome", filialNome);
+    const { error } = await delOcpd;
+    if (error) throw error;
+  } else if (docId) {
+    let delOcpd = supabase.from("OCPD").delete().eq("doc_id", docId);
+    if (filialNome) delOcpd = delOcpd.eq("filial_nome", filialNome);
+    if (dataDia) delOcpd = delOcpd.eq("data_dia", dataDia);
+    const { error } = await delOcpd;
+    if (error) throw error;
+  } else if (dataDia && filialNome) {
+    // Fallback para documento legado sem doc_id.
+    const { error } = await supabase
+      .from("OCPD")
+      .delete()
+      .is("doc_id", null)
+      .eq("data_dia", dataDia)
+      .eq("filial_nome", filialNome);
+    if (error) throw error;
+  } else {
+    throw new Error("Não foi possível identificar o documento para exclusão.");
+  }
+
+  // OCPH (bi-horária desse documento)
+  let delOcph = supabase.from("OCPH").delete().like("observacoes", "Bi-horária nº%");
+  if (docId) {
+    delOcph = delOcph.eq("doc_id", docId);
+  } else {
+    delOcph = delOcph.is("doc_id", null);
+    if (dataDia) delOcph = delOcph.eq("data_dia", dataDia);
+    if (filialNome) delOcph = delOcph.eq("filial_nome", filialNome);
+  }
+  const { error: delOcphError } = await delOcph;
+  if (delOcphError) throw delOcphError;
+
+  return { success: true };
+}
+
+/** Exclui somente os registros da Bi-horária (OCPH) de um documento. */
+export async function deleteBiHorariaDocumento(params: {
+  docId?: string | null;
+  dataDia?: string | null;
+  filialNome?: string | null;
+}) {
+  const docId = params.docId != null && String(params.docId).trim() !== "" ? String(params.docId).trim() : null;
+  const dataDia = params.dataDia != null && String(params.dataDia).trim() !== "" ? String(params.dataDia).trim() : null;
+  const filialNome = params.filialNome != null && String(params.filialNome).trim() !== "" ? String(params.filialNome).trim() : null;
+
+  let delOcph = supabase.from("OCPH").delete().like("observacoes", "Bi-horária nº%");
+  if (docId) {
+    delOcph = delOcph.eq("doc_id", docId);
+  } else {
+    delOcph = delOcph.is("doc_id", null);
+    if (dataDia) delOcph = delOcph.eq("data_dia", dataDia);
+    if (filialNome) delOcph = delOcph.eq("filial_nome", filialNome);
+  }
+  const { error } = await delOcph;
+  if (error) throw error;
+
+  return { success: true };
 }
 
 // --- Histórico produção ---

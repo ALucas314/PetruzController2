@@ -43,6 +43,7 @@ import {
   getItemByCode,
   loadProducao,
   saveProducao,
+  saveBiHorariaDocumento,
   deleteProducaoRecord,
   getDraft,
   saveDraft,
@@ -1759,12 +1760,6 @@ function Producao() {
           ...r,
           quantidade: parseFormattedNumber(r.quantidade),
         })),
-        biHorariaRegistros: biHorariaRegistros.map((r) => ({
-          dataDia: r.dataDia,
-          hora: r.hora,
-          numero: r.numero,
-          quantidadeRealizada: parseFormattedNumber(r.quantidadeRealizada),
-        })),
         latasPrevista: parseFormattedNumber(latasPrevista),
         latasRealizadas: parseFormattedNumber(latasRealizadas),
         latasBatidas: parseFormattedNumber(latasBatidas),
@@ -1874,6 +1869,49 @@ function Producao() {
     }
   };
   saveToDatabaseRef.current = saveToDatabase;
+
+  const saveBiHorariaToDatabase = async () => {
+    setSaving(true);
+    setSaveStatus(null);
+
+    if (!filialSelecionadaObj || !filialSelecionadaObj.nome) {
+      setSaveStatus({ success: false, message: "Por favor, selecione uma filial antes de salvar" });
+      setSaving(false);
+      return;
+    }
+
+    try {
+      await saveBiHorariaDocumento({
+        dataDia: dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
+        filialNome: filialSelecionadaObj.nome,
+        docId: currentDocId,
+        biHorariaRegistros: biHorariaRegistros.map((r) => ({
+          dataDia: r.dataDia,
+          hora: r.hora,
+          numero: r.numero,
+          quantidadeRealizada: parseFormattedNumber(r.quantidadeRealizada),
+        })),
+      });
+
+      setSaveStatus({ success: true, message: "Bi-horária salva com sucesso!" });
+      await Promise.all([loadAllRecords(), loadHistory()]);
+      toast({
+        title: "Bi-horária salva",
+        description: "Os registros foram gravados sem criar documento no acompanhamento diário.",
+        variant: "default",
+      });
+    } catch (error: any) {
+      const msg = error?.message || "Erro ao salvar bi-horária.";
+      setSaveStatus({ success: false, message: msg });
+      toast({
+        title: "Falha ao salvar bi-horária",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Função para carregar dados do Supabase (docId: null = documento legado, string = documento com doc_id; docOrdemGlobal: quando docId é null, identifica qual doc legado carregar)
   const loadFromDatabase = async (data?: string, filialNomeOverride?: string, docId?: string | null, docOrdemGlobal?: number | null) => {
@@ -3335,16 +3373,40 @@ function Producao() {
                 <LabelList
                   className="bihoraria-label-percent"
                   dataKey="percentual"
-                  position="insideLeft"
-                  offset={10}
-                  formatter={(v: number) =>
-                    v > 0 ? `${v.toFixed(1).replace(".", ",")}%` : ""
-                  }
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    fill: "#ffffff",
-                    textShadow: "0 1px 2px rgba(0,0,0,0.35)",
+                  content={(props: any) => {
+                    const { x, y, width, height, value } = props ?? {};
+                    if (
+                      typeof value !== "number" ||
+                      value <= 0 ||
+                      typeof x !== "number" ||
+                      typeof y !== "number" ||
+                      typeof width !== "number" ||
+                      typeof height !== "number"
+                    ) {
+                      return null;
+                    }
+
+                    // Em barras pequenas, usa rótulo compacto para não "vazar" do SVG.
+                    if (width < 18) return null;
+                    const text = width < 32
+                      ? `${Math.round(value)}%`
+                      : `${value.toFixed(1).replace(".", ",")}%`;
+
+                    return (
+                      <text
+                        className="bihoraria-label-percent"
+                        x={x + 4}
+                        y={y + height / 2}
+                        fill="#ffffff"
+                        fontSize={width < 40 ? 10 : 11}
+                        fontWeight={700}
+                        textAnchor="start"
+                        dominantBaseline="central"
+                        style={{ textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}
+                      >
+                        {text}
+                      </text>
+                    );
                   }}
                 />
                 <LabelList
@@ -3605,7 +3667,7 @@ function Producao() {
                             e.stopPropagation();
                             setGridFiltrosDialogOpen(true);
                           }}
-                          className={producaoFiltrosTriggerClassName}
+                          className={`${producaoFiltrosTriggerClassName} max-[891px]:hidden`}
                           aria-label="Abrir filtros de produção"
                           aria-haspopup="dialog"
                           aria-expanded={gridFiltrosDialogOpen}
@@ -3616,6 +3678,21 @@ function Producao() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-2 w-full min-[892px]:hidden pt-2 items-center max-w-sm mx-auto">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setGridFiltrosDialogOpen(true);
+                        }}
+                        className="inline-flex items-center justify-center gap-2 h-11 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 w-full"
+                        aria-label="Abrir filtros de produção"
+                        aria-haspopup="dialog"
+                        aria-expanded={gridFiltrosDialogOpen}
+                      >
+                        <Filter className="h-4 w-4 shrink-0" />
+                        <span>Filtros</span>
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -3635,7 +3712,7 @@ function Producao() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          saveToDatabase();
+                          saveBiHorariaToDatabase();
                         }}
                         disabled={saving || items.length === 0}
                         className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-success w-full disabled:opacity-50 disabled:cursor-not-allowed"
@@ -3648,7 +3725,7 @@ function Producao() {
                     </div>
                   </div>
                 </div>
-                <div className="hidden min-[892px]:flex flex-wrap items-center gap-2 order-2">
+                <div className="hidden min-[892px]:flex items-center gap-2 order-2 shrink-0">
                   <button
                     type="button"
                     onClick={(e) => {
@@ -3668,7 +3745,7 @@ function Producao() {
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      saveToDatabase();
+                      saveBiHorariaToDatabase();
                     }}
                     disabled={saving || items.length === 0}
                     className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-success/10 to-success/5 border border-success/30 rounded-lg shadow-sm hover:from-success/20 hover:to-success/10 hover:border-success/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-success disabled:opacity-50 disabled:cursor-not-allowed"
@@ -3844,7 +3921,7 @@ function Producao() {
                             e.stopPropagation();
                             setGridFiltrosDialogOpen(true);
                           }}
-                          className={producaoFiltrosTriggerClassName}
+                          className={`${producaoFiltrosTriggerClassName} max-[891px]:hidden`}
                           aria-label="Abrir filtros de produção"
                           aria-haspopup="dialog"
                           aria-expanded={gridFiltrosDialogOpen}
@@ -3857,6 +3934,21 @@ function Producao() {
 
                     {/* Abaixo de 892px: botões logo abaixo da hora/data, empilhados e centralizados */}
                     <div className="flex flex-col gap-2 w-full min-[892px]:hidden pt-2 items-center max-w-sm mx-auto">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setGridFiltrosDialogOpen(true);
+                        }}
+                        className="inline-flex items-center justify-center gap-2 h-11 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 w-full"
+                        aria-label="Abrir filtros de produção"
+                        aria-haspopup="dialog"
+                        aria-expanded={gridFiltrosDialogOpen}
+                      >
+                        <Filter className="h-4 w-4 shrink-0" />
+                        <span>Filtros</span>
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -3893,7 +3985,7 @@ function Producao() {
                 </div>
 
                 {/* A partir de 892px: botões à direita do cabeçalho */}
-                <div className="hidden min-[892px]:flex flex-wrap items-center gap-2 sm:gap-2 order-2">
+                <div className="hidden min-[892px]:flex items-center gap-2 sm:gap-2 order-2 shrink-0">
                   <button
                     type="button"
                     onClick={(e) => {
