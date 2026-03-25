@@ -1318,6 +1318,198 @@ export default function PlanejamentoProducao() {
           </Button>
         </div>
 
+        {/* Dashboard PCP — acima do card de planejamento */}
+        <section className="rounded-2xl border border-border/50 bg-card/95 backdrop-blur-sm shadow-md overflow-hidden" aria-label="Dashboard Planejamento de Produção PCP">
+          <div className="border-b border-border/40 bg-muted/30 px-4 py-3 sm:px-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <h2 className="text-lg sm:text-xl font-bold text-foreground">Planejamento de Produção PCP</h2>
+              <Dialog open={dashboardFiltersOpen} onOpenChange={setDashboardFiltersOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2 shrink-0" aria-label="Abrir filtros do dashboard">
+                    <Filter className="h-4 w-4" />
+                    Filtros
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-[95vw] sm:max-w-md rounded-lg">
+                  <DialogHeader>
+                    <DialogTitle>Filtros do dashboard</DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-2">
+                    <div className="grid gap-2">
+                      <Label>Data (intervalo)</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">De</Label>
+                          <DatePicker
+                            value={dashboardDateFromPending}
+                            onChange={(v) => v && setDashboardDateFromPending(v)}
+                            placeholder="Data"
+                            triggerClassName="h-9 border rounded-md w-full text-sm"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Até</Label>
+                          <DatePicker
+                            value={dashboardDateToPending}
+                            onChange={(v) => v && setDashboardDateToPending(v)}
+                            placeholder="Data"
+                            triggerClassName="h-9 border rounded-md w-full text-sm"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-unidade">Unidade</Label>
+                      <Select value={dashboardUnidadePending || "__todos__"} onValueChange={(v) => setDashboardUnidadePending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-unidade" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.unidades.map((u) => (
+                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-grupo">Grupo</Label>
+                      <Select value={dashboardGrupoPending || "__todos__"} onValueChange={(v) => setDashboardGrupoPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-grupo" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.grupos.map((g) => (
+                            <SelectItem key={g} value={g}>{g}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-tipo-linha">Tipo de Linha</Label>
+                      <Select value={dashboardTipoLinhaPending || "__todos__"} onValueChange={(v) => setDashboardTipoLinhaPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-tipo-linha" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.tipoLinhas.map((tl) => (
+                            <SelectItem key={tl} value={tl}>{getNomeLinhaParaFiltro(tl) || tl}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-tipo-fruto">Tipo de Fruto</Label>
+                      <Select value={dashboardTipoFrutoPending || "__todos__"} onValueChange={(v) => setDashboardTipoFrutoPending(v === "__todos__" ? "" : v)}>
+                        <SelectTrigger id="dashboard-filtro-tipo-fruto" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {dashboardFilterOptions.tipoFrutos.map((tf) => (
+                            <SelectItem key={tf} value={tf}>{tf}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dashboard-filtro-op">OP Code</Label>
+                      <Input
+                        id="dashboard-filtro-op"
+                        value={dashboardOpCodePending}
+                        onChange={(e) => setDashboardOpCodePending(e.target.value)}
+                        placeholder="Ex.: OP-001"
+                        className="h-9 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button variant="outline" onClick={() => setDashboardFiltersOpen(false)}>Cancelar</Button>
+                    <Button onClick={applyDashboardFilters}>Aplicar filtros</Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+          <div className="p-4 sm:p-5 overflow-x-auto">
+            {dashboardLoading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="rounded-lg border border-border/40 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">OP</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Código</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Descrição</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Unidade</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Grupo</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo Linha</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium">Tipo Fruto</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Sólidos</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Latas</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Prev. Latas</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd em Kg</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Basq</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Qtd. Chapa</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">T. Cort</TableHead>
+                      <TableHead className="whitespace-nowrap text-xs font-medium text-right">Entrada no Túnel (Kg)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dashboardFiltered.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={15} className="text-center text-muted-foreground py-8">
+                          Nenhum registro encontrado para os filtros aplicados.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      dashboardFiltered.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-mono text-xs">{row.op ?? "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">{row.Code ?? "—"}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">{row.descricao ?? "—"}</TableCell>
+                          <TableCell className="text-xs">{row.unidade ?? "—"}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">{row.grupo ?? "—"}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap">{row.tipo_linha ? (getNomeLinhaParaFiltro(row.tipo_linha) || row.tipo_linha) : "—"}</TableCell>
+                          <TableCell className="text-xs">{row.tipo_fruto ?? "—"}</TableCell>
+                          <TableCell className="text-xs text-right">{row.solidos != null ? SOLIDOS_PERFIS.find((p) => p.value === row.solidos)?.label ?? row.solidos : "—"}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_latas)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.previsao_latas)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_kg)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_basqueta)}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_chapa)}</TableCell>
+                          <TableCell className="text-xs text-right">{row.t_cort ?? "—"}</TableCell>
+                          <TableCell className="text-xs text-right">{formatNumber(row.quantidade_kg_tuneo)}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                  {dashboardFiltered.length > 0 && (
+                    <TableFooter>
+                      <TableRow className="bg-primary/10 font-bold border-t-2 border-primary/30">
+                        <TableCell colSpan={7} className="text-sm">Total</TableCell>
+                        <TableCell className="text-xs text-right"></TableCell>
+                          <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.quantidade_latas, 2)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.previsao_latas)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_kg)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_basqueta)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_chapa)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumberFixed(dashboardTotals.t_cort, 3)}</TableCell>
+                        <TableCell className="text-xs text-right">{formatNumber(dashboardTotals.quantidade_kg_tuneo)}</TableCell>
+                      </TableRow>
+                    </TableFooter>
+                  )}
+                </Table>
+              </div>
+            )}
+          </div>
+        </section>
+
         {/* Card principal — mesmo estilo do Acompanhamento diário da produção */}
         <div className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />
