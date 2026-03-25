@@ -1695,6 +1695,12 @@ function Producao() {
     }));
   }, [biHorariaRegistros]);
 
+  /** Total realizado somando todos os turnos exibidos no gráfico (3 barras). */
+  const totalBiHorariaRealizadoPorTurno = useMemo(
+    () => biHorariaRealizadoPorTurno.reduce((sum, r) => sum + (r.valor ?? 0), 0),
+    [biHorariaRealizadoPorTurno]
+  );
+
   // Calcular totais da produção
   const calcularTotaisProducao = () => {
     const totalPlanejada = items.reduce((sum, item) => sum + parseFormattedNumber(item.quantidadePlanejada), 0);
@@ -3315,7 +3321,7 @@ function Producao() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <KpiCard
           title="Total Qtd. realizada"
-          value={formatTotal(totalBiHorariaRealizada)}
+          value={formatTotal(totalBiHorariaRealizadoPorTurno)}
           icon={ClipboardList}
         />
       </div>
@@ -3390,9 +3396,15 @@ function Producao() {
             </div>
             <div className="min-w-0">
               <h3 className="text-base sm:text-lg font-bold tracking-tight text-card-foreground">Realizado por turno</h3>
-              <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">
-                Soma da qtd. realizada por turno neste documento — barras do maior para o menor (3 turnos).
-              </p>
+              <div className="mt-0.5">
+                <span className="text-xs sm:text-sm text-muted-foreground/90 font-medium">Total:</span>
+                <div className="flex items-end gap-3">
+                  <p className="text-xl sm:text-2xl lg:text-[1.65rem] font-bold tracking-tight tabular-nums bg-gradient-to-br from-foreground via-foreground to-foreground/80 bg-clip-text text-transparent">
+                    {formatTotal(totalBiHorariaRealizadoPorTurno)}
+                  </p>
+                  <span className="text-xs sm:text-sm text-muted-foreground/90 font-medium tabular-nums">100%</span>
+                </div>
+              </div>
             </div>
           </div>
           <ExportToPng
@@ -3448,7 +3460,39 @@ function Producao() {
                   fontSize: "13px",
                   fontWeight: 500,
                 }}
-                formatter={(value: number) => [formatNumber(value), "Realizado"]}
+                content={({ active, payload, label }: any) => {
+                  if (!active || !payload || payload.length === 0) return null;
+                  const p0 = payload[0];
+                  const turnoName = p0?.payload?.name ?? label ?? "—";
+                  const valor = typeof p0?.value === "number" ? p0.value : Number(p0?.value ?? 0);
+                  const formatZero = (v: number) => (v === 0 ? "0" : formatNumber(v) || "0");
+                  return (
+                    <div
+                      className="recharts-default-tooltip"
+                      style={{
+                        backgroundColor: "hsl(var(--card) / 0.98)",
+                        border: "1px solid hsl(var(--border) / 0.8)",
+                        borderRadius: "12px",
+                        padding: "10px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      <p className="recharts-tooltip-label" style={{ margin: 0 }}>
+                        {turnoName}
+                      </p>
+                      <div style={{ marginTop: 6 }}>
+                        <div style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
+                          <span style={{ color: "hsl(var(--muted-foreground))" }}>Realizado</span>
+                          <span style={{ fontWeight: 700 }}>{formatZero(valor)}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 12, alignItems: "baseline", marginTop: 4 }}>
+                          <span style={{ color: "hsl(var(--muted-foreground))" }}>Total</span>
+                          <span style={{ fontWeight: 700 }}>{formatZero(totalBiHorariaRealizadoPorTurno)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }}
               />
               <Bar
                 dataKey="valor"
