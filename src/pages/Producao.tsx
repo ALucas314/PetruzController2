@@ -256,6 +256,74 @@ function isOcpdHoraFinalPrevisaoObsoleta(
   return target.getTime() < agora.getTime();
 }
 
+/**
+ * Previsão salva (ex.: 20:01 no mesmo dia) ainda no futuro, mas não condiz com hora atual + restante
+ * (ex.: término após meia-noite → ~00:57). Tratar como obsoleta para não manter valor antigo do banco.
+ */
+function isOcpdHoraFinalDivergenteDoCalculo(
+  horaFinalStr: string,
+  agora: Date,
+  dataDia: string | undefined,
+  restanteHorasLabel: string | undefined
+): boolean {
+  const rest = (restanteHorasLabel ?? "").trim();
+  if (!rest || rest === "00:00" || /^0h\s*0m$/i.test(rest)) return false;
+  const matchRest = rest.match(/(\d+)h\s*(\d+)m/);
+  if (!matchRest) return false;
+  const addMin = parseInt(matchRest[1], 10) * 60 + parseInt(matchRest[2], 10);
+  const expectedEnd = new Date(agora.getTime() + addMin * 60 * 1000);
+
+  const t = String(horaFinalStr).trim();
+  if (!t) return false;
+  const normalized = t.slice(0, 8);
+  const parts = normalized.split(":").map((x) => parseInt(x, 10));
+  if (parts.length < 2 || parts.some((n) => Number.isNaN(n))) return false;
+  const hh = parts[0];
+  const mm = parts[1];
+  const ss = parts.length > 2 ? parts[2] : 0;
+  const rawDay = dataDia != null ? String(dataDia).split("T")[0] : "";
+  const ymd =
+    /^\d{4}-\d{2}-\d{2}$/.test(rawDay)
+      ? rawDay
+      : `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, "0")}-${String(agora.getDate()).padStart(2, "0")}`;
+  const base = new Date(
+    `${ymd}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
+  );
+  if (Number.isNaN(base.getTime())) return false;
+  const dayMs = 86400000;
+  const candidates = [base, new Date(base.getTime() - dayMs), new Date(base.getTime() + dayMs)];
+  let bestDiff = Infinity;
+  for (const c of candidates) {
+    if (Number.isNaN(c.getTime())) continue;
+    const d = Math.abs(c.getTime() - expectedEnd.getTime());
+    if (d < bestDiff) bestDiff = d;
+  }
+  return bestDiff > 120000;
+}
+
+/**
+ * Hora final (previsão) exibida/persistida em estado: mantém valor salvo só se ainda não passou
+ * e for coerente com hora atual + restante; caso contrário usa o cálculo.
+ */
+function resolveOcpdHoraFinalPrevisao(
+  horaFinalSalva: string | null | undefined,
+  horaFinalCalculada: string,
+  agora: Date,
+  dataDia: string | undefined,
+  restanteHorasLabel: string | undefined
+): string {
+  const stored = horaFinalSalva != null && String(horaFinalSalva).trim() !== "";
+  if (!stored) return horaFinalCalculada;
+  const s = String(horaFinalSalva).trim();
+  if (
+    isOcpdHoraFinalPrevisaoObsoleta(s, agora, dataDia, restanteHorasLabel) ||
+    isOcpdHoraFinalDivergenteDoCalculo(s, agora, dataDia, restanteHorasLabel)
+  ) {
+    return horaFinalCalculada;
+  }
+  return s;
+}
+
 /** Opções de status do OCTP com cor da bolinha */
 const OCTP_STATUS_OPTIONS = [
   { id: "Cancelada", label: "Cancelada", color: "#6b7280" },           // Cinza
@@ -788,15 +856,14 @@ function Producao() {
     const restanteHorasItem = calculateRestanteHorasForItem(item);
     if (!restanteHorasItem || restanteHorasItem === "") return "";
     // Quando restante é 00:00 (tempo esgotado), previsão = hora atual
-    if (restanteHorasItem === "00:00") return formatTime(currentTime);
+    if (restanteHorasItem === "00:00" || /^0h\s*0m$/i.test(restanteHorasItem)) return formatTime(currentTime);
     try {
       const match = restanteHorasItem.match(/(\d+)h\s*(\d+)m/);
       if (match) {
         const horasRestantes = parseInt(match[1], 10);
         const minutosRestantes = parseInt(match[2], 10);
-        const horaFinalDate = new Date(currentTime);
-        horaFinalDate.setHours(horaFinalDate.getHours() + horasRestantes);
-        horaFinalDate.setMinutes(horaFinalDate.getMinutes() + minutosRestantes);
+        const totalMin = horasRestantes * 60 + minutosRestantes;
+        const horaFinalDate = new Date(currentTime.getTime() + totalMin * 60 * 1000);
         return formatTime(horaFinalDate);
       }
     } catch {
@@ -865,18 +932,19 @@ function Producao() {
   }, [toast]);
 
   // Atualizar horas restantes e hora final para cada item quando necessário.
-  // Se hora_final do banco já passou mas ainda há restante, usar previsão dinâmica (agora + restante), não o valor fixo antigo.
+  // Previsão: resolveOcpdHoraFinalPrevisao (obsoleta no relógio ou divergente de agora+restante → cálculo).
   useEffect(() => {
     setItems((prevItems) =>
       prevItems.map((item) => {
         const restanteHoras = calculateRestanteHorasForItem(item);
         const horaFinalCalculada = calculateHoraFinalForItem({ ...item, restanteHoras });
-        const stored = item.horaFinal != null && String(item.horaFinal).trim() !== "";
-        const previsaoObsoleta =
-          stored &&
-          isOcpdHoraFinalPrevisaoObsoleta(item.horaFinal, currentTime, item.dataDia, restanteHoras);
-        const horaFinal =
-          !stored || previsaoObsoleta ? horaFinalCalculada : item.horaFinal;
+        const horaFinal = resolveOcpdHoraFinalPrevisao(
+          item.horaFinal,
+          horaFinalCalculada,
+          currentTime,
+          item.dataDia,
+          restanteHoras
+        );
         if (item.restanteHoras !== restanteHoras || item.horaFinal !== horaFinal) {
           return {
             ...item,
@@ -1717,7 +1785,14 @@ function Producao() {
           // Recalcular horas restantes e hora final quando necessário
           if (field === "horasTrabalhadas" || field === "quantidadePlanejada" || field === "quantidadeRealizada" || field === "diferenca") {
             updated.restanteHoras = calculateRestanteHorasForItem(updated);
-            updated.horaFinal = calculateHoraFinalForItem({ ...updated, restanteHoras: updated.restanteHoras });
+            const calc = calculateHoraFinalForItem({ ...updated, restanteHoras: updated.restanteHoras });
+            updated.horaFinal = resolveOcpdHoraFinalPrevisao(
+              updated.horaFinal,
+              calc,
+              currentTime,
+              updated.dataDia,
+              updated.restanteHoras
+            );
           }
           return updated;
         }
@@ -1970,6 +2045,21 @@ function Producao() {
           };
         });
 
+        const agoraLoad = new Date();
+        const normalizedItems = loadedItems.map((item) => {
+          const restanteHoras = calculateRestanteHorasForItem(item);
+          const horaFinalCalculada = calculateHoraFinalForItem({ ...item, restanteHoras });
+          const horaFinal = resolveOcpdHoraFinalPrevisao(
+            item.horaFinal,
+            horaFinalCalculada,
+            agoraLoad,
+            item.dataDia,
+            restanteHoras
+          );
+          if (item.restanteHoras === restanteHoras && item.horaFinal === horaFinal) return item;
+          return { ...item, restanteHoras, horaFinal };
+        });
+
         // Carregar a filial do primeiro registro (todos devem ter a mesma filial)
         if (result.data.length > 0 && result.data[0].filial_nome) {
           const filialEncontrada = filiais.find(f => f.nome === result.data[0].filial_nome);
@@ -1978,7 +2068,7 @@ function Producao() {
           }
         }
 
-        setItems(loadedItems);
+        setItems(normalizedItems);
         setCurrentDocId(result.data[0]?.doc_id ?? null);
 
         // Controle de Latas: preencher do primeiro registro OCPD
@@ -4582,14 +4672,13 @@ function Producao() {
                           value={(() => {
                             const rest = item.restanteHoras ?? calculateRestanteHorasForItem(item);
                             const calc = calculateHoraFinalForItem({ ...item, restanteHoras: rest });
-                            const stored = item.horaFinal != null && String(item.horaFinal).trim() !== "";
-                            if (
-                              stored &&
-                              !isOcpdHoraFinalPrevisaoObsoleta(item.horaFinal, currentTime, item.dataDia, rest)
-                            ) {
-                              return String(item.horaFinal).slice(0, 5);
-                            }
-                            return calc.slice(0, 5);
+                            return resolveOcpdHoraFinalPrevisao(
+                              item.horaFinal,
+                              calc,
+                              currentTime,
+                              item.dataDia,
+                              rest
+                            ).slice(0, 5);
                           })()}
                           onChange={(e) => updateItem(item.id, "horaFinal", e.target.value)}
                           className="h-9 sm:h-10 text-xs sm:text-sm font-mono font-semibold bg-primary/10 border-input text-primary"
@@ -6301,22 +6390,16 @@ function Producao() {
                             ...itemHistoricoCalc,
                             restanteHoras: restanteCalc,
                           });
-                          const temHoraSalva = horaFinalSalvaParaCalc.trim() !== "";
-                          const previsaoHistoricoObsoleta =
-                            temHoraSalva &&
-                            isOcpdHoraFinalPrevisaoObsoleta(
-                              horaFinalSalvaParaCalc,
-                              currentTime,
-                              dataDiaStr,
-                              restanteCalc
-                            );
                           const restante = restanteCalc && restanteCalc.trim() !== "" ? restanteCalc : "-";
+                          const horaFinalResolvida = resolveOcpdHoraFinalPrevisao(
+                            horaFinalSalvaParaCalc,
+                            horaFinalCalculadaHist,
+                            currentTime,
+                            dataDiaStr,
+                            restanteCalc
+                          );
                           const horaFinalStr =
-                            !temHoraSalva || previsaoHistoricoObsoleta
-                              ? horaFinalCalculadaHist && horaFinalCalculadaHist.trim() !== ""
-                                ? horaFinalCalculadaHist
-                                : "-"
-                              : formatHoraFinal(record.hora_final);
+                            horaFinalResolvida.trim() !== "" ? horaFinalResolvida : "-";
 
                           return (
                             <TableRow
