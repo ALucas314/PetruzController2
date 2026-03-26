@@ -35,6 +35,7 @@ import {
   ArrowDownToLine,
 } from "lucide-react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
+import { ExportToPng } from "@/components/ExportToPng";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   getOcppByDateRange,
@@ -361,6 +362,10 @@ export default function PlanejamentoProducao() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const toastRef = useRef(toast);
+  const cardCaptureRef = useRef<HTMLDivElement | null>(null);
+  const kpiCaptureEndRef = useRef<HTMLDivElement | null>(null);
+  const [hidePngButtonDuringCapture, setHidePngButtonDuringCapture] = useState(false);
+  const captureOriginalStylesRef = useRef<{ height: string; overflow: string } | null>(null);
   useEffect(() => {
     toastRef.current = toast;
   }, [toast]);
@@ -1581,7 +1586,7 @@ export default function PlanejamentoProducao() {
         </section>
 
         {/* Card principal — mesmo estilo do Acompanhamento diário da produção */}
-        <div className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
+        <div ref={cardCaptureRef} className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />
           <div className="relative z-10">
             {/* Cabeçalho do card */}
@@ -1657,6 +1662,46 @@ export default function PlanejamentoProducao() {
                       {savingAll ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Save className="h-4 w-4 shrink-0" />}
                       <span>{savingAll ? "Salvando..." : "Salvar"}</span>
                     </button>
+                    <div style={{ visibility: hidePngButtonDuringCapture ? "hidden" : "visible" }} className="w-full">
+                      <ExportToPng
+                        targetRef={cardCaptureRef}
+                        filenamePrefix="planejamento-producao-pcp"
+                        label="Baixar PNG"
+                        disabled={savingAll || registrosExibidos.length === 0}
+                        expandScrollable={false}
+                        onBeforeCapture={async () => {
+                          setHidePngButtonDuringCapture(true);
+
+                          // Espera o React re-renderizar para garantir que o botão sumiu antes do toPng.
+                          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+                          const start = cardCaptureRef.current;
+                          const end = kpiCaptureEndRef.current;
+                          if (start && end) {
+                            captureOriginalStylesRef.current = {
+                              height: start.style.height,
+                              overflow: start.style.overflow,
+                            };
+                            const height = end.getBoundingClientRect().bottom - start.getBoundingClientRect().top;
+                            start.style.height = `${Math.max(0, height)}px`;
+                          }
+                        }}
+                        onAfterCapture={async () => {
+                          setHidePngButtonDuringCapture(false);
+                          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+                          const start = cardCaptureRef.current;
+                          const orig = captureOriginalStylesRef.current;
+                          if (start && orig) {
+                            start.style.height = orig.height;
+                            start.style.overflow = orig.overflow;
+                            captureOriginalStylesRef.current = null;
+                          }
+                        }}
+                        className="w-full justify-center"
+                        title="Baixar PNG do PCP (a partir da linha azul do card)"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1681,6 +1726,43 @@ export default function PlanejamentoProducao() {
                   {savingAll ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Save className="h-4 w-4 shrink-0" />}
                   <span>{savingAll ? "Salvando..." : "Salvar"}</span>
                 </button>
+                <div style={{ visibility: hidePngButtonDuringCapture ? "hidden" : "visible" }}>
+                  <ExportToPng
+                    targetRef={cardCaptureRef}
+                    filenamePrefix="planejamento-producao-pcp"
+                    label="Baixar PNG"
+                    disabled={savingAll || registrosExibidos.length === 0}
+                      expandScrollable={false}
+                      onBeforeCapture={async () => {
+                        setHidePngButtonDuringCapture(true);
+                        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+                        const start = cardCaptureRef.current;
+                        const end = kpiCaptureEndRef.current;
+                        if (start && end) {
+                          captureOriginalStylesRef.current = {
+                            height: start.style.height,
+                            overflow: start.style.overflow,
+                          };
+                          const height = end.getBoundingClientRect().bottom - start.getBoundingClientRect().top;
+                          start.style.height = `${Math.max(0, height)}px`;
+                        }
+                      }}
+                      onAfterCapture={async () => {
+                        setHidePngButtonDuringCapture(false);
+                        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+                        const start = cardCaptureRef.current;
+                        const orig = captureOriginalStylesRef.current;
+                        if (start && orig) {
+                          start.style.height = orig.height;
+                          start.style.overflow = orig.overflow;
+                          captureOriginalStylesRef.current = null;
+                        }
+                      }}
+                    title="Baixar PNG do PCP (a partir da linha azul do card)"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1840,7 +1922,7 @@ export default function PlanejamentoProducao() {
                 />
                 <KpiCard
                   title="Total Previsto para Corte"
-                  value={formatNumberFixed(planejamentoKpiTotals.t_cort, 3) || "0,000"}
+                  value={formatNumberFixed(planejamentoKpiTotals.t_cort, 2) || "0,00"}
                   icon={Scissors}
                 />
                 <KpiCard
@@ -1850,6 +1932,9 @@ export default function PlanejamentoProducao() {
                 />
               </div>
             </div>
+
+              {/* Marcador para recorte do PNG: parar após os cards de KPI */}
+              <div ref={kpiCaptureEndRef} />
 
             {showDocumentGridForRange ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
