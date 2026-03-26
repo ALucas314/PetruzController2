@@ -6,6 +6,9 @@ const SELECT_LIST =
   "id, doc_entry, numero_documento, filial_nome, codigo_tunel, codigo_tipo_produto, qtd_inserida, data_fechamento, hora_fechamento, data_abertura, hora_abertura, observacao, created_at, updated_at";
 
 function fmtErr(e: { message?: string; details?: string; hint?: string; code?: string }): string {
+  if (e.code === "42501") {
+    return "Sem permissão para acessar movimentações de túneis. Verifique as políticas RLS da tabela.";
+  }
   const parts = [e.message, e.details, e.hint, e.code ? `[${e.code}]` : ""].filter(Boolean);
   return parts.join(" - ") || "Erro na tabela OCMT.";
 }

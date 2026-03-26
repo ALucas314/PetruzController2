@@ -1807,7 +1807,7 @@ export default function PlanejamentoProducao() {
               <p className="text-xs text-muted-foreground">
                 Totais do documento e período filtrados (alinhados ao dashboard PCP personalizado).
               </p>
-              <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 <KpiCard
                   title="Total produto acabado"
                   value={formatNumberFixed(planejamentoKpiTotals.quantidade, 2) || "0,00"}
@@ -1824,7 +1824,7 @@ export default function PlanejamentoProducao() {
                   icon={Layers}
                 />
                 <KpiCard
-                  title="Quantidade em Kg"
+                  title="Total Fruto e In - Natura"
                   value={formatNumberFixed(planejamentoKpiTotals.quantidade_kg, 2) || "0,00"}
                   icon={Weight}
                 />
@@ -1839,7 +1839,7 @@ export default function PlanejamentoProducao() {
                   icon={LayoutGrid}
                 />
                 <KpiCard
-                  title="Total cortado (T. Cort)"
+                  title="Total Previsto para Corte"
                   value={formatNumberFixed(planejamentoKpiTotals.t_cort, 3) || "0,000"}
                   icon={Scissors}
                 />
