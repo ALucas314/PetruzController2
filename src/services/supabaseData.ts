@@ -143,6 +143,19 @@ function str(r: Record<string, unknown>, ...keys: string[]): string | null {
   return null;
 }
 
+/** Soma dias em uma data YYYY-MM-DD (calendário, sem depender de timezone do horário). */
+export function addCalendarDays(isoDate: string, delta: number): string {
+  const base = isoDate.split("T")[0];
+  const [y, m, d] = base.split("-").map((v) => Number(v));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return base;
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + delta);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
 function mapOcppRow(r: Record<string, unknown>): OCPPRow {
   return {
     id: Number(r.id),
@@ -186,6 +199,10 @@ function mapOcppRow(r: Record<string, unknown>): OCPPRow {
   };
 }
 
+/**
+ * Busca OCPP pelo intervalo de data de lançamento (dia em que o documento foi cadastrado / dia anterior à coluna `data`).
+ * No banco, `data` é a data do documento de produção; convertemos: data_documento = data_lançamento + 1 dia.
+ */
 export async function getOcppByDateRange(
   dataInicio: string,
   dataFim: string,
@@ -193,13 +210,15 @@ export async function getOcppByDateRange(
 ): Promise<OCPPRow[]> {
   const de = dataInicio.split("T")[0];
   const ate = dataFim.split("T")[0];
+  const dataDocInicio = addCalendarDays(de, 1);
+  const dataDocFim = addCalendarDays(ate, 1);
   const filialTrim = filialNome != null && String(filialNome).trim() !== "" ? String(filialNome).trim() : null;
 
   let query = supabase
     .from("OCPP")
     .select(OCPP_SELECT_BASE)
-    .gte("data", de)
-    .lte("data", ate)
+    .gte("data", dataDocInicio)
+    .lte("data", dataDocFim)
     .order("data", { ascending: true })
     .order("id", { ascending: true });
   if (filialTrim) query = query.eq("filial_nome", filialTrim);
@@ -210,7 +229,7 @@ export async function getOcppByDateRange(
   return rows.map((r) => mapOcppRow(r));
 }
 
-/** Retorna menor e maior data com registros na OCPP, opcionalmente por filial. */
+/** Retorna menor e maior data de lançamento (coluna `data` do documento menos um dia). */
 export async function getOcppDateBounds(
   filialNome?: string | null
 ): Promise<{ minDate: string | null; maxDate: string | null }> {
@@ -227,8 +246,10 @@ export async function getOcppDateBounds(
   if (minErr) throw minErr;
   if (maxErr) throw maxErr;
 
-  const minDate = minData?.[0]?.data ? String(minData[0].data).split("T")[0] : null;
-  const maxDate = maxData?.[0]?.data ? String(maxData[0].data).split("T")[0] : null;
+  const minDoc = minData?.[0]?.data ? String(minData[0].data).split("T")[0] : null;
+  const maxDoc = maxData?.[0]?.data ? String(maxData[0].data).split("T")[0] : null;
+  const minDate = minDoc ? addCalendarDays(minDoc, -1) : null;
+  const maxDate = maxDoc ? addCalendarDays(maxDoc, -1) : null;
   return { minDate, maxDate };
 }
 

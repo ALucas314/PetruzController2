@@ -38,6 +38,7 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { ExportToPng } from "@/components/ExportToPng";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
+  addCalendarDays,
   getOcppByDateRange,
   getOcppDateBounds,
   createOcpp,
@@ -1266,13 +1267,13 @@ export default function PlanejamentoProducao() {
     if (isDocExistente) {
       const doc = documentosDoPeriodo.find((d) => d.key === selectedDocKey);
       const first = doc?.rows[0];
-      const dataStr = first?.data ? String(first.data).split("T")[0] : dataFiltro.split("T")[0];
+      const dataStr = first?.data ? String(first.data).split("T")[0] : addCalendarDays(dataFiltro.split("T")[0], 1);
       payload = emptyPayload(dataStr);
       payload.filial_nome = (first?.filial_nome ?? doc?.filial_nome ?? filialFiltro) || null;
       if (first?.doc_numero != null) payload.doc_numero = first.doc_numero;
       if (first?.doc_ordem_global != null) payload.doc_ordem_global = first.doc_ordem_global;
     } else if (isNovoDoc) {
-      payload = emptyPayload(dataFiltro.split("T")[0]);
+      payload = emptyPayload(addCalendarDays(dataFiltro.split("T")[0], 1));
       const filial = filialNovoDocumento || filialFiltro;
       payload.filial_nome = filial ? filial : null;
       try {
@@ -1291,7 +1292,7 @@ export default function PlanejamentoProducao() {
         return;
       }
     } else if (documentosDoPeriodo.length === 0) {
-      payload = emptyPayload(dataFiltro.split("T")[0]);
+      payload = emptyPayload(addCalendarDays(dataFiltro.split("T")[0], 1));
       const filial = filialFiltro;
       if (filial) payload.filial_nome = filial;
       try {
@@ -1613,7 +1614,7 @@ export default function PlanejamentoProducao() {
                       <DatePicker
                         value={dataFiltro}
                         onChange={(v) => v && setDataFiltro(v)}
-                        placeholder="Data"
+                        placeholder="Data lançamento"
                         className="min-w-[140px]"
                         triggerClassName="border border-input bg-background hover:bg-muted/60 px-2 py-1 min-h-0 h-auto text-sm"
                       />
@@ -1790,6 +1791,9 @@ export default function PlanejamentoProducao() {
                 <DialogContent className="w-[340px] sm:w-[380px] p-4 rounded-lg shadow-lg border-border/60 max-w-[95vw]">
                   <div className="space-y-4">
                     <p className="text-sm font-semibold text-foreground">Filtros</p>
+                    <p className="text-xs text-muted-foreground -mt-2">
+                      Período pela data de lançamento (cadastro). A data do documento no planejamento é o dia seguinte.
+                    </p>
                     <div className="grid gap-3">
                       <div className="grid grid-cols-[auto_1fr] items-center gap-2">
                         <Label htmlFor="card-filtro-de" className="text-xs text-muted-foreground">De</Label>
@@ -1797,7 +1801,7 @@ export default function PlanejamentoProducao() {
                           id="card-filtro-de"
                           value={dataFiltroPending}
                           onChange={(v) => v && setDataFiltroPending(v)}
-                          placeholder="Data"
+                          placeholder="Lançamento"
                           className="min-w-0"
                           triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
                         />
@@ -1808,7 +1812,7 @@ export default function PlanejamentoProducao() {
                           id="card-filtro-para"
                           value={dataFiltroParaPending}
                           onChange={(v) => v && setDataFiltroParaPending(v)}
-                          placeholder="Data"
+                          placeholder="Lançamento"
                           className="min-w-0"
                           triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
                         />
@@ -2066,7 +2070,7 @@ export default function PlanejamentoProducao() {
                           <TableCell className="text-center font-medium text-xs sm:text-sm">{idx + 1}</TableCell>
                           <TableCell className="p-2 sm:p-4">
                             <DatePicker
-                              value={row.data?.split("T")[0] ?? dataFiltro}
+                              value={row.data?.split("T")[0] ?? addCalendarDays(dataFiltro.split("T")[0], 1)}
                               onChange={(v) => v && updateRow(row.id, { data: v })}
                               size="sm"
                               triggerClassName="h-8 sm:h-9 text-xs sm:text-sm"
@@ -2901,14 +2905,14 @@ export default function PlanejamentoProducao() {
                   </DialogHeader>
                   <div className="grid gap-3 sm:gap-4 py-2 overflow-y-auto min-h-0 pr-1 -mr-1 overscroll-contain">
                     <div className="grid gap-2">
-                      <Label className="text-sm">Data (intervalo)</Label>
+                      <Label className="text-sm">Data de lançamento (intervalo)</Label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                           <Label className="text-xs text-muted-foreground">De</Label>
                           <DatePicker
                             value={dashboardDateFromPending}
                             onChange={(v) => v && setDashboardDateFromPending(v)}
-                            placeholder="Data"
+                            placeholder="Lançamento"
                             triggerClassName="h-9 sm:h-9 border rounded-md w-full text-sm min-h-[2.25rem]"
                           />
                         </div>
@@ -2917,7 +2921,7 @@ export default function PlanejamentoProducao() {
                           <DatePicker
                             value={dashboardDateToPending}
                             onChange={(v) => v && setDashboardDateToPending(v)}
-                            placeholder="Data"
+                            placeholder="Lançamento"
                             triggerClassName="h-9 sm:h-9 border rounded-md w-full text-sm min-h-[2.25rem]"
                           />
                         </div>
