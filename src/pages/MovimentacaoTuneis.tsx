@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertCircle, ArrowLeft, ArrowLeftRight, ArrowRight, Factory, FilePlus, Loader2, Plus, Save, Sparkles, Trash2, Zap } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Filter } from "lucide-react";
@@ -346,7 +346,7 @@ export default function MovimentacaoTuneis() {
           filial: tunel.filial,
           codigoTunel,
           capacidade,
-          ultimaTransacao: ult?.numeroDocumento ?? null,
+          ultimaRow: ult,
           statusTunel,
           qtdPendente,
           diffDisponivel,
@@ -355,6 +355,18 @@ export default function MovimentacaoTuneis() {
       })
       .sort((a, b) => a.codigoTunel - b.codigoTunel);
   }, [tuneis, rows, filtroFilial]);
+
+  const relatorioPorTunelTotals = useMemo(() => {
+    return relatorioPorTunelRows.reduce(
+      (acc, r) => ({
+        capacidade: round2(acc.capacidade + r.capacidade),
+        qtdPendente: round2(acc.qtdPendente + r.qtdPendente),
+        diffDisponivel: round2(acc.diffDisponivel + r.diffDisponivel),
+        diffRealDisponivel: round2(acc.diffRealDisponivel + r.diffRealDisponivel),
+      }),
+      { capacidade: 0, qtdPendente: 0, diffDisponivel: 0, diffRealDisponivel: 0 }
+    );
+  }, [relatorioPorTunelRows]);
 
   async function loadBase() {
     const [filiaisData, tuneisData, tiposData] = await Promise.all([getFiliais(), getTuneis(), getTiposProduto()]);
@@ -418,7 +430,39 @@ export default function MovimentacaoTuneis() {
       setFiltroDataFim(dataFimNorm);
       setFiltrosDialogOpen(false);
       setActiveTab("analise");
-      setRelatorioSelecionado("previsto");
+      // Mantém "por túnel" ou "previsto" se o filtro foi aplicado já na aba de relatórios; só força previsto vindo da movimentação ou do menu.
+      setRelatorioSelecionado((relAtual) => {
+        if (activeTab === "analise" && (relAtual === "por_tunel" || relAtual === "previsto")) return relAtual;
+        return "previsto";
+      });
+    } catch (error: unknown) {
+      const msg = getFriendlyErrorMessage(error, "Falha ao filtrar.");
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /** Relatório por túnel: só filial; carrega movimentações sem intervalo de data (limite da API). */
+  async function aplicarFiltrosRelatorioPorTunel() {
+    try {
+      setLoading(true);
+      await loadRows({
+        filialNome: filtroFilialPending,
+        dataInicio: "",
+        dataFim: "",
+      });
+      setFiltroFilial(filtroFilialPending);
+      setFiltroDataInicio("");
+      setFiltroDataFim("");
+      setFiltroDataInicioPending("");
+      setFiltroDataFimPending("");
+      setFiltrosDialogOpen(false);
+      setActiveTab("analise");
+      setRelatorioSelecionado((relAtual) => {
+        if (activeTab === "analise" && (relAtual === "por_tunel" || relAtual === "previsto")) return relAtual;
+        return "previsto";
+      });
     } catch (error: unknown) {
       const msg = getFriendlyErrorMessage(error, "Falha ao filtrar.");
       toast({ title: "Erro", description: msg, variant: "destructive" });
@@ -1235,7 +1279,7 @@ export default function MovimentacaoTuneis() {
                               <DialogHeader>
                                 <DialogTitle className="text-base">Filtros — Relatório por Túnel</DialogTitle>
                                 <DialogDescription className="text-sm text-muted-foreground">
-                                  Defina os filtros e clique em Filtrar para aplicar.
+                                  Filtre por filial. As movimentações são carregadas sem período (últimos registros, conforme limite do sistema).
                                 </DialogDescription>
                               </DialogHeader>
                               <div className="grid gap-3 py-2">
@@ -1251,32 +1295,20 @@ export default function MovimentacaoTuneis() {
                                     </SelectContent>
                                   </Select>
                                 </div>
-                                <div className="space-y-1.5">
-                                  <Label>Data inicial</Label>
-                                  <Input type="date" value={filtroDataInicioPending} onChange={(e) => setFiltroDataInicioPending(e.target.value)} />
-                                </div>
-                                <div className="space-y-1.5">
-                                  <Label>Data final</Label>
-                                  <Input type="date" value={filtroDataFimPending} onChange={(e) => setFiltroDataFimPending(e.target.value)} />
-                                </div>
                               </div>
                               <div className="flex gap-2">
                                 <Button
                                   type="button"
                                   variant="outline"
                                   className="flex-1 h-9"
-                                  onClick={() => {
-                                    setFiltroFilialPending("");
-                                    setFiltroDataInicioPending("");
-                                    setFiltroDataFimPending("");
-                                  }}
+                                  onClick={() => setFiltroFilialPending("")}
                                 >
                                   Limpar
                                 </Button>
                                 <Button
                                   type="button"
                                   className="flex-1 h-9 bg-primary text-primary-foreground hover:bg-primary/90"
-                                  onClick={() => void aplicarFiltros()}
+                                  onClick={() => void aplicarFiltrosRelatorioPorTunel()}
                                 >
                                   Filtrar
                                 </Button>
@@ -1303,7 +1335,29 @@ export default function MovimentacaoTuneis() {
                               {relatorioPorTunelRows.map((r) => (
                                 <TableRow key={`${r.filial}|${r.codigoTunel}`}>
                                   <TableCell className="font-mono">{String(r.codigoTunel).padStart(4, "0")}</TableCell>
-                                  <TableCell>{r.ultimaTransacao ?? "-"}</TableCell>
+                                  <TableCell>
+                                    {r.ultimaRow ? (
+                                      <span className="inline-flex items-center gap-1.5 font-mono">
+                                        <button
+                                          type="button"
+                                          className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary shadow-sm transition-colors hover:bg-primary/20 hover:border-primary/50"
+                                          onClick={() => {
+                                            const row = r.ultimaRow;
+                                            if (!row) return;
+                                            setActiveTab("movimentacao");
+                                            onEditar(row);
+                                          }}
+                                          title="Abrir documento"
+                                          aria-label={`Abrir documento ${padDoc(r.ultimaRow.numeroDocumento)}`}
+                                        >
+                                          <ArrowRight className="h-4 w-4 stroke-[2.75]" />
+                                        </button>
+                                        <span>{padDoc(r.ultimaRow.numeroDocumento)}</span>
+                                      </span>
+                                    ) : (
+                                      "-"
+                                    )}
+                                  </TableCell>
                                   <TableCell>{round2(r.capacidade).toFixed(2)}</TableCell>
                                   <TableCell>{r.statusTunel}</TableCell>
                                   <TableCell>{r.qtdPendente.toFixed(2)}</TableCell>
@@ -1312,6 +1366,28 @@ export default function MovimentacaoTuneis() {
                                 </TableRow>
                               ))}
                             </TableBody>
+                            {relatorioPorTunelRows.length > 0 ? (
+                              <TableFooter>
+                                <TableRow className="bg-muted/40 hover:bg-muted/40">
+                                  <TableCell colSpan={2} className="font-semibold text-foreground">
+                                    {`Total (${relatorioPorTunelRows.length} ${relatorioPorTunelRows.length === 1 ? "túnel" : "túneis"})`}
+                                  </TableCell>
+                                  <TableCell className="font-semibold tabular-nums">
+                                    {relatorioPorTunelTotals.capacidade.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="text-muted-foreground">—</TableCell>
+                                  <TableCell className="font-semibold tabular-nums">
+                                    {relatorioPorTunelTotals.qtdPendente.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="font-semibold tabular-nums">
+                                    {relatorioPorTunelTotals.diffDisponivel.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className="font-semibold tabular-nums">
+                                    {relatorioPorTunelTotals.diffRealDisponivel.toFixed(2)}
+                                  </TableCell>
+                                </TableRow>
+                              </TableFooter>
+                            ) : null}
                           </Table>
                         </div>
                       </CardContent>

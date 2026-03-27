@@ -380,8 +380,8 @@ export default function PlanejamentoProducao() {
   const [filtroTipoLinha, setFiltroTipoLinha] = useState("");
   const [filtroSolidos, setFiltroSolidos] = useState<number | "">("");
   const [filtrosCardOpen, setFiltrosCardOpen] = useState(false);
-  /** View do card: grid de documentos (true) ou tabela do documento (false). */
-  const [showDocumentGridForRange, setShowDocumentGridForRange] = useState(true);
+  /** View do card: grid de documentos (true) ou tabela do documento (false). Inicia em tabela; após Filtrar abre o grid do período. */
+  const [showDocumentGridForRange, setShowDocumentGridForRange] = useState(false);
   /** Documento selecionado no grid (chave: data + doc_ordem_global + doc_numero + filial). */
   const [selectedDocKey, setSelectedDocKey] = useState<string | null>(null);
   /** Valores dos filtros dentro do card (só aplicados ao clicar em "Filtrar"). */
@@ -407,8 +407,6 @@ export default function PlanejamentoProducao() {
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestCodeByRowRef = useRef<Record<number, string>>({});
   const isMobile = useIsMobile();
-  /** Ao entrar na aba PCP, abrir direto o último documento (só uma vez por carga). */
-  const hasAutoOpenedLastDocRef = useRef(false);
   /** Marca o momento da última alteração feita por este usuário; evita recarregar ao receber o próprio evento realtime. */
   const lastLocalChangeAtRef = useRef(0);
   /** Timeout do debounce do realtime para não recarregar a cada tecla. */
@@ -562,7 +560,7 @@ export default function PlanejamentoProducao() {
     }
   }, [filtrosCardOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- sync only when opening
 
-  /** Aplica os filtros do card (pendentes) e fecha o card. */
+  /** Aplica os filtros do card (pendentes) e fecha o card. Abre o grid de documentos do período; KPIs só somam após escolher um card. */
   const applyFiltrosCard = useCallback(() => {
     setDataFiltro(dataFiltroPending);
     setDataFiltroPara(dataFiltroParaPending);
@@ -815,16 +813,23 @@ export default function PlanejamentoProducao() {
     return list;
   }, [registrosNavegacao, filialFiltro, getDocKey]);
 
-  /** Ao carregar os dados, abrir sempre o último documento (vista tabela) em vez do grid de cards. */
+  /**
+   * Com a tabela aberta: garante documento selecionado para KPIs/rodapé.
+   * Com o grid aberto (após Filtrar): não força seleção — o usuário escolhe o card.
+   */
   useEffect(() => {
-    if (loading || hasAutoOpenedLastDocRef.current) return;
-    if (documentosDoPeriodo.length > 0) {
-      const last = documentosDoPeriodo[documentosDoPeriodo.length - 1];
-      setSelectedDocKey(last.key);
-      setShowDocumentGridForRange(false);
-      hasAutoOpenedLastDocRef.current = true;
+    if (loading) return;
+    if (newDocumentIndex != null) return;
+    if (documentosDoPeriodo.length === 0) {
+      setSelectedDocKey(null);
+      return;
     }
-  }, [loading, documentosDoPeriodo]);
+    if (showDocumentGridForRange) return;
+    const valid = selectedDocKey != null && documentosDoPeriodo.some((d) => d.key === selectedDocKey);
+    if (valid) return;
+    const last = documentosDoPeriodo[documentosDoPeriodo.length - 1];
+    setSelectedDocKey(last.key);
+  }, [loading, documentosDoPeriodo, newDocumentIndex, selectedDocKey, showDocumentGridForRange]);
 
   /** Valores únicos de tipo_linha nos registros carregados, para o filtro bater com o que está salvo (ex.: código ou "Balde"). */
   const opcoesTipoLinhaFiltro = useMemo(() => {
@@ -860,26 +865,26 @@ export default function PlanejamentoProducao() {
    * aplicada às linhas exibidas (data, filial, documento selecionado e filtros do card).
    */
   const planejamentoKpiTotals = useMemo(() => {
-    let list = registrosBaseFilial;
-    if (selectedDocKey) list = list.filter((r) => getDocKey(r) === selectedDocKey);
+    const emptyTotals = {
+      quantidade: 0,
+      quantidade_latas: 0,
+      previsao_latas: 0,
+      quantidade_kg: 0,
+      quantidade_basqueta: 0,
+      quantidade_chapa: 0,
+      t_cort: 0,
+      quantidade_kg_tuneo: 0,
+    };
+    if (!selectedDocKey) return emptyTotals;
+
+    let list = registrosBaseFilial.filter((r) => getDocKey(r) === selectedDocKey);
     const codigoTrim = (filtroCodigo ?? "").trim().toLowerCase();
     if (codigoTrim) list = list.filter((r) => String(r.Code ?? "").toLowerCase().includes(codigoTrim));
     const tipoLinhaTrim = (filtroTipoLinha ?? "").trim();
     if (tipoLinhaTrim) list = list.filter((r) => (r.tipo_linha ?? "").trim().toLowerCase() === tipoLinhaTrim.toLowerCase());
     if (filtroSolidos !== "" && filtroSolidos != null) list = list.filter((r) => r.solidos === filtroSolidos);
 
-    if (list.length === 0) {
-      return {
-        quantidade: 0,
-        quantidade_latas: 0,
-        previsao_latas: 0,
-        quantidade_kg: 0,
-        quantidade_basqueta: 0,
-        quantidade_chapa: 0,
-        t_cort: 0,
-        quantidade_kg_tuneo: 0,
-      };
-    }
+    if (list.length === 0) return emptyTotals;
     let quantidade = 0,
       quantidade_latas = 0,
       previsao_latas = 0,
@@ -1227,8 +1232,9 @@ export default function PlanejamentoProducao() {
         if (idx > 0) {
           setNewDocumentIndex(null);
           const target = documentosParaNavegacao[idx - 1];
-          setDataFiltro(target.data_dia);
-          setDataFiltroPara(target.data_dia);
+          const launchDay = addCalendarDays(target.data_dia, -1);
+          setDataFiltro(launchDay);
+          setDataFiltroPara(launchDay);
           setSelectedDocKey(target.key);
           setShowDocumentGridForRange(false);
         }
@@ -1237,8 +1243,9 @@ export default function PlanejamentoProducao() {
         if (idx >= 0 && idx < documentosParaNavegacao.length - 1) {
           setNewDocumentIndex(null);
           const target = documentosParaNavegacao[idx + 1];
-          setDataFiltro(target.data_dia);
-          setDataFiltroPara(target.data_dia);
+          const launchDay = addCalendarDays(target.data_dia, -1);
+          setDataFiltro(launchDay);
+          setDataFiltroPara(launchDay);
           setSelectedDocKey(target.key);
           setShowDocumentGridForRange(false);
         }
@@ -1610,7 +1617,7 @@ export default function PlanejamentoProducao() {
                         {formatTime(currentTime)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="hidden" aria-hidden={true}>
                       <DatePicker
                         value={dataFiltro}
                         onChange={(v) => v && setDataFiltro(v)}
@@ -1891,7 +1898,9 @@ export default function PlanejamentoProducao() {
             {/* KPIs — mesma lógica da linha de totais do dashboard Planejamento PCP Personalizado (documento, data e filtros) */}
             <div className="mb-5 space-y-2">
               <p className="text-xs text-muted-foreground">
-                Totais do documento e período filtrados (alinhados ao dashboard PCP personalizado).
+                {showDocumentGridForRange && documentosDoPeriodo.length > 0 && !selectedDocKey
+                  ? "Selecione um documento no grid abaixo para ver os totais (não são somados todos os documentos do período)."
+                  : "Totais do documento selecionado (e filtros Código / Tipo linha / Sólidos); mesma regra do dashboard PCP personalizado por linha."}
               </p>
               <div className="grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 <KpiCard
