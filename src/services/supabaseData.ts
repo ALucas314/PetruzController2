@@ -644,6 +644,100 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
   return { data: rows, count: rows.length, reprocessos, biHorariaRegistros };
 }
 
+/**
+ * Soma quantidades de reprocesso (Cortado / Usado) no intervalo de data do documento (`data_dia`),
+ * para a filial informada, considerando o código com a mesma regra do filtro da tela (contém, case-insensitive).
+ * Usa JSONB `reprocessos` e, quando não há array, colunas legado `reprocesso_*` da mesma linha OCPD.
+ */
+export async function aggregateReprocessosByCodigoInDateRange(params: {
+  dataInicio: string;
+  dataFim: string;
+  filialNome: string;
+  codigoFiltro: string;
+}): Promise<{ totalCortado: number; totalUsado: number; documentosComItem: number }> {
+  const de = params.dataInicio.split("T")[0];
+  const ate = params.dataFim.split("T")[0];
+  const filial = String(params.filialNome ?? "").trim();
+  const filtroCodigo = String(params.codigoFiltro ?? "").trim().toLowerCase();
+  if (!filial || !filtroCodigo) {
+    return { totalCortado: 0, totalUsado: 0, documentosComItem: 0 };
+  }
+
+  const pageSize = 1000;
+  let from = 0;
+  const rows: Record<string, unknown>[] = [];
+
+  for (;;) {
+    let q = supabase
+      .from("OCPD")
+      .select(
+        "id, data_dia, doc_id, doc_ordem_global, reprocessos, reprocesso_codigo, reprocesso_tipo, reprocesso_quantidade"
+      )
+      .gte("data_dia", de)
+      .lte("data_dia", ate)
+      .eq("filial_nome", filial)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    const chunk = data || [];
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  const docKeysComMatch = new Set<string>();
+  let totalCortado = 0;
+  let totalUsado = 0;
+
+  const docKey = (row: Record<string, unknown>) => {
+    const d = String(row.data_dia ?? "").split("T")[0];
+    const did = row.doc_id != null && String(row.doc_id).trim() !== "" ? String(row.doc_id).trim() : "legacy";
+    const og =
+      row.doc_ordem_global != null && row.doc_ordem_global !== ""
+        ? String(row.doc_ordem_global)
+        : "";
+    return `${d}|${did}|${og}`;
+  };
+
+  const codigoMatch = (codigo: unknown) =>
+    String(codigo ?? "")
+      .trim()
+      .toLowerCase()
+      .includes(filtroCodigo);
+
+  const addFromItem = (row: Record<string, unknown>, tipo: string, qtdRaw: unknown, matched: boolean) => {
+    if (!matched) return;
+    const q = parseBrazilNumber(qtdRaw);
+    const t = String(tipo ?? "Cortado").trim();
+    if (t === "Usado") totalUsado += q;
+    else totalCortado += q;
+    docKeysComMatch.add(docKey(row));
+  };
+
+  for (const row of rows) {
+    const rep = row.reprocessos;
+    if (rep != null && Array.isArray(rep) && rep.length > 0) {
+      for (const elem of rep as Record<string, unknown>[]) {
+        const matched = codigoMatch(elem.codigo);
+        addFromItem(row, String(elem.tipo ?? "Cortado"), elem.quantidade, matched);
+      }
+      continue;
+    }
+    const legCod = row.reprocesso_codigo;
+    if (legCod != null && String(legCod).trim() !== "") {
+      const matched = codigoMatch(legCod);
+      addFromItem(row, String(row.reprocesso_tipo ?? "Cortado"), row.reprocesso_quantidade, matched);
+    }
+  }
+
+  return {
+    totalCortado,
+    totalUsado,
+    documentosComItem: docKeysComMatch.size,
+  };
+}
+
 type BiHorariaPayloadRow = { numero: number; data: string; hora: string; qtd_realizada: number };
 
 /** Mesma ordem das 5 linhas fixas no front: turno 1,2,1,2,3 na coluna OCPH.turno */

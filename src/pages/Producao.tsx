@@ -58,6 +58,7 @@ import {
   deleteOCTP,
   computeDuracaoMinutos,
   parseBrazilNumber,
+  aggregateReprocessosByCodigoInDateRange,
   type OCTPRow,
 } from "@/services/supabaseData";
 import { useToast } from "@/hooks/use-toast";
@@ -610,6 +611,8 @@ function Producao() {
   const [gridFiltrosDialogOpen, setGridFiltrosDialogOpen] = useState(false);
   const [gridDataDePending, setGridDataDePending] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [gridDataAtePending, setGridDataAtePending] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  /** Código do reprocesso no dialog "Filtros de produção" (ícone fábrica) — alimenta totais do período no card Reprocesso */
+  const [gridDialogReprocessoCodigoPending, setGridDialogReprocessoCodigoPending] = useState<string>("");
   const [biChartDataDe, setBiChartDataDe] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [biChartDataAte, setBiChartDataAte] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [biChartFilial, setBiChartFilial] = useState<string>("");
@@ -654,12 +657,28 @@ function Producao() {
   const [reprocessoAppliedLinha, setReprocessoAppliedLinha] = useState<string>("");
   const [reprocessoAppliedGrupo, setReprocessoAppliedGrupo] = useState<"" | GrupoReprocesso>("");
   const [reprocessoAppliedCodigo, setReprocessoAppliedCodigo] = useState<string>("");
+  /** Data do documento (OCPD.data_dia) — intervalo para somar reprocessos do código em todos os documentos da filial */
+  const [reprocessoAppliedDataInicio, setReprocessoAppliedDataInicio] = useState<string>("");
+  const [reprocessoAppliedDataFim, setReprocessoAppliedDataFim] = useState<string>("");
+  /** Nome completo da filial (OCTF/OCPD) para totais no período; vazio = usa a filial selecionada no campo Filial do documento */
+  const [reprocessoAppliedFilialNome, setReprocessoAppliedFilialNome] = useState<string>("");
   /** Dialog de filtros do reprocesso — aberto pelo botão Filtros */
   const [reprocessoFiltrosDialogOpen, setReprocessoFiltrosDialogOpen] = useState(false);
   const [reprocessoFiltroTipoPending, setReprocessoFiltroTipoPending] = useState<"" | "Cortado" | "Usado">("");
   const [reprocessoFiltroLinhaPending, setReprocessoFiltroLinhaPending] = useState<string>("");
   const [reprocessoFiltroGrupoPending, setReprocessoFiltroGrupoPending] = useState<"" | GrupoReprocesso>("");
   const [reprocessoFiltroCodigoPending, setReprocessoFiltroCodigoPending] = useState<string>("");
+  const [reprocessoFiltroDataInicioPending, setReprocessoFiltroDataInicioPending] = useState<string>("");
+  const [reprocessoFiltroDataFimPending, setReprocessoFiltroDataFimPending] = useState<string>("");
+  /** Valor do Select: "" = filial do documento; senão nome da OCTF */
+  const [reprocessoFiltroFilialNomePending, setReprocessoFiltroFilialNomePending] = useState<string>("");
+  const [reprocessoPeriodoResumo, setReprocessoPeriodoResumo] = useState<{
+    totalCortado: number;
+    totalUsado: number;
+    documentosComItem: number;
+  } | null>(null);
+  const [reprocessoPeriodoLoading, setReprocessoPeriodoLoading] = useState(false);
+  const [reprocessoPeriodoError, setReprocessoPeriodoError] = useState<string | null>(null);
   // Lista de reprocessos filtrada pelos valores aplicados (só atualiza ao clicar em Filtrar)
   const reprocessosFiltrados = useMemo(() => {
     return reprocessos.filter((r) => {
@@ -690,11 +709,32 @@ function Producao() {
       setReprocessoFiltroLinhaPending(reprocessoAppliedLinha);
       setReprocessoFiltroGrupoPending(reprocessoAppliedGrupo);
       setReprocessoFiltroCodigoPending(reprocessoAppliedCodigo);
+      setReprocessoFiltroDataInicioPending(reprocessoAppliedDataInicio);
+      setReprocessoFiltroDataFimPending(reprocessoAppliedDataFim);
+      setReprocessoFiltroFilialNomePending(reprocessoAppliedFilialNome);
     }
   }, [reprocessoFiltrosDialogOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- sync only when opening
 
   /** Aplica os filtros do dialog de reprocesso e fecha o dialog */
   const applyReprocessoFiltrosDialog = useCallback(() => {
+    const di = reprocessoFiltroDataInicioPending.trim().split("T")[0];
+    const df = reprocessoFiltroDataFimPending.trim().split("T")[0];
+    if ((di && !df) || (!di && df)) {
+      toast({
+        title: "Datas do documento",
+        description: "Preencha data inicial e final ou deixe as duas em branco.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (di && df && di > df) {
+      toast({
+        title: "Datas do documento",
+        description: "A data inicial não pode ser maior que a final.",
+        variant: "destructive",
+      });
+      return;
+    }
     setReprocessoFiltroTipo(reprocessoFiltroTipoPending);
     setReprocessoAppliedTipo(reprocessoFiltroTipoPending);
     setReprocessoFiltroLinha(reprocessoFiltroLinhaPending);
@@ -703,8 +743,20 @@ function Producao() {
     setReprocessoAppliedGrupo(reprocessoFiltroGrupoPending);
     setReprocessoFiltroCodigo(reprocessoFiltroCodigoPending);
     setReprocessoAppliedCodigo(reprocessoFiltroCodigoPending);
+    setReprocessoAppliedDataInicio(di);
+    setReprocessoAppliedDataFim(df);
+    setReprocessoAppliedFilialNome(reprocessoFiltroFilialNomePending.trim());
     setReprocessoFiltrosDialogOpen(false);
-  }, [reprocessoFiltroTipoPending, reprocessoFiltroLinhaPending, reprocessoFiltroGrupoPending, reprocessoFiltroCodigoPending]);
+  }, [
+    reprocessoFiltroTipoPending,
+    reprocessoFiltroLinhaPending,
+    reprocessoFiltroGrupoPending,
+    reprocessoFiltroCodigoPending,
+    reprocessoFiltroDataInicioPending,
+    reprocessoFiltroDataFimPending,
+    reprocessoFiltroFilialNomePending,
+    toast,
+  ]);
 
   // Normaliza data vinda do banco (string ISO ou Date) para YYYY-MM-DD (evita mistura BELA/Petruz por fuso)
   const normalizeDataDia = (dateValue: string | Date | null | undefined): string => {
@@ -781,6 +833,49 @@ function Producao() {
     if (!filialSelecionada) return null;
     return filiais.find((f) => (f.codigo && String(f.codigo).trim() === filialSelecionada) || `id:${f.id}` === filialSelecionada) ?? null;
   }, [filiais, filialSelecionada]);
+
+  const filialNomeReprocesso =
+    reprocessoAppliedFilialNome.trim() || filialSelecionadaObj?.nome?.trim() || "";
+
+  useEffect(() => {
+    if (!filialNomeReprocesso || !reprocessoAppliedDataInicio || !reprocessoAppliedDataFim || !reprocessoAppliedCodigo.trim()) {
+      setReprocessoPeriodoResumo(null);
+      setReprocessoPeriodoError(null);
+      setReprocessoPeriodoLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setReprocessoPeriodoLoading(true);
+    setReprocessoPeriodoError(null);
+    aggregateReprocessosByCodigoInDateRange({
+      dataInicio: reprocessoAppliedDataInicio,
+      dataFim: reprocessoAppliedDataFim,
+      filialNome: filialNomeReprocesso,
+      codigoFiltro: reprocessoAppliedCodigo.trim(),
+    })
+      .then((r) => {
+        if (!cancelled) setReprocessoPeriodoResumo(r);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) {
+          setReprocessoPeriodoResumo(null);
+          setReprocessoPeriodoError(e?.message ?? "Erro ao carregar totais do período.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReprocessoPeriodoLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    filialNomeReprocesso,
+    reprocessoAppliedFilialNome,
+    filialSelecionadaObj?.nome,
+    reprocessoAppliedDataInicio,
+    reprocessoAppliedDataFim,
+    reprocessoAppliedCodigo,
+  ]);
 
   // Filtros do histórico: intervalo de datas, linha e filial (padrão = data de hoje, permitindo seleção)
   const [historyDataInicio, setHistoryDataInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
@@ -2831,11 +2926,14 @@ function Producao() {
     if (gridFiltrosDialogOpen) {
       setGridDataDePending(gridDataDeApplied);
       setGridDataAtePending(gridDataAteApplied);
+      setGridDialogReprocessoCodigoPending(reprocessoAppliedCodigo);
     }
   }, [gridFiltrosDialogOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- sync only when opening
 
   /** Aplica o período do dialog, limpa filtro por item/linha, mostra o grid e carrega os documentos */
   const applyGridFiltrosDialog = useCallback(() => {
+    const di = (gridDataDePending || "").split("T")[0];
+    const df = (gridDataAtePending || "").split("T")[0];
     setGridDataDe(gridDataDePending);
     setGridDataAte(gridDataAtePending);
     setGridDataDeApplied(gridDataDePending);
@@ -2844,10 +2942,21 @@ function Producao() {
     setGridCodigoItemApplied("");
     setGridLinhaFilter("");
     setGridLinhaFilterApplied("");
+    // Mesmo período = data do documento (OCPD) para somas de reprocesso no card Reprocesso
+    setReprocessoAppliedDataInicio(di);
+    setReprocessoAppliedDataFim(df);
+    setReprocessoFiltroCodigo(gridDialogReprocessoCodigoPending);
+    setReprocessoAppliedCodigo(gridDialogReprocessoCodigoPending.trim());
+    setReprocessoFiltroCodigoPending(gridDialogReprocessoCodigoPending);
     setShowDocumentGridForDate(true);
     setGridFiltrosDialogOpen(false);
     loadDocumentsForDateRange(gridDataDePending, gridDataAtePending, undefined, undefined);
-  }, [gridDataDePending, gridDataAtePending, loadDocumentsForDateRange]);
+  }, [
+    gridDataDePending,
+    gridDataAtePending,
+    gridDialogReprocessoCodigoPending,
+    loadDocumentsForDateRange,
+  ]);
 
   // Sincronizar data e filial com o Painel de Controle (dashboard) para acompanhar o diário
   useEffect(() => {
@@ -5084,11 +5193,14 @@ function Producao() {
                             <span>Filtros</span>
                           </button>
                         </DialogTrigger>
-                        <DialogContent className="w-[340px] sm:w-[380px] max-w-[95vw] p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
+                        <DialogContent
+                          className="w-[min(95vw,440px)] sm:w-[420px] max-h-[90vh] overflow-y-auto p-4 rounded-lg"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <DialogHeader>
                             <DialogTitle className="text-base">Filtros de reprocesso</DialogTitle>
                             <DialogDescription className="text-sm text-muted-foreground">
-                              Tipo, linha, grupo e código. Os filtros são aplicados ao clicar em Filtrar.
+                              Tipo, linha, grupo e código filtram a tabela deste documento. Abaixo: filial alvo, datas (opcional) e código para totais Cortado/Usado somados nos documentos da filial no período.
                             </DialogDescription>
                           </DialogHeader>
                           <div className="grid gap-3 py-2">
@@ -5144,6 +5256,65 @@ function Producao() {
                                 placeholder="Código"
                                 className="h-9 text-sm"
                               />
+                            </div>
+                            <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                              <Label htmlFor="reprocesso-dialog-filial" className="text-xs text-muted-foreground">
+                                Filial (totais no período)
+                              </Label>
+                              <Select
+                                value={reprocessoFiltroFilialNomePending.trim() ? reprocessoFiltroFilialNomePending : "__doc__"}
+                                onValueChange={(v) => setReprocessoFiltroFilialNomePending(v === "__doc__" ? "" : v)}
+                              >
+                                <SelectTrigger id="reprocesso-dialog-filial" className="h-9 text-sm min-w-0">
+                                  <SelectValue placeholder="Filial" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__doc__">Filial do documento (campo Filial acima)</SelectItem>
+                                  {filiais.map((f) => {
+                                    const nome = (f.nome || "").trim();
+                                    if (!nome) return null;
+                                    return (
+                                      <SelectItem key={f.id} value={nome}>
+                                        {nome}
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="rounded-lg border border-primary/30 bg-muted/25 p-3 space-y-2">
+                              <p className="text-xs font-semibold text-foreground">Data do documento (opcional)</p>
+                              <p className="text-[11px] text-muted-foreground leading-snug">
+                                Intervalo de <span className="font-medium text-foreground">data_dia</span> na OCPD. A filial usada nos totais é a selecionada no campo anterior (ou a do documento). Preencha as duas datas e o código para o resumo Cortado/Usado.
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="grid gap-1">
+                                  <Label htmlFor="reprocesso-dialog-data-ini" className="text-xs text-muted-foreground">
+                                    De
+                                  </Label>
+                                  <DatePicker
+                                    id="reprocesso-dialog-data-ini"
+                                    value={reprocessoFiltroDataInicioPending}
+                                    onChange={(v) => v && setReprocessoFiltroDataInicioPending(v.split("T")[0])}
+                                    placeholder="Data inicial"
+                                    className="min-w-0"
+                                    triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                                  />
+                                </div>
+                                <div className="grid gap-1">
+                                  <Label htmlFor="reprocesso-dialog-data-fim" className="text-xs text-muted-foreground">
+                                    Até
+                                  </Label>
+                                  <DatePicker
+                                    id="reprocesso-dialog-data-fim"
+                                    value={reprocessoFiltroDataFimPending}
+                                    onChange={(v) => v && setReprocessoFiltroDataFimPending(v.split("T")[0])}
+                                    placeholder="Data final"
+                                    className="min-w-0"
+                                    triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                                  />
+                                </div>
+                              </div>
                             </div>
                           </div>
                           <Button type="button" onClick={applyReprocessoFiltrosDialog} className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90">
@@ -5201,7 +5372,13 @@ function Producao() {
                     </div>
                     </div>
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 border-t border-border/40">
-                      {(reprocessoAppliedTipo || reprocessoAppliedLinha || reprocessoAppliedGrupo || reprocessoAppliedCodigo) && (
+                      {(reprocessoAppliedTipo ||
+                        reprocessoAppliedLinha ||
+                        reprocessoAppliedGrupo ||
+                        reprocessoAppliedCodigo ||
+                        reprocessoAppliedDataInicio ||
+                        reprocessoAppliedDataFim ||
+                        reprocessoAppliedFilialNome.trim()) && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -5216,16 +5393,74 @@ function Producao() {
                             setReprocessoAppliedGrupo("");
                             setReprocessoFiltroCodigo("");
                             setReprocessoAppliedCodigo("");
+                            setReprocessoAppliedDataInicio("");
+                            setReprocessoAppliedDataFim("");
                             setReprocessoFiltroTipoPending("");
                             setReprocessoFiltroLinhaPending("");
                             setReprocessoFiltroGrupoPending("");
                             setReprocessoFiltroCodigoPending("");
+                            setReprocessoFiltroDataInicioPending("");
+                            setReprocessoFiltroDataFimPending("");
                           }}
                         >
                           Limpar filtros
                         </Button>
                       )}
                     </div>
+                    {(reprocessoAppliedDataInicio && reprocessoAppliedDataFim && !reprocessoAppliedCodigo.trim()) && (
+                      <p className="text-xs text-muted-foreground">
+                        Informe o código do reprocesso para ver o total Cortado e Usado somados em todos os documentos entre as datas do documento.
+                      </p>
+                    )}
+                    {(reprocessoAppliedDataInicio && reprocessoAppliedDataFim && reprocessoAppliedCodigo.trim()) && (
+                      <div className="rounded-lg border border-border/50 bg-muted/30 p-3 text-sm space-y-2">
+                        <p className="font-medium text-card-foreground">
+                          Totais no período (todos os documentos, filial atual)
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Código filtrado: <span className="font-mono text-foreground">{reprocessoAppliedCodigo.trim()}</span>
+                          {" · "}
+                          {new Date(reprocessoAppliedDataInicio + "T12:00:00").toLocaleDateString("pt-BR")}
+                          {" — "}
+                          {new Date(reprocessoAppliedDataFim + "T12:00:00").toLocaleDateString("pt-BR")}
+                        </p>
+                        {reprocessoPeriodoLoading && (
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                            <span>Carregando somas…</span>
+                          </div>
+                        )}
+                        {reprocessoPeriodoError && (
+                          <p className="text-destructive text-xs">{reprocessoPeriodoError}</p>
+                        )}
+                        {!reprocessoPeriodoLoading && !reprocessoPeriodoError && reprocessoPeriodoResumo && (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                            <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
+                              <span className="text-xs text-muted-foreground">Cortado (soma)</span>
+                              <span className="text-base font-bold tabular-nums">
+                                {reprocessoPeriodoResumo.totalCortado.toLocaleString("pt-BR", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </div>
+                            <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
+                              <span className="text-xs text-muted-foreground">Usado (soma)</span>
+                              <span className="text-base font-bold tabular-nums">
+                                {reprocessoPeriodoResumo.totalUsado.toLocaleString("pt-BR", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </div>
+                            <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
+                              <span className="text-xs text-muted-foreground">Documentos com o item</span>
+                              <span className="text-base font-bold tabular-nums">{reprocessoPeriodoResumo.documentosComItem}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -6747,39 +6982,66 @@ function Producao() {
 
         {/* Filtros do grid (período, item, linha) — aberto a partir de Acompanhamento ou Bi-horária */}
         <Dialog open={gridFiltrosDialogOpen} onOpenChange={setGridFiltrosDialogOpen}>
-          <DialogContent className="w-[340px] sm:w-[380px] max-w-[95vw] p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
+          <DialogContent
+            className="w-[min(95vw,440px)] sm:w-[420px] max-h-[90vh] overflow-y-auto max-w-[95vw] p-4 rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
             <DialogHeader>
               <DialogTitle className="text-base">Filtros de produção</DialogTitle>
               <DialogDescription className="text-sm text-muted-foreground">
-                Defina o período. Ao clicar em Filtrar, o grid de documentos será exibido.
+                Período da lista de documentos (data do documento). O mesmo intervalo alimenta o resumo de reprocesso no card Reprocesso, se você informar o código abaixo.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-3 py-2">
-              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
-                <Label htmlFor="grid-dialog-de" className="text-xs text-muted-foreground">
-                  De
-                </Label>
-                <DatePicker
-                  id="grid-dialog-de"
-                  value={gridDataDePending}
-                  onChange={(v) => v && setGridDataDePending(v)}
-                  placeholder="Data"
-                  className="min-w-0"
-                  triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
-                />
+              <div className="rounded-lg border border-border/60 bg-muted/25 p-3 space-y-2">
+                <p className="text-xs font-semibold text-foreground">Data do documento</p>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Usado para o grid de documentos e para somar Cortado/Usado do reprocesso na filial atual.
+                </p>
+                <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                  <Label htmlFor="grid-dialog-de" className="text-xs text-muted-foreground">
+                    De
+                  </Label>
+                  <DatePicker
+                    id="grid-dialog-de"
+                    value={gridDataDePending}
+                    onChange={(v) => v && setGridDataDePending(v)}
+                    placeholder="Data"
+                    className="min-w-0"
+                    triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                  />
+                </div>
+                <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                  <Label htmlFor="grid-dialog-ate" className="text-xs text-muted-foreground">
+                    Até
+                  </Label>
+                  <DatePicker
+                    id="grid-dialog-ate"
+                    value={gridDataAtePending}
+                    onChange={(v) => v && setGridDataAtePending(v)}
+                    placeholder="Data"
+                    className="min-w-0"
+                    triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                  />
+                </div>
               </div>
-              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
-                <Label htmlFor="grid-dialog-ate" className="text-xs text-muted-foreground">
-                  Até
-                </Label>
-                <DatePicker
-                  id="grid-dialog-ate"
-                  value={gridDataAtePending}
-                  onChange={(v) => v && setGridDataAtePending(v)}
-                  placeholder="Data"
-                  className="min-w-0"
-                  triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
-                />
+              <div className="rounded-lg border border-primary/20 bg-muted/20 p-3 space-y-2">
+                <p className="text-xs font-semibold text-foreground">Reprocesso (opcional)</p>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Com código preenchido, o card Reprocesso mostra totais Cortado/Usado no período acima para todos os documentos da filial.
+                </p>
+                <div className="grid gap-1">
+                  <Label htmlFor="grid-dialog-reprocesso-codigo" className="text-xs text-muted-foreground">
+                    Código do reprocesso
+                  </Label>
+                  <Input
+                    id="grid-dialog-reprocesso-codigo"
+                    value={gridDialogReprocessoCodigoPending}
+                    onChange={(e) => setGridDialogReprocessoCodigoPending(e.target.value)}
+                    placeholder="Ex.: 06898"
+                    className="h-9 text-sm"
+                  />
+                </div>
               </div>
             </div>
             <Button type="button" onClick={applyGridFiltrosDialog} className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90">
