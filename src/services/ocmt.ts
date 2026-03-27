@@ -56,8 +56,8 @@ export async function getMovimentacoesTuneis(params?: {
 }): Promise<OCMTRow[]> {
   let query = supabase.from(TABLE).select(SELECT_LIST).order("doc_entry", { ascending: false }).limit(1000);
   if (params?.filialNome) query = query.eq("filial_nome", params.filialNome);
-  if (params?.dataInicio) query = query.gte("data_abertura", params.dataInicio);
-  if (params?.dataFim) query = query.lte("data_abertura", params.dataFim);
+  if (params?.dataInicio) query = query.gte("data_fechamento", params.dataInicio);
+  if (params?.dataFim) query = query.lte("data_fechamento", params.dataFim);
   const { data, error } = await query;
   if (error) throw new Error(fmtErr(error as { message?: string; details?: string; hint?: string; code?: string }));
   return (data || []).map((row) => mapRow(row as Record<string, unknown>));

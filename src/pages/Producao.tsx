@@ -3132,35 +3132,34 @@ function Producao() {
         }
       }
 
-      // Compartilhamento (WhatsApp etc.): funciona no celular (Android/iPhone). No computador só baixa as imagens.
+      // No celular, alguns navegadores "re-encodam" os arquivos quando vão para a tela de compartilhamento
+      // (o que pode resultar em PNG com aparência/dimensões diferentes do download direto).
+      // Para manter o mesmo formato do computador, no mobile a gente mantém somente o download local.
+      const isMobile = /Android|iPhone|iPad|iPod|webOS|Mobile/i.test(navigator.userAgent);
       const hasShare = typeof navigator !== "undefined" && navigator.share;
       const canShareFiles = hasShare && (navigator.canShare == null || navigator.canShare({ files: filesToShare, title: "Produção" }));
 
-      if (filesToShare.length > 0 && canShareFiles) {
-        try {
-          await navigator.share({
-            files: filesToShare,
-            title: "Produção",
-            text: `Produção - ${dataDoc}${filialDoc ? ` - ${filiais.find((f) => f.codigo === filialDoc)?.nome ?? ""}` : ""}`,
-          });
-          toast({ title: "Compartilhado!", description: "As 4 imagens foram enviadas." });
-        } catch (shareErr: unknown) {
-          if ((shareErr as Error)?.name !== "AbortError") {
-            console.error("Share failed:", shareErr);
+      if (filesToShare.length > 0) {
+        if (!isMobile && canShareFiles) {
+          try {
+            await navigator.share({
+              files: filesToShare,
+              title: "Produção",
+              text: `Produção - ${dataDoc}${filialDoc ? ` - ${filiais.find((f) => f.codigo === filialDoc)?.nome ?? ""}` : ""}`,
+            });
+            toast({ title: "Compartilhado!", description: "As 4 imagens foram enviadas." });
+          } catch (shareErr: unknown) {
+            if ((shareErr as Error)?.name !== "AbortError") {
+              console.error("Share failed:", shareErr);
+            }
+            toast({ title: "4 imagens baixadas", description: "O download local foi gerado normalmente." });
           }
+        } else {
           toast({
             title: "4 imagens baixadas",
-            description: "Toque em 'Exportar PNG' de novo para abrir o compartilhamento (WhatsApp, etc.).",
+            description: isMobile ? "No celular, mantendo o PNG do download direto." : "Toque novamente para compartilhar (se disponível).",
           });
         }
-      } else if (filesToShare.length > 0) {
-        const isMobile = /Android|iPhone|iPad|iPod|webOS|Mobile/i.test(navigator.userAgent);
-        toast({
-          title: "4 imagens baixadas",
-          description: isMobile
-            ? "Se a opção de compartilhar não abriu, use os arquivos na pasta Downloads ou tente de novo."
-            : "No celular (Android/iPhone), use 'Exportar PNG' para ver a opção de enviar no WhatsApp.",
-        });
       }
     } catch (error) {
       console.error("Erro ao exportar PNGs:", error);
