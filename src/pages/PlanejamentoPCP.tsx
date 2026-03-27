@@ -15,6 +15,7 @@ import { getItemByCode } from "@/services/supabaseData";
 import { Plus, Trash2, Factory, Download, Calendar, FileText, Clock } from "lucide-react";
 import { toPng } from "html-to-image";
 import { runWithLightThemeForCapture } from "@/components/ExportToPng";
+import { formatNumberPtBrFixed, formatPercentPtBr } from "@/lib/formatLocale";
 
 interface PlanejamentoItem {
     id: number;
@@ -143,15 +144,8 @@ export default function PlanejamentoPCP() {
         return decimalPart ? `${formattedInteger},${decimalPart}` : formattedInteger;
     };
 
-    // Formatar número para totais (sempre mostra 2 casas decimais)
-    const formatTotal = (value: number): string => {
-        const numValue = value || 0;
-        const parts = numValue.toFixed(2).split(".");
-        const integerPart = parts[0];
-        const decimalPart = parts[1] || "00";
-        const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-        return `${formattedInteger},${decimalPart}`;
-    };
+    const formatTotal = (value: number): string =>
+        formatNumberPtBrFixed(Number(value || 0), 2);
 
     // Remover formatação e converter para número
     const parseFormattedNumber = (value: string): number => {
@@ -673,7 +667,7 @@ export default function PlanejamentoPCP() {
                                                                                 : "text-destructive"
                                                                             }`}
                                                                     >
-                                                                        {eficienciaItem.toFixed(1)}%
+                                                                        {formatPercentPtBr(eficienciaItem, 1)}
                                                                     </div>
                                                                 </div>
                                                             );
@@ -751,7 +745,7 @@ export default function PlanejamentoPCP() {
                                                                             : "text-destructive"
                                                                         }`}
                                                                 >
-                                                                    {totais.eficiencia.toFixed(1)}%
+                                                                    {formatPercentPtBr(totais.eficiencia, 1)}
                                                                 </div>
                                                             </div>
                                                         </TableCell>

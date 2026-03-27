@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Filter } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
+import { formatNumberPtBr, formatNumberPtBrFixed } from "@/lib/formatLocale";
 import {
   createMovimentacaoTunel,
   deleteMovimentacaoTunel,
@@ -84,10 +85,6 @@ function createMovRow(): MovRow {
     horaFechamento: "",
     observacao: "",
   };
-}
-
-function fmtNum(n: number): string {
-  return Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
 
 function round2(n: number): number {
@@ -167,6 +164,48 @@ function formatHoraFechamentoInput(raw: string): string {
   return `${hh}:${mm}`;
 }
 
+/** Valor vindo do banco ou vazio → string pt-BR para o input (até 4 casas decimais). */
+function formatMovQtdInseridaFromValue(v: unknown): string {
+  if (v == null || v === "") return "";
+  const n = typeof v === "number" && Number.isFinite(v) ? v : parseBrazilNumber(v);
+  if (!Number.isFinite(n)) return "";
+  return formatNumberPtBr(n, 0, 4);
+}
+
+/** pt-BR enquanto digita: milhares `.`; após `,` até 4 dígitos. */
+function formatQtdInseridaWhileTyping(input: string): string {
+  let s = input.replace(/[^\d.,]/g, "");
+  if (!s) return "";
+
+  const firstComma = s.indexOf(",");
+  if (firstComma !== -1) {
+    s = s.slice(0, firstComma + 1) + s.slice(firstComma + 1).replace(/,/g, "");
+  }
+
+  const intSection = firstComma === -1 ? s : s.slice(0, firstComma);
+  const decSection = firstComma === -1 ? "" : s.slice(firstComma + 1);
+
+  let intDigits = intSection.replace(/\./g, "").replace(/\D/g, "");
+  const decDigitsRaw = decSection.replace(/\D/g, "").slice(0, 4);
+
+  if (!intDigits && firstComma !== -1) intDigits = "0";
+
+  const intFmt = intDigits ? intDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : "";
+
+  if (firstComma === -1) return intFmt;
+
+  if (decSection.replace(/\D/g, "").length === 0) return `${intFmt},`;
+
+  return `${intFmt},${decDigitsRaw}`;
+}
+
+function normalizeQtdInseridaOnBlur(raw: string): string {
+  const t = String(raw || "").trim();
+  if (!t) return "";
+  const n = parseBrazilNumber(t);
+  return formatNumberPtBr(n, 0, 4);
+}
+
 function getFriendlyErrorMessage(error: unknown, fallback: string): string {
   const msg = error instanceof Error ? error.message : fallback;
   const normalized = String(msg || "").toLowerCase();
@@ -227,7 +266,7 @@ export default function MovimentacaoTuneis() {
       const tunel = tuneisByKey.get(`${row.filialNome}|${String(row.codigoTunel)}`);
       const tipo = tiposByKey.get(`${row.filialNome}|${String(row.codigoTipoProduto)}`);
       const capacidade = Number(tunel?.capacidadeMaximaTunel ?? 0);
-      const quantidade = Number(row.qtdInserida ?? 0);
+      const quantidade = parseBrazilNumber(row.qtdInserida ?? 0);
       const tempoMaxCongMin = Number(tipo?.tempoMaxCongelamentoMinutos ?? 0);
       const tempoMaxCongHoras = Math.floor(tempoMaxCongMin / 60);
       const fechamentoDt = toDateTime(row.dataFechamento, row.horaFechamento);
@@ -236,7 +275,8 @@ export default function MovimentacaoTuneis() {
 
       const qtdDisponivel = Math.max(capacidade - quantidade, 0);
       const ocupacaoPct = capacidade > 0 ? (quantidade * 100) / capacidade : null;
-      const ocupacaoFmt = ocupacaoPct != null ? `${Math.floor(ocupacaoPct)} %` : null;
+      const ocupacaoFmt =
+        ocupacaoPct != null ? `${formatNumberPtBr(Math.floor(ocupacaoPct), 0, 0)} %` : null;
       const statusOcupacao = ocupacaoPct != null && ocupacaoPct > 100 ? "Alagado" : "Normal";
 
       const diffMin = Math.abs(minutesDiff(fechamentoDt, aberturaDt));
@@ -251,7 +291,10 @@ export default function MovimentacaoTuneis() {
             )
           : 0;
 
-      const percentualCong = tempoMaxCongMin > 0 && fechamentoDt && aberturaDt ? `${Math.floor((diffMin * 100) / tempoMaxCongMin)} %` : "0 %";
+      const percentualCong =
+        tempoMaxCongMin > 0 && fechamentoDt && aberturaDt
+          ? `${formatNumberPtBr(Math.floor((diffMin * 100) / tempoMaxCongMin), 0, 0)} %`
+          : `${formatNumberPtBr(0, 0, 0)} %`;
 
       let statusTunel = "Fechado";
       if (aberturaDt) {
@@ -318,10 +361,10 @@ export default function MovimentacaoTuneis() {
           });
 
         const ult = transacoesTunel[0] ?? null;
-        const qtdUlt = ult ? Number(ult.qtdInserida || 0) : 0;
+        const qtdUlt = ult ? parseBrazilNumber(ult.qtdInserida || 0) : 0;
         const ocupado = ult ? ult.dataAbertura == null : false;
         const qtdPendente = round2(
-          transacoesTunel.reduce((acc, r) => acc + (r.dataAbertura == null ? Number(r.qtdInserida || 0) : 0), 0)
+          transacoesTunel.reduce((acc, r) => acc + (r.dataAbertura == null ? parseBrazilNumber(r.qtdInserida || 0) : 0), 0)
         );
         const diffDisponivel = statusOperacional === "M" ? 0 : round2(capacidade - qtdPendente);
         const diffRealDisponivel =
@@ -547,7 +590,7 @@ export default function MovimentacaoTuneis() {
       {
         rowId: Date.now(),
         codigoTipoProduto: String(row.codigoTipoProduto),
-        qtdInserida: String(row.qtdInserida ?? ""),
+        qtdInserida: formatMovQtdInseridaFromValue(row.qtdInserida),
         dataAbertura: row.dataAbertura || "",
         horaAbertura: row.horaAbertura || "",
         dataFechamento: row.dataFechamento || "",
@@ -871,10 +914,24 @@ export default function MovimentacaoTuneis() {
                           <TableCell className="align-top">
                             <Input
                               inputMode="decimal"
-                              placeholder="0,0000"
+                              placeholder="0"
+                              className="text-right tabular-nums"
                               value={row.qtdInserida}
                               onChange={(e) =>
-                                setMovRows((prev) => prev.map((r) => (r.rowId === row.rowId ? { ...r, qtdInserida: e.target.value } : r)))
+                                setMovRows((prev) =>
+                                  prev.map((r) =>
+                                    r.rowId === row.rowId
+                                      ? { ...r, qtdInserida: formatQtdInseridaWhileTyping(e.target.value) }
+                                      : r
+                                  )
+                                )
+                              }
+                              onBlur={() =>
+                                setMovRows((prev) =>
+                                  prev.map((r) =>
+                                    r.rowId === row.rowId ? { ...r, qtdInserida: normalizeQtdInseridaOnBlur(r.qtdInserida) } : r
+                                  )
+                                )
                               }
                             />
                           </TableCell>
@@ -1184,23 +1241,23 @@ export default function MovimentacaoTuneis() {
                                 <TableRow className="bg-muted/30">
                                   <TableHead>Número do Documento</TableHead>
                                   <TableHead>Filial</TableHead>
-                                  <TableHead>Tempo Máximo de Congelamento</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Tempo Máximo de Congelamento</TableHead>
                                   <TableHead>Data de Início</TableHead>
                                   <TableHead>Código do Túnel Utilizado</TableHead>
-                                  <TableHead>Capacidade do Túnel</TableHead>
-                                  <TableHead>Quantidade Alocada no Túnel</TableHead>
-                                  <TableHead>Quantidade Disponível no Túnel</TableHead>
-                                  <TableHead>Ocupação</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Capacidade do Túnel</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Quantidade Alocada no Túnel</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Quantidade Disponível no Túnel</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Ocupação</TableHead>
                                   <TableHead>Status Ocupação</TableHead>
                                   <TableHead>Data de Fechamento</TableHead>
                                   <TableHead>Hora do Fechamento</TableHead>
                                   <TableHead>Data de Abertura</TableHead>
                                   <TableHead>Hora de Abertura</TableHead>
-                                  <TableHead>Diferença de Dias</TableHead>
-                                  <TableHead>Diferença em Horas</TableHead>
-                                  <TableHead>Percentual de congelamento</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Diferença de Dias</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Diferença em Horas</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Percentual de congelamento</TableHead>
                                   <TableHead>Status do túnel</TableHead>
-                                  <TableHead>Total (horas)</TableHead>
+                                  <TableHead className="text-right whitespace-nowrap">Total (horas)</TableHead>
                                   <TableHead>Tempo Adicional (hh:mm)</TableHead>
                                   <TableHead>Data prevista de abertura</TableHead>
                                   <TableHead>Hora prevista de abertura</TableHead>
@@ -1227,23 +1284,25 @@ export default function MovimentacaoTuneis() {
                                       </span>
                                     </TableCell>
                                     <TableCell className="min-w-[20rem] whitespace-nowrap">{a.row.filialNome || "-"}</TableCell>
-                                    <TableCell>{a.tempoMaxCongHoras}</TableCell>
+                                    <TableCell className="tabular-nums text-right">
+                                      {formatNumberPtBr(a.tempoMaxCongHoras, 0, 4)}
+                                    </TableCell>
                                     <TableCell className="whitespace-nowrap">{formatDate(a.row.dataFechamento)}</TableCell>
                                     <TableCell className="font-mono">{String(a.row.codigoTunel).padStart(4, "0")}</TableCell>
-                                    <TableCell>{fmtNum(a.capacidade)}</TableCell>
-                                    <TableCell>{fmtNum(a.quantidade)}</TableCell>
-                                    <TableCell>{fmtNum(a.qtdDisponivel)}</TableCell>
-                                    <TableCell>{a.ocupacaoFmt ?? "-"}</TableCell>
+                                    <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.capacidade, 0, 4)}</TableCell>
+                                    <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.quantidade, 0, 4)}</TableCell>
+                                    <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.qtdDisponivel, 0, 4)}</TableCell>
+                                    <TableCell className="tabular-nums text-right whitespace-nowrap">{a.ocupacaoFmt ?? "-"}</TableCell>
                                     <TableCell>{a.statusOcupacao}</TableCell>
                                     <TableCell className="whitespace-nowrap">{formatDate(a.row.dataFechamento)}</TableCell>
                                     <TableCell className="whitespace-nowrap">{formatHora(a.row.horaFechamento) || "-"}</TableCell>
                                     <TableCell className="whitespace-nowrap">{formatDate(a.row.dataAbertura) || "-"}</TableCell>
                                     <TableCell className="whitespace-nowrap">{formatHora(a.row.horaAbertura) || "-"}</TableCell>
-                                    <TableCell>{a.diffDias}</TableCell>
-                                    <TableCell>{a.diffHoras}</TableCell>
-                                    <TableCell>{a.percentualCong}</TableCell>
+                                    <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.diffDias, 0, 0)}</TableCell>
+                                    <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.diffHoras, 0, 0)}</TableCell>
+                                    <TableCell className="tabular-nums text-right whitespace-nowrap">{a.percentualCong}</TableCell>
                                     <TableCell>{a.statusTunel}</TableCell>
-                                    <TableCell>{a.totalHoras}</TableCell>
+                                    <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.totalHoras, 0, 4)}</TableCell>
                                     <TableCell>{a.tempoAdicional}</TableCell>
                                     <TableCell className="whitespace-nowrap">{a.dataPrevAbertura || "-"}</TableCell>
                                     <TableCell className="whitespace-nowrap">{a.horaPrevAbertura || "-"}</TableCell>
@@ -1324,11 +1383,11 @@ export default function MovimentacaoTuneis() {
                               <TableRow className="bg-muted/30">
                                 <TableHead>Código do Túnel</TableHead>
                                 <TableHead>Última transação no túnel</TableHead>
-                                <TableHead>Capacidade do Túnel</TableHead>
+                                <TableHead className="text-right">Capacidade do Túnel</TableHead>
                                 <TableHead>Status do Túnel</TableHead>
-                                <TableHead>Quantidade pendente de abertura</TableHead>
-                                <TableHead>Diferença disponível por túnel</TableHead>
-                                <TableHead>Diferença real disponível por túnel</TableHead>
+                                <TableHead className="text-right">Quantidade pendente de abertura</TableHead>
+                                <TableHead className="text-right">Diferença disponível por túnel</TableHead>
+                                <TableHead className="text-right">Diferença real disponível por túnel</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -1358,11 +1417,11 @@ export default function MovimentacaoTuneis() {
                                       "-"
                                     )}
                                   </TableCell>
-                                  <TableCell>{round2(r.capacidade).toFixed(2)}</TableCell>
+                                  <TableCell className="tabular-nums text-right">{formatNumberPtBrFixed(r.capacidade, 2)}</TableCell>
                                   <TableCell>{r.statusTunel}</TableCell>
-                                  <TableCell>{r.qtdPendente.toFixed(2)}</TableCell>
-                                  <TableCell>{r.diffDisponivel.toFixed(2)}</TableCell>
-                                  <TableCell>{r.diffRealDisponivel.toFixed(2)}</TableCell>
+                                  <TableCell className="tabular-nums text-right">{formatNumberPtBrFixed(r.qtdPendente, 2)}</TableCell>
+                                  <TableCell className="tabular-nums text-right">{formatNumberPtBrFixed(r.diffDisponivel, 2)}</TableCell>
+                                  <TableCell className="tabular-nums text-right">{formatNumberPtBrFixed(r.diffRealDisponivel, 2)}</TableCell>
                                 </TableRow>
                               ))}
                             </TableBody>
@@ -1372,18 +1431,18 @@ export default function MovimentacaoTuneis() {
                                   <TableCell colSpan={2} className="font-semibold text-foreground">
                                     {`Total (${relatorioPorTunelRows.length} ${relatorioPorTunelRows.length === 1 ? "túnel" : "túneis"})`}
                                   </TableCell>
-                                  <TableCell className="font-semibold tabular-nums">
-                                    {relatorioPorTunelTotals.capacidade.toFixed(2)}
+                                  <TableCell className="font-semibold tabular-nums text-right">
+                                    {formatNumberPtBrFixed(relatorioPorTunelTotals.capacidade, 2)}
                                   </TableCell>
                                   <TableCell className="text-muted-foreground">—</TableCell>
-                                  <TableCell className="font-semibold tabular-nums">
-                                    {relatorioPorTunelTotals.qtdPendente.toFixed(2)}
+                                  <TableCell className="font-semibold tabular-nums text-right">
+                                    {formatNumberPtBrFixed(relatorioPorTunelTotals.qtdPendente, 2)}
                                   </TableCell>
-                                  <TableCell className="font-semibold tabular-nums">
-                                    {relatorioPorTunelTotals.diffDisponivel.toFixed(2)}
+                                  <TableCell className="font-semibold tabular-nums text-right">
+                                    {formatNumberPtBrFixed(relatorioPorTunelTotals.diffDisponivel, 2)}
                                   </TableCell>
-                                  <TableCell className="font-semibold tabular-nums">
-                                    {relatorioPorTunelTotals.diffRealDisponivel.toFixed(2)}
+                                  <TableCell className="font-semibold tabular-nums text-right">
+                                    {formatNumberPtBrFixed(relatorioPorTunelTotals.diffRealDisponivel, 2)}
                                   </TableCell>
                                 </TableRow>
                               </TableFooter>

@@ -64,6 +64,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { useLoadNotifications } from "@/contexts/LoadNotificationsContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatNumberPtBrFixed } from "@/lib/formatLocale";
 
 interface ProductionItem {
   id: number;
@@ -4761,7 +4762,7 @@ function Producao() {
                                   }`}
                               >
                                 <Calculator className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
-                                <span className="truncate">{Math.abs(item.diferenca).toFixed(2)}</span>
+                                <span className="truncate">{formatNumberPtBrFixed(Math.abs(item.diferenca), 2)}</span>
                               </div>
                             </TableCell>
                             <TableCell className="p-2 sm:p-4">

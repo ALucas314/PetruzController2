@@ -266,6 +266,16 @@ function isValidItemCode(value: string | number | null | undefined): boolean {
   return code.length === 0 || code.length >= MIN_ITEM_CODE_LENGTH;
 }
 
+/** Cadastro PCP: só BELA (Iaca) ou Petruz — nomes completos vêm da OCTF. */
+function isFilialBelaOuPetruz(nome: string | null | undefined): boolean {
+  const n = String(nome ?? "").trim().toUpperCase();
+  if (!n) return false;
+  return n.includes("BELA") || n.includes("PETRUZ");
+}
+
+/** Placeholder controlado no Select (novo documento); `undefined` no Radix fazia parecer a 1ª filial selecionada sem poder trocar. */
+const PCP_FILIAL_NOVO_DOC_PENDENTE = "__pcp_filial_novo_doc_pendente__";
+
 const emptyPayload = (data: string): OCPPInsertPayload => ({
   data,
   op: "",
@@ -374,6 +384,10 @@ export default function PlanejamentoProducao() {
   const [dataFiltro, setDataFiltro] = useState(hoje);
   const [dataFiltroPara, setDataFiltroPara] = useState(hoje);
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
+  const filiaisBelaOuPetruz = useMemo(
+    () => filiais.filter((f) => isFilialBelaOuPetruz(f.nome)),
+    [filiais]
+  );
   const [filialFiltro, setFilialFiltro] = useState<string>("");
   const [productionLines, setProductionLines] = useState<LineOption[]>([]);
   const [filtroCodigo, setFiltroCodigo] = useState("");
@@ -769,6 +783,16 @@ export default function PlanejamentoProducao() {
     });
     return list;
   }, [registrosBaseFilial, getDocKey]);
+
+  /** Cabeçalho: contexto de filial (não altera filtro; filtro de filiais só no card Filtros). */
+  const filialExibicaoHeader = useMemo(() => {
+    if (selectedDocKey) {
+      const doc = documentosDoPeriodo.find((d) => d.key === selectedDocKey);
+      const nome = (doc?.filial_nome ?? "").trim();
+      return nome || "—";
+    }
+    return filialFiltro ? filialFiltro : "Todas as filiais";
+  }, [selectedDocKey, documentosDoPeriodo, filialFiltro]);
 
   const documentosParaNavegacao = useMemo(() => {
     const base = filialFiltro && registrosNavegacao.length > 0
@@ -1190,16 +1214,19 @@ export default function PlanejamentoProducao() {
     }
   }, [registrosExibidos, rowToPayload, toast, loadRegistros]);
 
-  /** Criar novo documento: limpa a lista; usa filial atual (ou filial do filtro) para o novo doc; alterar filial no header não filtra. */
+  /** Criar novo documento: limpa a lista. Filial do cadastro é só no campo do header (não usa o filtro de listagem). */
   const createNewDocument = useCallback(() => {
     const totalDocs = documentosParaNavegacao.length;
     pendingNovoDocIdentityRef.current = null;
     setNewDocumentIndex(totalDocs + 1);
-    setFilialNovoDocumento(filialFiltro || "");
+    setFilialNovoDocumento(isFilialBelaOuPetruz(filialFiltro) ? filialFiltro : "");
     setRegistros([]);
     setSelectedDocKey(null);
     setShowDocumentGridForRange(false);
-    toast({ title: "Novo documento", description: "Selecione a filial acima se quiser. Adicione linhas e salve." });
+    toast({
+      title: "Novo documento",
+      description: "Obrigatório escolher filial BELA ou Petruz. Depois adicione linhas e salve.",
+    });
   }, [documentosParaNavegacao.length, filialFiltro]);
 
   /** Contagem para PCP por documento: "1 de 1" = um documento (com N linhas), "2 de 3" = segundo doc de três. Setas navegam entre documentos. */
@@ -1276,13 +1303,21 @@ export default function PlanejamentoProducao() {
       const first = doc?.rows[0];
       const dataStr = first?.data ? String(first.data).split("T")[0] : addCalendarDays(dataFiltro.split("T")[0], 1);
       payload = emptyPayload(dataStr);
-      payload.filial_nome = (first?.filial_nome ?? doc?.filial_nome ?? filialFiltro) || null;
+      payload.filial_nome = (first?.filial_nome ?? doc?.filial_nome) || null;
       if (first?.doc_numero != null) payload.doc_numero = first.doc_numero;
       if (first?.doc_ordem_global != null) payload.doc_ordem_global = first.doc_ordem_global;
     } else if (isNovoDoc) {
       payload = emptyPayload(addCalendarDays(dataFiltro.split("T")[0], 1));
-      const filial = filialNovoDocumento || filialFiltro;
-      payload.filial_nome = filial ? filial : null;
+      const filial = filialNovoDocumento;
+      if (!isFilialBelaOuPetruz(filial)) {
+        toast({
+          title: "Filial obrigatória",
+          description: "No campo Filial do documento (acima), escolha BELA ou Petruz antes de adicionar linhas.",
+          variant: "destructive",
+        });
+        return;
+      }
+      payload.filial_nome = filial;
       try {
         if (pendingNovoDocIdentityRef.current == null) {
           pendingNovoDocIdentityRef.current = await getNextOcppDocIdentity(payload.data, payload.filial_nome);
@@ -1301,7 +1336,15 @@ export default function PlanejamentoProducao() {
     } else if (documentosDoPeriodo.length === 0) {
       payload = emptyPayload(addCalendarDays(dataFiltro.split("T")[0], 1));
       const filial = filialFiltro;
-      if (filial) payload.filial_nome = filial;
+      if (!isFilialBelaOuPetruz(filial)) {
+        toast({
+          title: "Filial obrigatória",
+          description: "Nos filtros, escolha BELA ou Petruz antes de adicionar a primeira linha.",
+          variant: "destructive",
+        });
+        return;
+      }
+      payload.filial_nome = filial;
       try {
         const idn = await getNextOcppDocIdentity(payload.data, payload.filial_nome);
         payload.doc_numero = idn.doc_numero;
@@ -1626,28 +1669,65 @@ export default function PlanejamentoProducao() {
                         triggerClassName="border border-input bg-background hover:bg-muted/60 px-2 py-1 min-h-0 h-auto text-sm"
                       />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Select
-                        value={(newDocumentIndex != null && !selectedDocKey ? filialNovoDocumento : filialFiltro) || "__todas__"}
-                        onValueChange={(v) => {
-                          const val = v === "__todas__" ? "" : v;
-                          if (newDocumentIndex != null && !selectedDocKey) setFilialNovoDocumento(val);
-                          else setFilialFiltro(val);
-                        }}
-                      >
-                        <SelectTrigger id="filial-select" className="w-full min-w-[160px] sm:w-[220px] h-9 text-sm">
-                          <SelectValue placeholder={newDocumentIndex != null && !selectedDocKey ? "Filial do novo documento" : "Todas as filiais"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__todas__">{newDocumentIndex != null && !selectedDocKey ? "Nenhuma" : "Todas as filiais"}</SelectItem>
-                          {filiais.map((f) => (
-                            <SelectItem key={f.id} value={(f.nome || "").trim()}>
-                              {f.nome}
+                    {newDocumentIndex != null && !selectedDocKey ? (
+                      <div className="flex flex-col gap-1 min-w-0">
+                        <Label htmlFor="filial-select" className="text-xs text-muted-foreground font-normal">
+                          Filial do documento (cadastro)
+                        </Label>
+                        <Select
+                          value={filialNovoDocumento || PCP_FILIAL_NOVO_DOC_PENDENTE}
+                          onValueChange={(v) =>
+                            setFilialNovoDocumento(v === PCP_FILIAL_NOVO_DOC_PENDENTE ? "" : v)
+                          }
+                        >
+                          <SelectTrigger
+                            id="filial-select"
+                            className="w-full min-w-[160px] sm:w-[220px] h-9 text-sm"
+                            disabled={registrosExibidos.length > 0}
+                            aria-label="Filial do novo documento"
+                            title={
+                              registrosExibidos.length > 0
+                                ? "Filial fixa após a primeira linha deste documento."
+                                : undefined
+                            }
+                          >
+                            <SelectValue placeholder="BELA ou Petruz (obrigatório)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={PCP_FILIAL_NOVO_DOC_PENDENTE}>
+                              BELA ou Petruz (obrigatório)
                             </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                            {filiaisBelaOuPetruz.length > 0 ? (
+                              filiaisBelaOuPetruz.map((f) => (
+                                <SelectItem key={f.id} value={(f.nome || "").trim()}>
+                                  {f.nome}
+                                </SelectItem>
+                              ))
+                            ) : (
+                              <div className="px-2 py-3 text-xs text-muted-foreground">
+                                Cadastre BELA e Petruz na OCTF (nenhuma filial compatível encontrada).
+                              </div>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1 min-w-0 max-w-[min(100%,22rem)]">
+                        <Label htmlFor="filial-select-contexto" className="text-xs text-muted-foreground font-normal">
+                          Filial do documento
+                        </Label>
+                        <div
+                          id="filial-select-contexto"
+                          className="flex h-9 w-full min-w-[160px] sm:w-[220px] items-center rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground"
+                          title="Documento atual (BELA Iaca ou Petruz). Para filtrar a listagem, use Filtros no card."
+                        >
+                          <span className="line-clamp-1 text-left">{filialExibicaoHeader}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-snug">
+                          Filtro da listagem: <span className="font-medium text-foreground">Filtros</span> no card.
+                        </p>
+                      </div>
+                    )}
                   </div>
                   {/* Mobile: botões abaixo */}
                   <div className="flex flex-col gap-2 w-full min-[892px]:hidden pt-2 items-center max-w-sm mx-auto">
@@ -1867,7 +1947,9 @@ export default function PlanejamentoProducao() {
                         </Select>
                       </div>
                       <div className="grid grid-cols-[auto_1fr] items-center gap-2">
-                        <Label htmlFor="card-filtro-filial" className="text-xs text-muted-foreground">Filial</Label>
+                        <Label htmlFor="card-filtro-filial" className="text-xs text-muted-foreground">
+                          Filial (listagem)
+                        </Label>
                         <Select value={filialFiltroPending || "__todas__"} onValueChange={(v) => setFilialFiltroPending(v === "__todas__" ? "" : v)}>
                           <SelectTrigger id="card-filtro-filial" className="h-9 text-sm">
                             <SelectValue placeholder="Todas as filiais" />

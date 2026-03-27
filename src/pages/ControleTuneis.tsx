@@ -17,6 +17,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Edit, Trash2, Loader2, AlertCircle, Save, Thermometer, Filter } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { formatNumberPtBrFixed } from "@/lib/formatLocale";
 import { createTunel, deleteTunel, getFiliais, getTuneis, parseBrazilNumber, updateTunel, type OCTTRow } from "@/services/supabaseData";
 
 type Tunel = OCTTRow;
@@ -76,7 +77,7 @@ function formatCodigoDocumentoDisplay(n: number): string {
 function formatCapacidadeBr(n: number): string {
   const v = Number(n);
   if (!Number.isFinite(v)) return "";
-  return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatNumberPtBrFixed(v, 2);
 }
 
 /** pt-BR enquanto digita: milhares com `.`; após `,` até 2 dígitos (sem completar `,00` até o blur). */
