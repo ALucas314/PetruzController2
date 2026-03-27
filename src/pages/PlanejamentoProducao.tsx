@@ -204,6 +204,13 @@ function is100Gramas(tipoLinha: string): boolean {
   return /100\s*g(\s|ramas|$)/.test(s) || s.includes("100g") || (s.includes("100") && s.includes("gramas"));
 }
 
+/** Mix - Pote: Uni. Basqueta 6, Uni. Chapa 0. */
+function isMixPote(tipoLinha: string): boolean {
+  const s = (tipoLinha ?? "").trim().toLowerCase();
+  if (!s) return false;
+  return s.includes("mix") && s.includes("pote");
+}
+
 /** Verifica se o tipo de linha indica 1Kg (Uni. Basqueta 12, Uni. Chapa 2). */
 function is1Kg(tipoLinha: string): boolean {
   const s = (tipoLinha ?? "").trim().toLowerCase();
@@ -322,6 +329,7 @@ function getLinhaRuleUnitsFor(tipoLinha: string | null | undefined, productionLi
   const lineByName = productionLines.find((l) => (l.code?.trim() || l.name?.trim() || `line-${l.id}`) === tipoLinhaVal);
   const nomeLinhaParaRegra = lineByName?.name ?? tipoLinhaVal;
   if (is100Gramas(nomeLinhaParaRegra)) return { unidadeBase: "6", unidadeChapa: "4" };
+  if (isMixPote(nomeLinhaParaRegra)) return { unidadeBase: "6", unidadeChapa: "0" };
   if (is1Kg(nomeLinhaParaRegra)) return { unidadeBase: "12", unidadeChapa: "2" };
   if (is5Kg(nomeLinhaParaRegra)) return { unidadeBase: "10", unidadeChapa: "0" };
   if (isCubos(nomeLinhaParaRegra)) return { unidadeBase: "22", unidadeChapa: "0" };
@@ -2338,6 +2346,12 @@ export default function PlanejamentoProducao() {
                                   const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
                                   payload.quantidade_basqueta = qtdBasqueta;
                                   payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "4");
+                                } else if (isMixPote(nomeLinhaParaRegra)) {
+                                  payload.unidade_base = "6";
+                                  payload.unidade_chapa = "0";
+                                  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
+                                  payload.quantidade_basqueta = qtdBasqueta;
+                                  payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
                                 } else if (is1Kg(nomeLinhaParaRegra)) {
                                   payload.unidade_base = "12";
                                   payload.unidade_chapa = "2";
@@ -2416,6 +2430,12 @@ export default function PlanejamentoProducao() {
                                       const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
                                       payload.quantidade_basqueta = qtdBasqueta;
                                       payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "4");
+                                    } else if (isMixPote(nomeLinhaParaRegra)) {
+                                      payload.unidade_base = "6";
+                                      payload.unidade_chapa = "0";
+                                      const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
+                                      payload.quantidade_basqueta = qtdBasqueta;
+                                      payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
                                     } else if (is1Kg(nomeLinhaParaRegra)) {
                                       payload.unidade_base = "12";
                                       payload.unidade_chapa = "2";
@@ -2476,6 +2496,12 @@ export default function PlanejamentoProducao() {
                                     const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
                                     payload.quantidade_basqueta = qtdBasqueta;
                                     payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "4");
+                                  } else if (isMixPote(newVal)) {
+                                    payload.unidade_base = "6";
+                                    payload.unidade_chapa = "0";
+                                    const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "6");
+                                    payload.quantidade_basqueta = qtdBasqueta;
+                                    payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "0");
                                   } else if (is1Kg(newVal)) {
                                     payload.unidade_base = "12";
                                     payload.unidade_chapa = "2";
