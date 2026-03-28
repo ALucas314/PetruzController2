@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, Table
 import { AlertCircle, ArrowLeft, ArrowLeftRight, ArrowRight, Factory, FilePlus, Loader2, Plus, Save, Sparkles, Trash2, Zap } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Filter } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { formatNumberPtBr, formatNumberPtBrFixed } from "@/lib/formatLocale";
@@ -21,7 +22,11 @@ import {
   getTiposProduto,
   getTuneis,
   parseBrazilNumber,
+  subscribeOCMTRealtime,
+  subscribeOCTTRealtime,
   updateMovimentacaoTunel,
+  REALTIME_COLLAPSE_MS,
+  REALTIME_SUPPRESS_OWN_WRITE_MS,
   type CDTPRow,
   type OCMTRow,
   type OCTTRow,
@@ -54,10 +59,6 @@ type MovRow = {
   observacao: string;
 };
 
-function todayStr(): string {
-  return new Date().toISOString().split("T")[0];
-}
-
 function emptyForm(): FormState {
   return {
     id: null,
@@ -67,7 +68,7 @@ function emptyForm(): FormState {
     codigoTunel: "",
     codigoTipoProduto: "",
     qtdInserida: "",
-    dataAbertura: todayStr(),
+    dataAbertura: "",
     horaAbertura: "",
     dataFechamento: "",
     horaFechamento: "",
@@ -79,7 +80,7 @@ function createMovRow(): MovRow {
     rowId: Date.now() + Math.floor(Math.random() * 1000),
     codigoTipoProduto: "",
     qtdInserida: "",
-    dataAbertura: todayStr(),
+    dataAbertura: "",
     horaAbertura: "",
     dataFechamento: "",
     horaFechamento: "",
@@ -220,9 +221,27 @@ function getFriendlyErrorMessage(error: unknown, fallback: string): string {
   return msg || fallback;
 }
 
+/** Query string para abrir o cadastro do túnel na filial/código indicados. */
+function cadastroTunelDeepLinkQuery(filialNome: string, codigoTunel: number | string): string {
+  const n = Number(String(codigoTunel).replace(/\D/g, ""));
+  const codigo =
+    Number.isFinite(n) && n >= 1 ? String(n).padStart(4, "0") : String(codigoTunel ?? "").replace(/\D/g, "") || "1";
+  return new URLSearchParams({
+    filial: (filialNome || "").trim(),
+    codigo,
+  }).toString();
+}
+
 export default function MovimentacaoTuneis() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { setDocumentNav } = useDocumentNav();
+
+  const goToCadastroTunel = (filialNome: string, codigoTunel: number | string) => {
+    const f = (filialNome || "").trim();
+    if (!f) return;
+    navigate(`/estoque/cadastro-tuneis?${cadastroTunelDeepLinkQuery(f, codigoTunel)}`);
+  };
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -366,16 +385,36 @@ export default function MovimentacaoTuneis() {
         const qtdPendente = round2(
           transacoesTunel.reduce((acc, r) => acc + (r.dataAbertura == null ? parseBrazilNumber(r.qtdInserida || 0) : 0), 0)
         );
-        const diffDisponivel = statusOperacional === "M" ? 0 : round2(capacidade - qtdPendente);
+        /** Alguma linha ainda sem abertura excede a capacidade (não só a “última” por documento). */
+        const algumaPendenteExcedeCap = transacoesTunel.some(
+          (r) => r.dataAbertura == null && parseBrazilNumber(r.qtdInserida || 0) > capacidade
+        );
+        /** Última movimentação (maior doc) com quantidade acima da capacidade — vale mesmo com data abertura preenchida. */
+        const ultimaExcedeCap = capacidade > 0 && ult != null && qtdUlt > capacidade;
+        const alagado =
+          statusOperacional !== "M" &&
+          capacidade > 0 &&
+          (qtdPendente > capacidade || algumaPendenteExcedeCap || ultimaExcedeCap);
+
+        /** Carga usada na “diferença disponível”: pendente total e, se a última mov. excedeu a cap., o maior dos dois. */
+        const cargaRelevanteDiff =
+          statusOperacional === "M"
+            ? 0
+            : alagado
+              ? round2(Math.max(qtdPendente, ultimaExcedeCap ? qtdUlt : 0))
+              : qtdPendente;
+
+        const diffDisponivel =
+          statusOperacional === "M" ? 0 : round2(capacidade - cargaRelevanteDiff);
         const diffRealDisponivel =
           statusOperacional === "M"
             ? 0
-            : round2(capacidade - Math.min(qtdPendente, capacidade));
+            : round2(capacidade - Math.min(cargaRelevanteDiff, capacidade));
 
         let statusTunel = "Nenhuma transação";
         if (statusOperacional === "M") {
           statusTunel = "Túnel em Manutenção";
-        } else if (statusOperacional === "A" && ult && ocupado && qtdUlt > capacidade) {
+        } else if (statusOperacional === "A" && alagado) {
           statusTunel = "Túnel alagado";
         } else if (statusOperacional === "A" && ult && ocupado) {
           statusTunel = "Túnel ocupado";
@@ -436,6 +475,39 @@ export default function MovimentacaoTuneis() {
     setRows(ordered);
     return ordered;
   }
+
+  const movLocalMutationAtRef = useRef(0);
+  const movRtDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const movRtCtxRef = useRef({
+    loadBase: async () => {},
+    loadRows: async (_?: { filialNome?: string; dataInicio?: string; dataFim?: string }) => [] as OCMTRow[],
+  });
+  movRtCtxRef.current = { loadBase, loadRows };
+
+  useEffect(() => {
+    const schedule = () => {
+      if (Date.now() - movLocalMutationAtRef.current < REALTIME_SUPPRESS_OWN_WRITE_MS) return;
+      if (movRtDebounceRef.current) clearTimeout(movRtDebounceRef.current);
+      movRtDebounceRef.current = setTimeout(() => {
+        movRtDebounceRef.current = null;
+        void (async () => {
+          try {
+            await movRtCtxRef.current.loadBase();
+            await movRtCtxRef.current.loadRows();
+          } catch {
+            /* reload silencioso */
+          }
+        })();
+      }, REALTIME_COLLAPSE_MS);
+    };
+    const u1 = subscribeOCTTRealtime(schedule);
+    const u2 = subscribeOCMTRealtime(schedule);
+    return () => {
+      if (movRtDebounceRef.current) clearTimeout(movRtDebounceRef.current);
+      u1();
+      u2();
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -534,8 +606,8 @@ export default function MovimentacaoTuneis() {
       let focoId: number | null = null;
       for (let i = 0; i < validRows.length; i++) {
         const line = validRows[i];
-        if (!line.codigoTipoProduto || !line.dataAbertura) {
-          throw new Error(`Linha ${i + 1}: preencha Tipo de produto e Data abertura.`);
+        if (!line.codigoTipoProduto) {
+          throw new Error(`Linha ${i + 1}: preencha o tipo de produto.`);
         }
         const qtdInserida = parseBrazilNumber(line.qtdInserida || "0");
         if (qtdInserida < 0) throw new Error(`Linha ${i + 1}: quantidade inserida não pode ser negativa.`);
@@ -558,6 +630,7 @@ export default function MovimentacaoTuneis() {
           focoId = created.id;
         }
       }
+      movLocalMutationAtRef.current = Date.now();
       toast({ title: "Sucesso", description: form.id ? "Movimentação atualizada." : "Movimentação(ões) cadastrada(s)." });
       const refreshedRows = await loadRows();
       if (focoId != null) {
@@ -619,6 +692,7 @@ export default function MovimentacaoTuneis() {
   async function onExcluir(id: number) {
     try {
       await deleteMovimentacaoTunel(id);
+      movLocalMutationAtRef.current = Date.now();
       toast({ title: "Sucesso", description: "Movimentação excluída." });
       if (form.id === id) onNovoDocumento();
       await loadRows();
@@ -1288,7 +1362,21 @@ export default function MovimentacaoTuneis() {
                                       {formatNumberPtBr(a.tempoMaxCongHoras, 0, 4)}
                                     </TableCell>
                                     <TableCell className="whitespace-nowrap">{formatDate(a.row.dataFechamento)}</TableCell>
-                                    <TableCell className="font-mono">{String(a.row.codigoTunel).padStart(4, "0")}</TableCell>
+                                    <TableCell className="font-mono">
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary shadow-sm transition-colors hover:bg-primary/20 hover:border-primary/50 disabled:pointer-events-none disabled:opacity-40"
+                                          disabled={!(a.row.filialNome || "").trim()}
+                                          onClick={() => goToCadastroTunel(a.row.filialNome, a.row.codigoTunel)}
+                                          title="Abrir cadastro deste túnel"
+                                          aria-label={`Abrir cadastro do túnel ${String(a.row.codigoTunel).padStart(4, "0")}`}
+                                        >
+                                          <ArrowRight className="h-4 w-4 stroke-[2.75]" />
+                                        </button>
+                                        <span>{String(a.row.codigoTunel).padStart(4, "0")}</span>
+                                      </span>
+                                    </TableCell>
                                     <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.capacidade, 0, 4)}</TableCell>
                                     <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.quantidade, 0, 4)}</TableCell>
                                     <TableCell className="tabular-nums text-right">{formatNumberPtBr(a.qtdDisponivel, 0, 4)}</TableCell>
@@ -1393,7 +1481,21 @@ export default function MovimentacaoTuneis() {
                             <TableBody>
                               {relatorioPorTunelRows.map((r) => (
                                 <TableRow key={`${r.filial}|${r.codigoTunel}`}>
-                                  <TableCell className="font-mono">{String(r.codigoTunel).padStart(4, "0")}</TableCell>
+                                  <TableCell className="font-mono">
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary shadow-sm transition-colors hover:bg-primary/20 hover:border-primary/50 disabled:pointer-events-none disabled:opacity-40"
+                                        disabled={!(r.filial || "").trim()}
+                                        onClick={() => goToCadastroTunel(r.filial, r.codigoTunel)}
+                                        title="Abrir cadastro deste túnel"
+                                        aria-label={`Abrir cadastro do túnel ${String(r.codigoTunel).padStart(4, "0")}`}
+                                      >
+                                        <ArrowRight className="h-4 w-4 stroke-[2.75]" />
+                                      </button>
+                                      <span>{String(r.codigoTunel).padStart(4, "0")}</span>
+                                    </span>
+                                  </TableCell>
                                   <TableCell>
                                     {r.ultimaRow ? (
                                       <span className="inline-flex items-center gap-1.5 font-mono">

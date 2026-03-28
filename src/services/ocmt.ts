@@ -127,3 +127,16 @@ export async function deleteMovimentacaoTunel(id: number): Promise<void> {
   const { error } = await supabase.from(TABLE).delete().eq("id", Number(id));
   if (error) throw new Error(fmtErr(error as { message?: string; details?: string; hint?: string; code?: string }));
 }
+
+/** Realtime na OCMT: habilite a tabela em Database → Replication (Supabase) se os eventos não chegarem. */
+export function subscribeOCMTRealtime(onChanges: () => void): () => void {
+  const channel = supabase
+    .channel("ocmt-realtime")
+    .on("postgres_changes", { event: "*", schema: "public", table: TABLE }, () => {
+      onChanges();
+    })
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

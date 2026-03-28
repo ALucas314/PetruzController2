@@ -182,3 +182,16 @@ export async function deleteTunel(id: number) {
   const { error } = await supabase.from(TABLE).delete().eq("id", Number(id));
   if (error) throw new Error(fmtErr(error as { message?: string; details?: string; hint?: string; code?: string }));
 }
+
+/** Realtime na OCTT: habilite a tabela em Database → Replication (Supabase) se os eventos não chegarem. */
+export function subscribeOCTTRealtime(onChanges: () => void): () => void {
+  const channel = supabase
+    .channel("octt-realtime")
+    .on("postgres_changes", { event: "*", schema: "public", table: TABLE }, () => {
+      onChanges();
+    })
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

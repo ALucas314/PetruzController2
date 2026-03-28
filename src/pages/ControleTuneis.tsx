@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Plus, Edit, Trash2, Loader2, AlertCircle, Save, Thermometer, Filter } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatNumberPtBrFixed } from "@/lib/formatLocale";
-import { createTunel, deleteTunel, getFiliais, getTuneis, parseBrazilNumber, updateTunel, type OCTTRow } from "@/services/supabaseData";
+import {
+  createTunel,
+  deleteTunel,
+  getFiliais,
+  getTuneis,
+  parseBrazilNumber,
+  subscribeOCTTRealtime,
+  updateTunel,
+  REALTIME_COLLAPSE_MS,
+  REALTIME_SUPPRESS_OWN_WRITE_MS,
+  type OCTTRow,
+} from "@/services/supabaseData";
 
 type Tunel = OCTTRow;
 type FilialOption = { id: number; codigo: string; nome: string; endereco: string };
@@ -138,6 +150,9 @@ export default function ControleTuneis() {
   const [filialFilterPending, setFilialFilterPending] = useState<string>("");
   const [tuneisFiltrosDialogOpen, setTuneisFiltrosDialogOpen] = useState(false);
   const { toast } = useToast();
+  const octtLocalMutationAtRef = useRef(0);
+  const octtRtDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const filiaisFiltroOpcoes = useMemo(() => {
     const s = new Set<string>();
@@ -164,24 +179,7 @@ export default function ControleTuneis() {
     }
   }, [tuneisFiltrosDialogOpen, filialFilterApplied]);
 
-  useEffect(() => {
-    void loadTuneis();
-  }, []);
-
-  useEffect(() => {
-    getFiliais()
-      .then((list) => {
-        setFiliais(list as FilialOption[]);
-        setFiliaisLoadError(null);
-      })
-      .catch((e: unknown) => {
-        const msg = e instanceof Error ? e.message : "Falha ao carregar filiais";
-        setFiliaisLoadError(msg);
-        console.error("Erro ao carregar filiais (OCTF):", e);
-      });
-  }, []);
-
-  const loadTuneis = async () => {
+  const loadTuneis = useCallback(async () => {
     try {
       setLoading(true);
       const data = await getTuneis();
@@ -198,9 +196,41 @@ export default function ControleTuneis() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
-  const openDialog = (tunel?: Tunel) => {
+  useEffect(() => {
+    void loadTuneis();
+  }, [loadTuneis]);
+
+  useEffect(() => {
+    getFiliais()
+      .then((list) => {
+        setFiliais(list as FilialOption[]);
+        setFiliaisLoadError(null);
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Falha ao carregar filiais";
+        setFiliaisLoadError(msg);
+        console.error("Erro ao carregar filiais (OCTF):", e);
+      });
+  }, []);
+
+  useEffect(() => {
+    const unsub = subscribeOCTTRealtime(() => {
+      if (Date.now() - octtLocalMutationAtRef.current < REALTIME_SUPPRESS_OWN_WRITE_MS) return;
+      if (octtRtDebounceRef.current) clearTimeout(octtRtDebounceRef.current);
+      octtRtDebounceRef.current = setTimeout(() => {
+        octtRtDebounceRef.current = null;
+        void loadTuneis();
+      }, REALTIME_COLLAPSE_MS);
+    });
+    return () => {
+      if (octtRtDebounceRef.current) clearTimeout(octtRtDebounceRef.current);
+      unsub();
+    };
+  }, [loadTuneis]);
+
+  const openDialog = useCallback((tunel?: Tunel) => {
     if (tunel) {
       setEditingTunel(tunel);
       const codigoEdicao = Number(String(tunel.code ?? "").replace(/\D/g, ""));
@@ -229,7 +259,41 @@ export default function ControleTuneis() {
       });
     }
     setIsDialogOpen(true);
-  };
+  }, [tuneis]);
+
+  /** Abre o cadastro do túnel vindo de Movimentação (query ?filial=&codigo=). */
+  useEffect(() => {
+    const filialQ = (searchParams.get("filial") ?? "").trim();
+    const codigoRaw = (searchParams.get("codigo") ?? "").replace(/\D/g, "");
+    if (!filialQ || !codigoRaw) return;
+    if (loading) return;
+
+    const codigoNum = Number(codigoRaw);
+    if (!Number.isFinite(codigoNum) || codigoNum < 1) {
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    const match = tuneis.find(
+      (t) =>
+        filialNorm(t.filial) === filialNorm(filialQ) &&
+        Number(String(t.code ?? "").replace(/\D/g, "")) === codigoNum
+    );
+
+    setSearchParams({}, { replace: true });
+
+    if (match) {
+      openDialog(match);
+      setFilialFilterApplied(filialNorm(filialQ));
+    } else {
+      toast({
+        title: "Túnel não encontrado",
+        description: `Não há cadastro para filial "${filialQ}" e código ${String(codigoNum).padStart(4, "0")}.`,
+        variant: "destructive",
+      });
+      setFilialFilterApplied(filialNorm(filialQ));
+    }
+  }, [loading, tuneis, searchParams, setSearchParams, openDialog, toast]);
 
   const handleSave = async () => {
     const nameTrim = formData.name.trim();
@@ -267,6 +331,7 @@ export default function ControleTuneis() {
         });
       }
       setIsDialogOpen(false);
+      octtLocalMutationAtRef.current = Date.now();
       toast({ title: "Sucesso", description: editingTunel ? "Túnel atualizado." : "Túnel cadastrado." });
       await loadTuneis();
     } catch (error: any) {
@@ -588,6 +653,7 @@ export default function ControleTuneis() {
             <AlertDialogAction onClick={async () => {
               if (deleteConfirmId == null) return;
               await deleteTunel(deleteConfirmId);
+              octtLocalMutationAtRef.current = Date.now();
               setDeleteConfirmId(null);
               toast({ title: "Sucesso", description: "Túnel excluído." });
               await loadTuneis();

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Filter, ArrowRight } from "lucide-react";
 import { AppLayout } from "@/components/AppLayout";
@@ -21,7 +21,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { getFiliais, getProducaoHistory } from "@/services/supabaseData";
+import { getFiliais, getProducaoHistory, subscribeOCPDRealtime, REALTIME_COLLAPSE_MS } from "@/services/supabaseData";
 
 function formatDate(str: string): string {
   if (!str) return "—";
@@ -73,6 +73,7 @@ export default function Relatorios() {
   const [filtrosDialogOpen, setFiltrosDialogOpen] = useState(false);
   const [docGridRecords, setDocGridRecords] = useState<DocRecord[]>([]);
   const [docGridLoading, setDocGridLoading] = useState(false);
+  const docGridRealtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const normalizeDataDia = (v: string | Date | null | undefined): string => {
     if (!v) return "";
@@ -162,6 +163,20 @@ export default function Relatorios() {
 
   useEffect(() => {
     loadDocGrid();
+  }, [loadDocGrid]);
+
+  useEffect(() => {
+    const unsub = subscribeOCPDRealtime(() => {
+      if (docGridRealtimeDebounceRef.current) clearTimeout(docGridRealtimeDebounceRef.current);
+      docGridRealtimeDebounceRef.current = setTimeout(() => {
+        docGridRealtimeDebounceRef.current = null;
+        void loadDocGrid();
+      }, REALTIME_COLLAPSE_MS);
+    });
+    return () => {
+      if (docGridRealtimeDebounceRef.current) clearTimeout(docGridRealtimeDebounceRef.current);
+      unsub();
+    };
   }, [loadDocGrid]);
 
   useEffect(() => {

@@ -5,6 +5,11 @@
 
 import { supabase } from "@/lib/supabase";
 
+/** Coalesce vários `postgres_changes` seguidos; outros usuários costumam ver em ~este atraso. */
+export const REALTIME_COLLAPSE_MS = 80;
+/** Só no cliente que acabou de gravar: ignorar eco do Realtime (evita piscar a tela). */
+export const REALTIME_SUPPRESS_OWN_WRITE_MS = 700;
+
 const DRAFT_TABLE = "OCTU_DRAFT_AUTH"; // tabela para rascunho por auth.uid() (UUID)
 
 // --- Filiais (OCTF) ---
@@ -67,7 +72,7 @@ export async function deleteLine(id: number) {
 }
 
 export type { OCTTRow } from "./octt";
-export { getTuneis, createTunel, updateTunel, deleteTunel } from "./octt";
+export { getTuneis, createTunel, updateTunel, deleteTunel, subscribeOCTTRealtime } from "./octt";
 
 export type { CDTPRow } from "./cdtp";
 export { getTiposProduto, createTipoProduto, updateTipoProduto, deleteTipoProduto } from "./cdtp";
@@ -78,6 +83,7 @@ export {
   createMovimentacaoTunel,
   updateMovimentacaoTunel,
   deleteMovimentacaoTunel,
+  subscribeOCMTRealtime,
 } from "./ocmt";
 
 // --- OCPP (Planejamento de Produção) ---

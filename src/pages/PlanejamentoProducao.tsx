@@ -49,6 +49,8 @@ import {
   getLines,
   getItemByCode,
   subscribeOCPPRealtime,
+  REALTIME_COLLAPSE_MS,
+  REALTIME_SUPPRESS_OWN_WRITE_MS,
   type OCPPRow,
   type OCPPInsertPayload,
 } from "@/services/supabaseData";
@@ -553,16 +555,16 @@ export default function PlanejamentoProducao() {
     setRegistros((prev) => prev.map((row) => normalizeRowUnitsAndDerivedFor(row, productionLines)));
   }, [productionLines]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Sincronização em tempo real: quando outro usuário alterar a OCPP, recarrega após debounce. Ignora eventos logo após nossa própria alteração para não interromper o cadastro. */
+  /** Sincronização em tempo real OCPP: mesmo padrão da bi-horária (debounce curto + ignorar eco do próprio save neste aparelho). */
   useEffect(() => {
     const unsubscribe = subscribeOCPPRealtime(() => {
       const now = Date.now();
-      if (now - lastLocalChangeAtRef.current < 2500) return; // nossa própria alteração acabou de disparar o evento
+      if (now - lastLocalChangeAtRef.current < REALTIME_SUPPRESS_OWN_WRITE_MS) return;
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
       realtimeDebounceRef.current = setTimeout(() => {
         realtimeDebounceRef.current = null;
         loadRegistros();
-      }, 1800);
+      }, REALTIME_COLLAPSE_MS);
     });
     return () => {
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);

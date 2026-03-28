@@ -4,7 +4,15 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
 import { AppLayout } from "@/components/AppLayout";
 import { ExportToPng } from "@/components/ExportToPng";
-import { getFiliais, getDashboardStats, getProductionChart, getProductionLines } from "@/services/supabaseData";
+import {
+  getFiliais,
+  getDashboardStats,
+  getProductionChart,
+  getProductionLines,
+  subscribeOCPDRealtime,
+  subscribeOCPPRealtime,
+  REALTIME_COLLAPSE_MS,
+} from "@/services/supabaseData";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList,
@@ -75,6 +83,7 @@ const Index = () => {
   const chartPlanejadoRealizadoRef = useRef<HTMLDivElement>(null);
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
   const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
+  const dashboardRealtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [chartBarMargin, setChartBarMargin] = useState({ top: 28, right: 24, left: 24, bottom: 8 });
   const [barMaxSize, setBarMaxSize] = useState(96);
@@ -141,6 +150,24 @@ const Index = () => {
 
   useEffect(() => {
     loadDashboardData();
+  }, [loadDashboardData]);
+
+  /** Produção/planejamento mudaram no banco: atualiza KPIs e gráficos para quem está no dashboard. */
+  useEffect(() => {
+    const schedule = () => {
+      if (dashboardRealtimeDebounceRef.current) clearTimeout(dashboardRealtimeDebounceRef.current);
+      dashboardRealtimeDebounceRef.current = setTimeout(() => {
+        dashboardRealtimeDebounceRef.current = null;
+        void loadDashboardData();
+      }, REALTIME_COLLAPSE_MS);
+    };
+    const unsubOcpd = subscribeOCPDRealtime(schedule);
+    const unsubOcpp = subscribeOCPPRealtime(schedule);
+    return () => {
+      if (dashboardRealtimeDebounceRef.current) clearTimeout(dashboardRealtimeDebounceRef.current);
+      unsubOcpd();
+      unsubOcpp();
+    };
   }, [loadDashboardData]);
 
   // Aplicar filtro ao clicar no botão Filtrar (atualiza valores aplicados; o useEffect recarrega)

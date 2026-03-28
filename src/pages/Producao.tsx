@@ -53,6 +53,8 @@ import {
   getDashboardStats,
   subscribeOCPDRealtime,
   subscribeOCPHRealtime,
+  REALTIME_COLLAPSE_MS,
+  REALTIME_SUPPRESS_OWN_WRITE_MS,
   loadBiHorariaFromOcph,
   getOCTPByInicio,
   getOCTPByDateRange,
@@ -535,6 +537,8 @@ function Producao() {
   const chartBiHorariaTurnoRef = useRef<HTMLDivElement>(null);
   /** Ignora só o eco do próprio save neste aparelho (outros usuários não passam por esta janela). */
   const biHorariaLocalSaveAtRef = useRef(0);
+  const ocpdLocalSaveAtRef = useRef(0);
+  const ocpdRealtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ocphRealtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ocphRealtimeCtxRef = useRef<{
     view: "menu" | "cadastro" | "historico" | "bihoraria";
@@ -1963,6 +1967,7 @@ function Producao() {
     if (idBanco != null) {
       try {
         await deleteProducaoRecord(idBanco);
+        ocpdLocalSaveAtRef.current = Date.now();
       } catch (err) {
         console.error("Erro ao excluir registro OCPD:", err);
         toast({
@@ -2282,6 +2287,8 @@ function Producao() {
         percentualMeta: parseFormattedNumber(percentualMeta),
         totalReprocesso: parseFormattedNumber(totalReprocesso),
       });
+
+      ocpdLocalSaveAtRef.current = Date.now();
 
       const wasUpdate = (result.updated ?? 0) > 0;
       const savedDate = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
@@ -3177,21 +3184,29 @@ function Producao() {
   const ocpdRealtimeRef = useRef({ loadRecordByIndex: (_i: number) => {}, currentRecordIndex: -1, showDocumentGridForDate: true });
   ocpdRealtimeRef.current = { loadRecordByIndex, currentRecordIndex, showDocumentGridForDate };
 
-  // Sincronização em tempo real: quando outro usuário alterar a OCPD, recarrega para todos verem o mesmo
+  // OCPD: realtime rápido para colaboradores; debounce curto + ignorar eco do próprio save neste aparelho
   useEffect(() => {
     const unsubscribe = subscribeOCPDRealtime(() => {
-      if (gridDataDeApplied && gridDataAteApplied) {
-        loadDocumentsForDateRange(
-          gridDataDeApplied,
-          gridDataAteApplied,
-          gridCodigoItemApplied || undefined,
-          gridLinhaFilterApplied || undefined
-        );
-      }
-      const { loadRecordByIndex: loadRec, currentRecordIndex: idx, showDocumentGridForDate: showGrid } = ocpdRealtimeRef.current;
-      if (!showGrid && idx >= 0) loadRec(idx);
+      if (Date.now() - ocpdLocalSaveAtRef.current < REALTIME_SUPPRESS_OWN_WRITE_MS) return;
+      if (ocpdRealtimeDebounceRef.current) clearTimeout(ocpdRealtimeDebounceRef.current);
+      ocpdRealtimeDebounceRef.current = setTimeout(() => {
+        ocpdRealtimeDebounceRef.current = null;
+        if (gridDataDeApplied && gridDataAteApplied) {
+          loadDocumentsForDateRange(
+            gridDataDeApplied,
+            gridDataAteApplied,
+            gridCodigoItemApplied || undefined,
+            gridLinhaFilterApplied || undefined
+          );
+        }
+        const { loadRecordByIndex: loadRec, currentRecordIndex: idx, showDocumentGridForDate: showGrid } = ocpdRealtimeRef.current;
+        if (!showGrid && idx >= 0) loadRec(idx);
+      }, REALTIME_COLLAPSE_MS);
     });
-    return unsubscribe;
+    return () => {
+      if (ocpdRealtimeDebounceRef.current) clearTimeout(ocpdRealtimeDebounceRef.current);
+      unsubscribe();
+    };
   }, [
     gridDataDeApplied,
     gridDataAteApplied,
@@ -3200,19 +3215,17 @@ function Producao() {
     loadDocumentsForDateRange,
   ]);
 
-  // Bi-horária na OCPH: realtime para todos; debounce curto só agrupa vários eventos do mesmo save; ignorar eco só no cliente que acabou de salvar
+  // Bi-horária na OCPH: mesmo padrão de tempo real que OCPD/OCPP
   useEffect(() => {
-    const ignoreAfterLocalSaveMs = 700;
-    const debounceMs = 80;
     const unsubscribe = subscribeOCPHRealtime(() => {
-      if (Date.now() - biHorariaLocalSaveAtRef.current < ignoreAfterLocalSaveMs) return;
+      if (Date.now() - biHorariaLocalSaveAtRef.current < REALTIME_SUPPRESS_OWN_WRITE_MS) return;
       const { view, reload } = ocphRealtimeCtxRef.current;
       if (view !== "cadastro" && view !== "bihoraria") return;
       if (ocphRealtimeDebounceRef.current) clearTimeout(ocphRealtimeDebounceRef.current);
       ocphRealtimeDebounceRef.current = setTimeout(() => {
         ocphRealtimeDebounceRef.current = null;
         void reload();
-      }, debounceMs);
+      }, REALTIME_COLLAPSE_MS);
     });
     return () => {
       if (ocphRealtimeDebounceRef.current) clearTimeout(ocphRealtimeDebounceRef.current);
