@@ -814,7 +814,7 @@ type BiHorariaPayloadRow = { numero: number; data: string; hora: string; qtd_rea
 const BI_HORARIA_TURNO_OCPH = [1, 2, 1, 2, 3] as const;
 
 /** Registros bi-horária gravados apenas em OCPH (sem vínculo com OCPD). */
-async function loadBiHorariaFromOcph(params: {
+export async function loadBiHorariaFromOcph(params: {
   dataDia: string;
   filialNome?: string | null;
   docId?: string | null;
@@ -1338,6 +1338,26 @@ export function subscribeOCPDRealtime(onChanges: () => void): () => void {
   };
 }
 
+/**
+ * Inscreve em alterações na tabela OCPH (bi-horária e histórico por item).
+ * Ative a publicação da tabela OCPH em Database → Replication no Supabase, se os eventos não chegarem.
+ */
+export function subscribeOCPHRealtime(onChanges: () => void): () => void {
+  const channel = supabase
+    .channel("ocph-realtime")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "OCPH" },
+      () => {
+        onChanges();
+      }
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
 // --- Draft (OCTU_DRAFT_AUTH: auth_user_id uuid, screen, data jsonb) ---
 export async function getDraft(authUserId: string, screen: string) {
   const { data, error } = await supabase
@@ -1489,32 +1509,8 @@ export function computeDuracaoMinutos(horaInicio: string | null | undefined, hor
   return diff;
 }
 
-/**
- * Busca registros OCTP do documento (problemas/ações).
- * Quando `data_dia` existe no banco, filtra só por `data_dia` + `filial_nome` — a coluna `inicio` é a data
- * editável de cada linha, não o documento; filtrar por `inicio === "hoje"` fazia sumir tudo ao abrir dias antigos.
- */
-export async function getOCTPByInicio(
-  inicio: string,
-  dataDia?: string,
-  filialNome?: string
-): Promise<OCTPRow[]> {
-  // select("*") para funcionar mesmo se as colunas hora_inicio/hora_final ainda não existirem (antes da migration)
-  let query = supabase.from("OCTP").select("*");
-
-  if (dataDia) {
-    query = query.eq("data_dia", dataDia);
-  } else {
-    // Legado: registros sem data_dia preenchido
-    query = query.eq("inicio", inicio);
-  }
-  if (filialNome) {
-    query = query.eq("filial_nome", filialNome);
-  }
-
-  const { data, error } = await query.order("numero", { ascending: true });
-  if (error) throw error;
-  return (data || []).map((r: Record<string, unknown>) => ({
+function mapOCTPRecord(r: Record<string, unknown>): OCTPRow {
+  return {
     id: Number(r.id),
     numero: Number(r.numero ?? 0),
     problema: r.problema != null ? String(r.problema) : null,
@@ -1530,7 +1526,83 @@ export async function getOCTPByInicio(
     filial_nome: r.filial_nome != null ? String(r.filial_nome) : null,
     created_at: r.created_at != null ? String(r.created_at) : undefined,
     updated_at: r.updated_at != null ? String(r.updated_at) : undefined,
-  }));
+  };
+}
+
+/**
+ * Busca registros OCTP do documento (problemas/ações).
+ * Quando `data_dia` existe no banco, filtra só por `data_dia` + `filial_nome` — a coluna `inicio` é a data
+ * editável de cada linha, não o documento; filtrar por `inicio === "hoje"` fazia sumir tudo ao abrir dias antigos.
+ */
+export async function getOCTPByInicio(
+  inicio: string,
+  dataDia?: string,
+  filialNome?: string
+): Promise<OCTPRow[]> {
+  let query = supabase.from("OCTP").select("*");
+
+  if (dataDia) {
+    query = query.eq("data_dia", dataDia);
+  } else {
+    query = query.eq("inicio", inicio);
+  }
+  if (filialNome) {
+    query = query.eq("filial_nome", filialNome);
+  }
+
+  const { data, error } = await query.order("numero", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((row) => mapOCTPRecord(row as Record<string, unknown>));
+}
+
+/**
+ * Todos os OCTP da filial com `data_dia` no intervalo [dataInicio, dataFim] (inclusive).
+ * Inclui legado sem `data_dia` quando `inicio` cai no mesmo intervalo.
+ */
+export async function getOCTPByDateRange(params: {
+  dataInicio: string;
+  dataFim: string;
+  filialNome: string;
+}): Promise<OCTPRow[]> {
+  const de = params.dataInicio.split("T")[0];
+  const ate = params.dataFim.split("T")[0];
+  const filial = params.filialNome.trim();
+  if (!filial) return [];
+
+  const { data: comDia, error: err1 } = await supabase
+    .from("OCTP")
+    .select("*")
+    .eq("filial_nome", filial)
+    .gte("data_dia", de)
+    .lte("data_dia", ate)
+    .order("data_dia", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (err1) throw err1;
+
+  const { data: legado, error: err2 } = await supabase
+    .from("OCTP")
+    .select("*")
+    .eq("filial_nome", filial)
+    .is("data_dia", null)
+    .gte("inicio", de)
+    .lte("inicio", ate)
+    .order("inicio", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (err2) throw err2;
+
+  const byId = new Map<number, OCTPRow>();
+  for (const raw of [...(comDia || []), ...(legado || [])]) {
+    const row = mapOCTPRecord(raw as Record<string, unknown>);
+    byId.set(row.id, row);
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    const da = (a.data_dia || a.inicio || "").split("T")[0];
+    const db = (b.data_dia || b.inicio || "").split("T")[0];
+    if (da !== db) return da.localeCompare(db);
+    return a.id - b.id;
+  });
 }
 
 export async function insertOCTP(payload: {
@@ -1562,22 +1634,7 @@ export async function insertOCTP(payload: {
   if (duracao !== null) row.duracao_minutos = duracao;
   const { data, error } = await supabase.from("OCTP").insert(row).select("*").single();
   if (error) throw error;
-  const r = data as Record<string, unknown>;
-  return {
-    id: Number(r.id),
-    numero: Number(r.numero ?? 0),
-    problema: r.problema != null ? String(r.problema) : null,
-    acao: r.acao != null ? String(r.acao) : null,
-    responsavel: r.responsavel != null ? String(r.responsavel) : null,
-    hora: r.hora != null ? String(r.hora) : null,
-    inicio: r.inicio != null ? String(r.inicio) : null,
-    hora_inicio: (r.hora_inicio != null ? String(r.hora_inicio).slice(0, 8) : null) as string | null,
-    hora_final: (r.hora_fim != null ? String(r.hora_fim).slice(0, 8) : null) as string | null,
-    duracao_minutos: r.duracao_minutos != null ? Number(r.duracao_minutos) : null,
-    descricao_status: r.descricao_status != null ? String(r.descricao_status) : null,
-    created_at: r.created_at != null ? String(r.created_at) : undefined,
-    updated_at: r.updated_at != null ? String(r.updated_at) : undefined,
-  };
+  return mapOCTPRecord(data as Record<string, unknown>);
 }
 
 export async function updateOCTP(

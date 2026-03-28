@@ -52,7 +52,10 @@ import {
   getBiHorariaResumoPorPeriodo,
   getDashboardStats,
   subscribeOCPDRealtime,
+  subscribeOCPHRealtime,
+  loadBiHorariaFromOcph,
   getOCTPByInicio,
+  getOCTPByDateRange,
   insertOCTP,
   updateOCTP,
   deleteOCTP,
@@ -219,10 +222,43 @@ interface OCTPItem {
   responsavel: string;
   hora: string | null; // ISO ou vazio (exibição formatada)
   inicio: string; // YYYY-MM-DD
+  /** Data do documento na OCTP (`data_dia`); usada no filtro por período quando preenchida. */
+  dataDia?: string | null;
   horaInicio: string; // HH:MM (editável) → coluna hora_inicio
   horaFinal: string;   // HH:MM (editável) → coluna hora_fim
   duracaoMinutos?: number | null; // intervalo em minutos (coluna duracao_minutos)
   descricao_status: string;
+  /** `filial_nome` no banco — usado ao salvar quando a lista veio de outro filtro de filial. */
+  filialNome?: string | null;
+}
+
+function parseDuracaoMinutosFilterInput(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = parseInt(t, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function mapOCTPRowsToUiItems(rows: OCTPRow[], fallbackDataDocumento: string): OCTPItem[] {
+  return rows.map((r) => {
+    const docDay =
+      r.data_dia != null ? String(r.data_dia).split("T")[0] : r.inicio != null ? String(r.inicio).split("T")[0] : fallbackDataDocumento;
+    return {
+      id: r.id,
+      numero: r.numero,
+      problema: r.problema ?? "",
+      acao: r.acao ?? "",
+      responsavel: r.responsavel ?? "",
+      hora: r.hora ?? null,
+      inicio: r.inicio ?? fallbackDataDocumento,
+      dataDia: docDay,
+      horaInicio: r.hora_inicio != null ? String(r.hora_inicio).slice(0, 5) : "",
+      horaFinal: r.hora_final != null ? String(r.hora_final).slice(0, 5) : "",
+      duracaoMinutos: r.duracao_minutos ?? null,
+      descricao_status: r.descricao_status ?? "",
+      filialNome: r.filial_nome != null ? String(r.filial_nome).trim() : null,
+    };
+  });
 }
 
 /** Status que param o relógio (hora final fixa). */
@@ -497,6 +533,13 @@ function Producao() {
   const chartStatusProducaoRef = useRef<HTMLDivElement>(null);
   const chartProducaoLinhaRef = useRef<HTMLDivElement>(null);
   const chartBiHorariaTurnoRef = useRef<HTMLDivElement>(null);
+  /** Ignora só o eco do próprio save neste aparelho (outros usuários não passam por esta janela). */
+  const biHorariaLocalSaveAtRef = useRef(0);
+  const ocphRealtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ocphRealtimeCtxRef = useRef<{
+    view: "menu" | "cadastro" | "historico" | "bihoraria";
+    reload: () => Promise<void>;
+  }>({ view: "menu", reload: async () => {} });
   const historicoProducaoLinhaRef = useRef<HTMLDivElement>(null);
   /** Ref para o header sempre chamar a versão mais recente de saveToDatabase (com todos os campos atualizados) */
   const saveToDatabaseRef = useRef<() => void | Promise<void>>(() => {});
@@ -845,12 +888,24 @@ function Producao() {
   const [editingHoraInicioId, setEditingHoraInicioId] = useState<number | null>(null);
   const [editingHoraInicioValue, setEditingHoraInicioValue] = useState("");
   const [octpLoading, setOctpLoading] = useState(false);
-  /** Dialog e filtros do card Problemas e Ações (OCTP): apenas responsável e descrição do status. Aplicados só ao clicar em Filtrar. */
+  /** Dialog e filtros do card Problemas e Ações (OCTP): responsável, status e opcionalmente período (data do documento). Aplicados só ao clicar em Filtrar. */
   const [octpFiltrosDialogOpen, setOctpFiltrosDialogOpen] = useState(false);
   const [octpFilterStatus, setOctpFilterStatus] = useState<string>("");
   const [octpFilterResponsavel, setOctpFilterResponsavel] = useState<string>("");
+  const [octpFilterDataInicio, setOctpFilterDataInicio] = useState<string>("");
+  const [octpFilterDataFim, setOctpFilterDataFim] = useState<string>("");
   const [octpFilterStatusPending, setOctpFilterStatusPending] = useState<string>("");
   const [octpFilterResponsavelPending, setOctpFilterResponsavelPending] = useState<string>("");
+  const [octpFilterDataInicioPending, setOctpFilterDataInicioPending] = useState<string>("");
+  const [octpFilterDataFimPending, setOctpFilterDataFimPending] = useState<string>("");
+  /** Filial aplicada na busca por período (`filial_nome` na OCTP). */
+  const [octpFilterFilialNome, setOctpFilterFilialNome] = useState<string>("");
+  const [octpFilterFilialNomePending, setOctpFilterFilialNomePending] = useState<string>("");
+  /** Duração do intervalo em minutos (getOCTPItemMinutos): vazio = sem filtro. */
+  const [octpFilterDuracaoMin, setOctpFilterDuracaoMin] = useState<number | null>(null);
+  const [octpFilterDuracaoMax, setOctpFilterDuracaoMax] = useState<number | null>(null);
+  const [octpFilterDuracaoMinPending, setOctpFilterDuracaoMinPending] = useState<string>("");
+  const [octpFilterDuracaoMaxPending, setOctpFilterDuracaoMaxPending] = useState<string>("");
   // Filiais (OCTF)
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string; endereco: string }>>([]);
   const [filiaisLoadError, setFiliaisLoadError] = useState<string | null>(null);
@@ -1545,21 +1600,7 @@ function Producao() {
         dataDocumento,
         filialNome || undefined
       );
-      setOctpItems(
-        rows.map((r: OCTPRow) => ({
-          id: r.id,
-          numero: r.numero,
-          problema: r.problema ?? "",
-          acao: r.acao ?? "",
-          responsavel: r.responsavel ?? "",
-          hora: r.hora ?? null,
-          inicio: r.inicio ?? dataDocumento,
-          horaInicio: r.hora_inicio != null ? String(r.hora_inicio).slice(0, 5) : "",
-          horaFinal: r.hora_final != null ? String(r.hora_final).slice(0, 5) : "",
-          duracaoMinutos: r.duracao_minutos ?? null,
-          descricao_status: r.descricao_status ?? "",
-        }))
-      );
+      setOctpItems(mapOCTPRowsToUiItems(rows, dataDocumento));
     } catch (e) {
       console.error("Erro ao carregar OCTP:", e);
       toast({ title: "Erro", description: "Não foi possível carregar os registros OCTP.", variant: "destructive" });
@@ -1567,7 +1608,7 @@ function Producao() {
     } finally {
       setOctpLoading(false);
     }
-  }, [dataCabecalhoSelecionada, filialSelecionada, filiais, toast]);
+  }, [dataCabecalhoSelecionada, filialSelecionadaObj?.nome, toast]);
 
 
   useEffect(() => {
@@ -1652,8 +1693,13 @@ function Producao() {
   const addOCTPItem = async () => {
     const dataDocumento = dataCabecalhoSelecionada || new Date().toISOString().split("T")[0];
     const filialNome = filialSelecionadaObj?.nome ?? null;
+    const dePeriodo = octpFilterDataInicio.trim().split("T")[0];
+    const atePeriodo = octpFilterDataFim.trim().split("T")[0];
 
-    const newNumero = octpItems.length > 0 ? Math.max(...octpItems.map((o) => o.numero)) + 1 : 1;
+    const sameDocRows = octpItems.filter(
+      (o) => ((o.dataDia ?? o.inicio) || "").trim().split("T")[0] === dataDocumento
+    );
+    const newNumero = sameDocRows.length > 0 ? Math.max(...sameDocRows.map((o) => o.numero)) + 1 : 1;
     try {
       const inserted = await insertOCTP({
         numero: newNumero,
@@ -1665,22 +1711,34 @@ function Producao() {
         dataDia: dataDocumento,
         filialNome: filialNome,
       });
-      setOctpItems((prev) => [
-        ...prev,
-        {
-          id: inserted.id,
-          numero: inserted.numero,
-          problema: inserted.problema ?? "",
-          acao: inserted.acao ?? "",
-          responsavel: inserted.responsavel ?? "",
-          hora: inserted.hora ?? null,
-          inicio: inserted.inicio ?? dataDocumento,
-          horaInicio: inserted.hora_inicio != null ? String(inserted.hora_inicio).slice(0, 5) : "",
-          horaFinal: inserted.hora_final != null ? String(inserted.hora_final).slice(0, 5) : "",
-          duracaoMinutos: inserted.duracao_minutos ?? null,
-          descricao_status: inserted.descricao_status ?? "",
-        },
-      ]);
+      const filialPeriodo = (octpFilterFilialNome || "").trim() || (filialNome ?? "").trim();
+      if (dePeriodo && atePeriodo && filialPeriodo) {
+        const rows = await getOCTPByDateRange({
+          dataInicio: dePeriodo,
+          dataFim: atePeriodo,
+          filialNome: filialPeriodo,
+        });
+        setOctpItems(mapOCTPRowsToUiItems(rows, dePeriodo));
+      } else {
+        setOctpItems((prev) => [
+          ...prev,
+          {
+            id: inserted.id,
+            numero: inserted.numero,
+            problema: inserted.problema ?? "",
+            acao: inserted.acao ?? "",
+            responsavel: inserted.responsavel ?? "",
+            hora: inserted.hora ?? null,
+            inicio: inserted.inicio ?? dataDocumento,
+            dataDia: inserted.data_dia != null ? String(inserted.data_dia).split("T")[0] : dataDocumento,
+            horaInicio: inserted.hora_inicio != null ? String(inserted.hora_inicio).slice(0, 5) : "",
+            horaFinal: inserted.hora_final != null ? String(inserted.hora_final).slice(0, 5) : "",
+            duracaoMinutos: inserted.duracao_minutos ?? null,
+            descricao_status: inserted.descricao_status ?? "",
+            filialNome: inserted.filial_nome != null ? String(inserted.filial_nome).trim() : filialNome?.trim() ?? null,
+          },
+        ]);
+      }
     } catch (e) {
       console.error("Erro ao adicionar OCTP:", e);
       toast({ title: "Erro", description: "Não foi possível adicionar o registro.", variant: "destructive" });
@@ -1698,8 +1756,9 @@ function Producao() {
     }
     setOctpItems(octpItems.map((o) => (o.id === id ? updated : o)));
     const payload: Record<string, unknown> = {
-      dataDia: dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
-      filialNome: filialSelecionadaObj?.nome ?? null,
+      dataDia: (item.dataDia && String(item.dataDia).trim()) || dataCabecalhoSelecionada || new Date().toISOString().split("T")[0],
+      filialNome:
+        (item.filialNome && String(item.filialNome).trim()) || filialSelecionadaObj?.nome?.trim() || null,
     };
     if (field === "numero") payload.numero = value as number;
     else if (field === "problema") payload.problema = value as string;
@@ -1727,14 +1786,26 @@ function Producao() {
   const removeOCTPItem = async (id: number) => {
     try {
       await deleteOCTP(id);
-      setOctpItems(octpItems.filter((o) => o.id !== id));
+      const dePeriodo = octpFilterDataInicio.trim().split("T")[0];
+      const atePeriodo = octpFilterDataFim.trim().split("T")[0];
+      const fn = (octpFilterFilialNome || "").trim() || (filialSelecionadaObj?.nome ?? "").trim();
+      if (dePeriodo && atePeriodo && fn) {
+        const rows = await getOCTPByDateRange({
+          dataInicio: dePeriodo,
+          dataFim: atePeriodo,
+          filialNome: fn,
+        });
+        setOctpItems(mapOCTPRowsToUiItems(rows, dePeriodo));
+      } else {
+        setOctpItems(octpItems.filter((o) => o.id !== id));
+      }
     } catch (e) {
       console.error("Erro ao remover OCTP:", e);
       toast({ title: "Erro", description: "Não foi possível remover o registro.", variant: "destructive" });
     }
   };
 
-  /** Responsáveis já cadastrados no documento (únicos, ordenados) — para o filtro por responsável */
+  /** Responsáveis nos registros carregados (documento ou período), únicos — lista do filtro */
   const octpResponsaveisList = useMemo(() => {
     const set = new Set<string>();
     octpItems.forEach((item) => {
@@ -1744,7 +1815,7 @@ function Producao() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
   }, [octpItems]);
 
-  /** Lista de itens OCTP filtrada por descrição do status e por responsável (valores aplicados ao clicar em Filtrar) */
+  /** Lista OCTP após filtros de status, responsável e duração do intervalo (minutos). O período De/Até carrega os dados no banco. */
   const octpItemsFiltered = useMemo(() => {
     let list = octpItems;
     if (octpFilterStatus) {
@@ -1755,23 +1826,99 @@ function Producao() {
       const respNorm = octpFilterResponsavel.trim();
       list = list.filter((item) => (item.responsavel ?? "").trim() === respNorm);
     }
+    if (octpFilterDuracaoMin != null && !Number.isNaN(octpFilterDuracaoMin)) {
+      list = list.filter((item) => getOCTPItemMinutos(item) >= octpFilterDuracaoMin!);
+    }
+    if (octpFilterDuracaoMax != null && !Number.isNaN(octpFilterDuracaoMax)) {
+      list = list.filter((item) => getOCTPItemMinutos(item) <= octpFilterDuracaoMax!);
+    }
     return list;
-  }, [octpItems, octpFilterStatus, octpFilterResponsavel]);
+  }, [octpItems, octpFilterStatus, octpFilterResponsavel, octpFilterDuracaoMin, octpFilterDuracaoMax, getOCTPItemMinutos]);
 
   // Ao abrir o dialog de filtros OCTP, copiar valores aplicados para os campos pendentes
   useEffect(() => {
     if (octpFiltrosDialogOpen) {
       setOctpFilterStatusPending(octpFilterStatus);
       setOctpFilterResponsavelPending(octpFilterResponsavel);
+      setOctpFilterDataInicioPending(octpFilterDataInicio);
+      setOctpFilterDataFimPending(octpFilterDataFim);
+      setOctpFilterFilialNomePending(
+        octpFilterFilialNome.trim() || filialSelecionadaObj?.nome?.trim() || ""
+      );
+      setOctpFilterDuracaoMinPending(
+        octpFilterDuracaoMin != null && !Number.isNaN(octpFilterDuracaoMin) ? String(octpFilterDuracaoMin) : ""
+      );
+      setOctpFilterDuracaoMaxPending(
+        octpFilterDuracaoMax != null && !Number.isNaN(octpFilterDuracaoMax) ? String(octpFilterDuracaoMax) : ""
+      );
     }
   }, [octpFiltrosDialogOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- sync only when opening
 
-  /** Aplica os filtros do dialog de Problemas e Ações e fecha o dialog */
-  const applyOctpFiltrosDialog = useCallback(() => {
+  /** Aplica filtros: com De e Até busca OCTP da filial no período; senão recarrega só o documento atual. */
+  const applyOctpFiltrosDialog = useCallback(async () => {
+    let de = octpFilterDataInicioPending.trim().split("T")[0];
+    let ate = octpFilterDataFimPending.trim().split("T")[0];
+    if (de && ate && de > ate) {
+      const t = de;
+      de = ate;
+      ate = t;
+    }
+    const filialNomeFiltro = octpFilterFilialNomePending.trim();
+    const minM = parseDuracaoMinutosFilterInput(octpFilterDuracaoMinPending);
+    const maxM = parseDuracaoMinutosFilterInput(octpFilterDuracaoMaxPending);
+
     setOctpFilterStatus(octpFilterStatusPending);
     setOctpFilterResponsavel(octpFilterResponsavelPending);
+    setOctpFilterDataInicio(de);
+    setOctpFilterDataFim(ate);
+    setOctpFilterDuracaoMin(minM);
+    setOctpFilterDuracaoMax(maxM);
+
+    if (de && ate && !filialNomeFiltro) {
+      toast({
+        title: "Selecione a filial",
+        description: "No filtro, escolha a filial para buscar problemas e ações no período.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setOctpFiltrosDialogOpen(false);
-  }, [octpFilterStatusPending, octpFilterResponsavelPending]);
+
+    if (de && ate) {
+      setOctpFilterFilialNome(filialNomeFiltro);
+      setOctpLoading(true);
+      try {
+        const rows = await getOCTPByDateRange({ dataInicio: de, dataFim: ate, filialNome: filialNomeFiltro });
+        const fallback = de;
+        setOctpItems(mapOCTPRowsToUiItems(rows, fallback));
+      } catch (e) {
+        console.error("Erro ao carregar OCTP no período:", e);
+        toast({
+          title: "Erro",
+          description: "Não foi possível carregar os registros do período.",
+          variant: "destructive",
+        });
+        setOctpItems([]);
+      } finally {
+        setOctpLoading(false);
+      }
+      return;
+    }
+
+    setOctpFilterFilialNome("");
+    await loadOCTP();
+  }, [
+    octpFilterDataInicioPending,
+    octpFilterDataFimPending,
+    octpFilterFilialNomePending,
+    octpFilterDuracaoMinPending,
+    octpFilterDuracaoMaxPending,
+    octpFilterStatusPending,
+    octpFilterResponsavelPending,
+    toast,
+    loadOCTP,
+  ]);
 
   /** Dados do gráfico de pizza: porcentagem por status (OCTP) — usa lista filtrada */
   const octpStatusPieData = useMemo(() => {
@@ -1877,6 +2024,35 @@ function Producao() {
     const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
     return `${formattedInteger},${decimalPart}`;
   };
+
+  /** Recarrega só a bi-horária da OCPH para o documento/data/filial atuais (ex.: após outro usuário salvar). */
+  const reloadBiHorariaFromOcphRemote = useCallback(async () => {
+    const dataDia = (dataCabecalhoSelecionada || new Date().toISOString().split("T")[0]).split("T")[0];
+    const filialNome = filialSelecionadaObj?.nome ?? null;
+    if (!filialNome?.trim()) return;
+    try {
+      const rows = await loadBiHorariaFromOcph({
+        dataDia,
+        filialNome,
+        docId: currentDocId ?? null,
+      });
+      const loadedBiRows: BiHorariaRegistroItem[] =
+        rows.length > 0
+          ? rows.map((r, idx) => ({
+              id: Date.now() + idx,
+              numero: Number(r.numero ?? idx + 1),
+              dataDia: String(r.data ?? dataDia).split("T")[0],
+              hora: normalizeIntervaloBiHoraria(r.hora),
+              quantidadeRealizada: formatNumber(r.qtd_realizada ?? 0),
+            }))
+          : [];
+      setBiHorariaRegistros(mergeBiHorariaToFiveFixedRows(dataDia, loadedBiRows));
+    } catch (e) {
+      console.error("Erro ao sincronizar bi-horária (tempo real):", e);
+    }
+  }, [dataCabecalhoSelecionada, filialSelecionadaObj?.nome, currentDocId]);
+
+  ocphRealtimeCtxRef.current = { view: currentView, reload: reloadBiHorariaFromOcphRemote };
 
   /** Soma das quantidades realizadas do documento bi-horária (parse BR: 2.000 → 2000) */
   const totalBiHorariaRealizada = useMemo(
@@ -2232,6 +2408,7 @@ function Producao() {
         })),
       });
 
+      biHorariaLocalSaveAtRef.current = Date.now();
       setSaveStatus({ success: true, message: "Bi-horária salva com sucesso!" });
       await Promise.all([loadAllRecords(), loadHistory()]);
       toast({
@@ -3022,6 +3199,26 @@ function Producao() {
     gridLinhaFilterApplied,
     loadDocumentsForDateRange,
   ]);
+
+  // Bi-horária na OCPH: realtime para todos; debounce curto só agrupa vários eventos do mesmo save; ignorar eco só no cliente que acabou de salvar
+  useEffect(() => {
+    const ignoreAfterLocalSaveMs = 700;
+    const debounceMs = 80;
+    const unsubscribe = subscribeOCPHRealtime(() => {
+      if (Date.now() - biHorariaLocalSaveAtRef.current < ignoreAfterLocalSaveMs) return;
+      const { view, reload } = ocphRealtimeCtxRef.current;
+      if (view !== "cadastro" && view !== "bihoraria") return;
+      if (ocphRealtimeDebounceRef.current) clearTimeout(ocphRealtimeDebounceRef.current);
+      ocphRealtimeDebounceRef.current = setTimeout(() => {
+        ocphRealtimeDebounceRef.current = null;
+        void reload();
+      }, debounceMs);
+    });
+    return () => {
+      if (ocphRealtimeDebounceRef.current) clearTimeout(ocphRealtimeDebounceRef.current);
+      unsubscribe();
+    };
+  }, []);
 
   // Ao abrir o dialog de filtros do grid, copiar valores aplicados para os campos pendentes
   useEffect(() => {
@@ -5793,6 +5990,12 @@ function Producao() {
                         <p className="text-xs text-muted-foreground/70 mt-0.5">
                           Registro de problema, ação, responsável, hora inicial/final, intervalo e status
                         </p>
+                        {octpFilterDataInicio && octpFilterDataFim ? (
+                          <p className="text-xs text-amber-900 dark:text-amber-100/90 bg-amber-500/15 border border-amber-500/30 rounded-md px-2 py-1.5 mt-2 leading-snug">
+                            Período na lista: {formatDateShort(octpFilterDataInicio)} — {formatDateShort(octpFilterDataFim)}
+                            {octpFilterFilialNome ? ` · ${octpFilterFilialNome}` : ""}. Apague as datas no filtro e clique em Filtrar para voltar ao documento aberto.
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto shrink-0">
@@ -5809,14 +6012,45 @@ function Producao() {
                             <span>Filtros</span>
                           </button>
                         </DialogTrigger>
-                        <DialogContent className="w-[340px] sm:w-[380px] max-w-[95vw] p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
+                        <DialogContent className="w-[min(95vw,440px)] sm:w-[420px] max-h-[90vh] overflow-y-auto p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
                           <DialogHeader>
                             <DialogTitle className="text-base">Filtros — Problemas e Ações</DialogTitle>
                             <DialogDescription className="text-sm text-muted-foreground">
-                              Defina responsável e descrição do status. Os filtros são aplicados ao clicar em Filtrar.
+                              Com <span className="font-medium text-foreground/90">De</span>, <span className="font-medium text-foreground/90">Até</span> e <span className="font-medium text-foreground/90">Filial</span> a lista traz todos os registros OCTP da filial no período (todos os documentos). O card abaixo mostra o total de intervalo desse período; a tabela pode ser refinada por responsável, status ou duração.
                             </DialogDescription>
                           </DialogHeader>
                           <div className="grid gap-3 py-2">
+                            <div className="rounded-lg border border-primary/30 bg-muted/25 p-3 space-y-2">
+                              <p className="text-xs font-semibold text-foreground">Data do Documento</p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="grid gap-1">
+                                  <Label htmlFor="octp-dialog-data-ini" className="text-xs text-muted-foreground">
+                                    De
+                                  </Label>
+                                  <DatePicker
+                                    id="octp-dialog-data-ini"
+                                    value={octpFilterDataInicioPending}
+                                    onChange={(v) => v && setOctpFilterDataInicioPending(v.split("T")[0])}
+                                    placeholder="Data inicial"
+                                    className="min-w-0"
+                                    triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                                  />
+                                </div>
+                                <div className="grid gap-1">
+                                  <Label htmlFor="octp-dialog-data-fim" className="text-xs text-muted-foreground">
+                                    Até
+                                  </Label>
+                                  <DatePicker
+                                    id="octp-dialog-data-fim"
+                                    value={octpFilterDataFimPending}
+                                    onChange={(v) => v && setOctpFilterDataFimPending(v.split("T")[0])}
+                                    placeholder="Data final"
+                                    className="min-w-0"
+                                    triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                                  />
+                                </div>
+                              </div>
+                            </div>
                             <div className="grid grid-cols-[auto_1fr] items-center gap-2">
                               <Label htmlFor="octp-dialog-responsavel" className="text-xs text-muted-foreground">Responsável</Label>
                               <Select value={octpFilterResponsavelPending || "__todos__"} onValueChange={(v) => setOctpFilterResponsavelPending(v === "__todos__" ? "" : v)}>
@@ -5845,6 +6079,46 @@ function Producao() {
                                 </SelectContent>
                               </Select>
                             </div>
+                            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                              <p className="text-xs font-semibold text-foreground">Intervalo (duração)</p>
+                              <p className="text-[11px] text-muted-foreground leading-snug">
+                                Opcional: filtra pela duração em minutos (hora inicial → hora final). O total na tabela soma só as linhas que passarem em todos os filtros.
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="grid gap-1">
+                                  <Label htmlFor="octp-dialog-dur-min" className="text-xs text-muted-foreground">
+                                    Mín. (min)
+                                  </Label>
+                                  <Input
+                                    id="octp-dialog-dur-min"
+                                    type="number"
+                                    min={0}
+                                    step={1}
+                                    inputMode="numeric"
+                                    placeholder="Ex.: 15"
+                                    className="h-9 text-sm"
+                                    value={octpFilterDuracaoMinPending}
+                                    onChange={(e) => setOctpFilterDuracaoMinPending(e.target.value)}
+                                  />
+                                </div>
+                                <div className="grid gap-1">
+                                  <Label htmlFor="octp-dialog-dur-max" className="text-xs text-muted-foreground">
+                                    Máx. (min)
+                                  </Label>
+                                  <Input
+                                    id="octp-dialog-dur-max"
+                                    type="number"
+                                    min={0}
+                                    step={1}
+                                    inputMode="numeric"
+                                    placeholder="Ex.: 120"
+                                    className="h-9 text-sm"
+                                    value={octpFilterDuracaoMaxPending}
+                                    onChange={(e) => setOctpFilterDuracaoMaxPending(e.target.value)}
+                                  />
+                                </div>
+                              </div>
+                            </div>
                           </div>
                           <div className="flex gap-2">
                             <Button
@@ -5854,11 +6128,19 @@ function Producao() {
                               onClick={() => {
                                 setOctpFilterStatusPending("");
                                 setOctpFilterResponsavelPending("");
+                                setOctpFilterDataInicioPending("");
+                                setOctpFilterDataFimPending("");
+                                setOctpFilterDuracaoMinPending("");
+                                setOctpFilterDuracaoMaxPending("");
                               }}
                             >
                               Limpar
                             </Button>
-                            <Button type="button" onClick={applyOctpFiltrosDialog} className="flex-1 h-9 bg-primary text-primary-foreground hover:bg-primary/90">
+                            <Button
+                              type="button"
+                              onClick={() => void applyOctpFiltrosDialog()}
+                              className="flex-1 h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+                            >
                               Filtrar
                             </Button>
                           </div>
@@ -6128,7 +6410,7 @@ function Producao() {
                           {octpItemsFiltered.length > 0 && (
                             <TableRow className="bg-muted/50 hover:bg-muted/50 border-t-2 border-border font-semibold">
                               <TableCell colSpan={7} className="p-2 sm:p-4 text-xs sm:text-sm text-right">
-                                Total (intervalo)
+                                Total intervalo (linhas filtradas)
                               </TableCell>
                               <TableCell className="p-2 sm:p-4 text-xs sm:text-sm font-mono font-semibold text-foreground text-right min-w-[80px] sm:min-w-[90px]">
                                 {formatMinutosToHHMM(octpTotalIntervaloMinutosFiltered)}
