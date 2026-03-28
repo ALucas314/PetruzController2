@@ -644,24 +644,64 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
   return { data: rows, count: rows.length, reprocessos, biHorariaRegistros };
 }
 
+/** Linha do reprocesso: mesma regra do filtro da tela de produção (valor salvo vs código/id/nome da OCLP). */
+function reprocessoLinhaMatchesFilter(
+  linhaStored: unknown,
+  linhaFiltroRaw: string,
+  productionLines: Array<{ id: number; code?: string; name?: string }>
+): boolean {
+  const filtroVal = String(linhaFiltroRaw ?? "").trim();
+  if (!filtroVal) return true;
+  const linhaVal = String(linhaStored ?? "").trim();
+  if (linhaVal === filtroVal) return true;
+  const selectedLine = productionLines.find((l) => (l.code ? String(l.code) : `line-${l.id}`) === filtroVal);
+  if (selectedLine) {
+    const codeOrId = selectedLine.code ? String(selectedLine.code) : `line-${selectedLine.id}`;
+    return linhaVal === codeOrId || linhaVal === String(selectedLine.name ?? "").trim();
+  }
+  return false;
+}
+
+function normalizeGrupoReprocessoJson(v: unknown): string {
+  const s = String(v ?? "").trim();
+  if (s === "Reprocesso" || s === "Matéria Prima Açaí" || s === "Matéria Prima Fruto") return s;
+  return "Reprocesso";
+}
+
+/** Cortado vs Usado independente de maiúsculas no JSON/colunas legado. */
+function normalizeTipoReprocessoParaFiltro(tipo: unknown): "Cortado" | "Usado" {
+  return String(tipo ?? "Cortado").trim().toLowerCase() === "usado" ? "Usado" : "Cortado";
+}
+
 /**
  * Soma quantidades de reprocesso (Cortado / Usado) no intervalo de data do documento (`data_dia`),
- * para a filial informada, considerando o código com a mesma regra do filtro da tela (contém, case-insensitive).
+ * para a filial informada. Cada filtro é opcional e independente: código (contém, case-insensitive),
+ * tipo, grupo, linha — iguais ao card de reprocesso na tela.
  * Usa JSONB `reprocessos` e, quando não há array, colunas legado `reprocesso_*` da mesma linha OCPD.
  */
 export async function aggregateReprocessosByCodigoInDateRange(params: {
   dataInicio: string;
   dataFim: string;
   filialNome: string;
-  codigoFiltro: string;
+  /** Vazio = não restringe por código (soma todos os reprocessos que passam nos outros filtros). */
+  codigoFiltro?: string;
+  tipoFiltro?: "" | "Cortado" | "Usado";
+  grupoFiltro?: "" | "Reprocesso" | "Matéria Prima Açaí" | "Matéria Prima Fruto";
+  linhaFiltro?: string;
+  productionLines?: Array<{ id: number; code?: string; name?: string }>;
 }): Promise<{ totalCortado: number; totalUsado: number; documentosComItem: number }> {
   const de = params.dataInicio.split("T")[0];
   const ate = params.dataFim.split("T")[0];
   const filial = String(params.filialNome ?? "").trim();
-  const filtroCodigo = String(params.codigoFiltro ?? "").trim().toLowerCase();
-  if (!filial || !filtroCodigo) {
+  if (!filial) {
     return { totalCortado: 0, totalUsado: 0, documentosComItem: 0 };
   }
+
+  const filtroCodigo = String(params.codigoFiltro ?? "").trim().toLowerCase();
+  const tipoFiltro = String(params.tipoFiltro ?? "").trim() as "" | "Cortado" | "Usado";
+  const grupoFiltro = String(params.grupoFiltro ?? "").trim();
+  const linhaFiltroRaw = String(params.linhaFiltro ?? "").trim();
+  const productionLines = params.productionLines ?? [];
 
   const pageSize = 1000;
   let from = 0;
@@ -671,7 +711,7 @@ export async function aggregateReprocessosByCodigoInDateRange(params: {
     let q = supabase
       .from("OCPD")
       .select(
-        "id, data_dia, doc_id, doc_ordem_global, reprocessos, reprocesso_codigo, reprocesso_tipo, reprocesso_quantidade"
+        "id, data_dia, doc_id, doc_ordem_global, reprocessos, reprocesso_codigo, reprocesso_tipo, reprocesso_quantidade, reprocesso_linha"
       )
       .gte("data_dia", de)
       .lte("data_dia", ate)
@@ -700,17 +740,33 @@ export async function aggregateReprocessosByCodigoInDateRange(params: {
     return `${d}|${did}|${og}`;
   };
 
-  const codigoMatch = (codigo: unknown) =>
-    String(codigo ?? "")
+  const codigoMatch = (codigo: unknown) => {
+    if (!filtroCodigo) return true;
+    return String(codigo ?? "")
       .trim()
       .toLowerCase()
       .includes(filtroCodigo);
+  };
+
+  const grupoMatch = (grupo: unknown) => {
+    if (!grupoFiltro) return true;
+    return normalizeGrupoReprocessoJson(grupo) === grupoFiltro;
+  };
+
+  const linhaMatch = (linha: unknown) => reprocessoLinhaMatchesFilter(linha, linhaFiltroRaw, productionLines);
+
+  const itemMatchesFilters = (tipo: string, grupo: unknown, linha: unknown, codigo: unknown) => {
+    if (tipoFiltro && normalizeTipoReprocessoParaFiltro(tipo) !== tipoFiltro) return false;
+    if (!grupoMatch(grupo)) return false;
+    if (!linhaMatch(linha)) return false;
+    if (!codigoMatch(codigo)) return false;
+    return true;
+  };
 
   const addFromItem = (row: Record<string, unknown>, tipo: string, qtdRaw: unknown, matched: boolean) => {
     if (!matched) return;
     const q = parseBrazilNumber(qtdRaw);
-    const t = String(tipo ?? "Cortado").trim();
-    if (t === "Usado") totalUsado += q;
+    if (normalizeTipoReprocessoParaFiltro(tipo) === "Usado") totalUsado += q;
     else totalCortado += q;
     docKeysComMatch.add(docKey(row));
   };
@@ -719,14 +775,28 @@ export async function aggregateReprocessosByCodigoInDateRange(params: {
     const rep = row.reprocessos;
     if (rep != null && Array.isArray(rep) && rep.length > 0) {
       for (const elem of rep as Record<string, unknown>[]) {
-        const matched = codigoMatch(elem.codigo);
+        const matched = itemMatchesFilters(
+          String(elem.tipo ?? "Cortado"),
+          elem.grupo,
+          elem.linha,
+          elem.codigo
+        );
         addFromItem(row, String(elem.tipo ?? "Cortado"), elem.quantidade, matched);
       }
       continue;
     }
     const legCod = row.reprocesso_codigo;
     if (legCod != null && String(legCod).trim() !== "") {
-      const matched = codigoMatch(legCod);
+      const legacyGrupo =
+        rep != null && Array.isArray(rep) && (rep as Record<string, unknown>[])[0]?.grupo != null
+          ? (rep as Record<string, unknown>[])[0].grupo
+          : undefined;
+      const matched = itemMatchesFilters(
+        String(row.reprocesso_tipo ?? "Cortado"),
+        legacyGrupo,
+        row.reprocesso_linha,
+        legCod
+      );
       addFromItem(row, String(row.reprocesso_tipo ?? "Cortado"), row.reprocesso_quantidade, matched);
     }
   }

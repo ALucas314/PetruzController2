@@ -205,6 +205,11 @@ interface ReprocessoItem {
   quantidade: string;
 }
 
+/** Normaliza tipo vindo do banco/JSON (ex.: "cortado", "CORTADO") para o mesmo valor do filtro da UI. */
+function normalizeReprocessoTipoVindoDb(tipo: unknown): "Cortado" | "Usado" {
+  return String(tipo ?? "Cortado").trim().toLowerCase() === "usado" ? "Usado" : "Cortado";
+}
+
 /** Item do card OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Descrição do Status) */
 interface OCTPItem {
   id: number;
@@ -483,6 +488,7 @@ function Producao() {
   const producaoCardRef = useRef<HTMLDivElement>(null);
   const historicoCardRef = useRef<HTMLDivElement>(null);
   const reprocessoCardRef = useRef<HTMLDivElement>(null);
+  const reprocessoTotaisPeriodoExportRef = useRef<HTMLDivElement>(null);
   const reprocessoExportRestoreRef = useRef<{ input: HTMLInputElement; wrapper: HTMLDivElement }[]>([]);
   const octpCardRef = useRef<HTMLDivElement>(null);
   const octpExportRestoreRef = useRef<{ el: HTMLElement; wrapper: HTMLDivElement }[]>([]);
@@ -662,6 +668,8 @@ function Producao() {
   const [reprocessoAppliedDataFim, setReprocessoAppliedDataFim] = useState<string>("");
   /** Nome completo da filial (OCTF/OCPD) para totais no período; vazio = usa a filial selecionada no campo Filial do documento */
   const [reprocessoAppliedFilialNome, setReprocessoAppliedFilialNome] = useState<string>("");
+  /** `filial_nome` exato do último documento OCPD carregado — fallback quando o select não casa com o cadastro OCTF */
+  const [ocpdFilialNomeCarregada, setOcpdFilialNomeCarregada] = useState<string>("");
   /** Dialog de filtros do reprocesso — aberto pelo botão Filtros */
   const [reprocessoFiltrosDialogOpen, setReprocessoFiltrosDialogOpen] = useState(false);
   const [reprocessoFiltroTipoPending, setReprocessoFiltroTipoPending] = useState<"" | "Cortado" | "Usado">("");
@@ -682,7 +690,7 @@ function Producao() {
   // Lista de reprocessos filtrada pelos valores aplicados (só atualiza ao clicar em Filtrar)
   const reprocessosFiltrados = useMemo(() => {
     return reprocessos.filter((r) => {
-      if (reprocessoAppliedTipo && r.tipo !== reprocessoAppliedTipo) return false;
+      if (reprocessoAppliedTipo && normalizeReprocessoTipoVindoDb(r.tipo) !== reprocessoAppliedTipo) return false;
       if (reprocessoAppliedGrupo && r.grupo !== reprocessoAppliedGrupo) return false;
       if (reprocessoAppliedCodigo.trim()) {
         const codigoVal = (r.codigo ?? "").toString().trim().toLowerCase();
@@ -757,6 +765,27 @@ function Producao() {
     reprocessoFiltroFilialNomePending,
     toast,
   ]);
+
+  const clearReprocessoFiltros = useCallback(() => {
+    setReprocessoFiltroTipo("");
+    setReprocessoAppliedTipo("");
+    setReprocessoFiltroLinha("");
+    setReprocessoAppliedLinha("");
+    setReprocessoFiltroGrupo("");
+    setReprocessoAppliedGrupo("");
+    setReprocessoFiltroCodigo("");
+    setReprocessoAppliedCodigo("");
+    setReprocessoAppliedDataInicio("");
+    setReprocessoAppliedDataFim("");
+    setReprocessoFiltroTipoPending("");
+    setReprocessoFiltroLinhaPending("");
+    setReprocessoFiltroGrupoPending("");
+    setReprocessoFiltroCodigoPending("");
+    setReprocessoFiltroDataInicioPending("");
+    setReprocessoFiltroDataFimPending("");
+    setReprocessoAppliedFilialNome("");
+    setReprocessoFiltroFilialNomePending("");
+  }, []);
 
   // Normaliza data vinda do banco (string ISO ou Date) para YYYY-MM-DD (evita mistura BELA/Petruz por fuso)
   const normalizeDataDia = (dateValue: string | Date | null | undefined): string => {
@@ -835,10 +864,64 @@ function Producao() {
   }, [filiais, filialSelecionada]);
 
   const filialNomeReprocesso =
-    reprocessoAppliedFilialNome.trim() || filialSelecionadaObj?.nome?.trim() || "";
+    reprocessoAppliedFilialNome.trim() ||
+    filialSelecionadaObj?.nome?.trim() ||
+    ocpdFilialNomeCarregada.trim() ||
+    "";
+
+  /** Só busca/exibe card de totais no período quando o usuário aplicou algum filtro de reprocesso (ou datas explícitas). */
+  const reprocessoPediuResumoPeriodo = useMemo(
+    () =>
+      !!(
+        reprocessoAppliedTipo ||
+        reprocessoAppliedLinha.trim() ||
+        reprocessoAppliedGrupo ||
+        reprocessoAppliedCodigo.trim() ||
+        reprocessoAppliedFilialNome.trim() ||
+        (reprocessoAppliedDataInicio.trim() && reprocessoAppliedDataFim.trim())
+      ),
+    [
+      reprocessoAppliedTipo,
+      reprocessoAppliedLinha,
+      reprocessoAppliedGrupo,
+      reprocessoAppliedCodigo,
+      reprocessoAppliedFilialNome,
+      reprocessoAppliedDataInicio,
+      reprocessoAppliedDataFim,
+    ]
+  );
+
+  /**
+   * Datas da soma: preferência filtros do reprocesso; se vazio, período do grid; senão um dia = data do documento.
+   * Assim o card aparece ao filtrar só por código (sem preencher datas no diálogo).
+   */
+  const reprocessoPeriodoDatasEfetivas = useMemo(() => {
+    const expDe = reprocessoAppliedDataInicio.trim().split("T")[0];
+    const expAte = reprocessoAppliedDataFim.trim().split("T")[0];
+    if (expDe && expAte) return { de: expDe, ate: expAte, fonte: "filtro" as const };
+    const gDe = (gridDataDeApplied || "").trim().split("T")[0];
+    const gAte = (gridDataAteApplied || "").trim().split("T")[0];
+    if (gDe && gAte) return { de: gDe, ate: gAte, fonte: "grid" as const };
+    const cab = (dataCabecalhoSelecionada || "").trim().split("T")[0];
+    if (cab) return { de: cab, ate: cab, fonte: "documento" as const };
+    return { de: "", ate: "", fonte: "none" as const };
+  }, [
+    reprocessoAppliedDataInicio,
+    reprocessoAppliedDataFim,
+    gridDataDeApplied,
+    gridDataAteApplied,
+    dataCabecalhoSelecionada,
+  ]);
 
   useEffect(() => {
-    if (!filialNomeReprocesso || !reprocessoAppliedDataInicio || !reprocessoAppliedDataFim || !reprocessoAppliedCodigo.trim()) {
+    if (!filialNomeReprocesso || !reprocessoPediuResumoPeriodo) {
+      setReprocessoPeriodoResumo(null);
+      setReprocessoPeriodoError(null);
+      setReprocessoPeriodoLoading(false);
+      return;
+    }
+    const { de, ate } = reprocessoPeriodoDatasEfetivas;
+    if (!de || !ate) {
       setReprocessoPeriodoResumo(null);
       setReprocessoPeriodoError(null);
       setReprocessoPeriodoLoading(false);
@@ -848,10 +931,14 @@ function Producao() {
     setReprocessoPeriodoLoading(true);
     setReprocessoPeriodoError(null);
     aggregateReprocessosByCodigoInDateRange({
-      dataInicio: reprocessoAppliedDataInicio,
-      dataFim: reprocessoAppliedDataFim,
+      dataInicio: de,
+      dataFim: ate,
       filialNome: filialNomeReprocesso,
       codigoFiltro: reprocessoAppliedCodigo.trim(),
+      tipoFiltro: reprocessoAppliedTipo,
+      grupoFiltro: reprocessoAppliedGrupo,
+      linhaFiltro: reprocessoAppliedLinha,
+      productionLines,
     })
       .then((r) => {
         if (!cancelled) setReprocessoPeriodoResumo(r);
@@ -872,9 +959,15 @@ function Producao() {
     filialNomeReprocesso,
     reprocessoAppliedFilialNome,
     filialSelecionadaObj?.nome,
-    reprocessoAppliedDataInicio,
-    reprocessoAppliedDataFim,
+    reprocessoPediuResumoPeriodo,
+    reprocessoPeriodoDatasEfetivas.de,
+    reprocessoPeriodoDatasEfetivas.ate,
     reprocessoAppliedCodigo,
+    reprocessoAppliedTipo,
+    reprocessoAppliedGrupo,
+    reprocessoAppliedLinha,
+    productionLines,
+    ocpdFilialNomeCarregada,
   ]);
 
   // Filtros do histórico: intervalo de datas, linha e filial (padrão = data de hoje, permitindo seleção)
@@ -2241,6 +2334,12 @@ function Producao() {
 
         setItems(normalizedItems);
         setCurrentDocId(result.data[0]?.doc_id ?? null);
+        {
+          const fn = result.data[0]?.filial_nome;
+          setOcpdFilialNomeCarregada(
+            fn != null && String(fn).trim() !== "" ? String(fn).trim() : ""
+          );
+        }
 
         // Controle de Latas: preencher do primeiro registro OCPD
         if (result.data.length > 0) {
@@ -2338,6 +2437,8 @@ function Producao() {
           itemCount: result.count,
           filialNome,
         });
+      } else {
+        setOcpdFilialNomeCarregada("");
       }
     } catch (error: any) {
       console.error("Erro ao carregar produção:", error);
@@ -2846,6 +2947,7 @@ function Producao() {
     setTotalReprocesso("");
     setObservacao("");
     setFilialSelecionada("");
+    setOcpdFilialNomeCarregada("");
     setSaveStatus(null);
   };
 
@@ -5199,9 +5301,6 @@ function Producao() {
                         >
                           <DialogHeader>
                             <DialogTitle className="text-base">Filtros de reprocesso</DialogTitle>
-                            <DialogDescription className="text-sm text-muted-foreground">
-                              Tipo, linha, grupo e código filtram a tabela deste documento. Abaixo: filial alvo, datas (opcional) e código para totais Cortado/Usado somados nos documentos da filial no período.
-                            </DialogDescription>
                           </DialogHeader>
                           <div className="grid gap-3 py-2">
                             <div className="grid grid-cols-[auto_1fr] items-center gap-2">
@@ -5269,7 +5368,9 @@ function Producao() {
                                   <SelectValue placeholder="Filial" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="__doc__">Filial do documento (campo Filial acima)</SelectItem>
+                                  <SelectItem value="__doc__">
+                                    Filial do documento (campo Filial ou nome gravado na OCPD do doc. aberto)
+                                  </SelectItem>
                                   {filiais.map((f) => {
                                     const nome = (f.nome || "").trim();
                                     if (!nome) return null;
@@ -5283,10 +5384,7 @@ function Producao() {
                               </Select>
                             </div>
                             <div className="rounded-lg border border-primary/30 bg-muted/25 p-3 space-y-2">
-                              <p className="text-xs font-semibold text-foreground">Data do documento (opcional)</p>
-                              <p className="text-[11px] text-muted-foreground leading-snug">
-                                Intervalo de <span className="font-medium text-foreground">data_dia</span> na OCPD. A filial usada nos totais é a selecionada no campo anterior (ou a do documento). Preencha as duas datas e o código para o resumo Cortado/Usado.
-                              </p>
+                              <p className="text-xs font-semibold text-foreground">Data do Documento</p>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div className="grid gap-1">
                                   <Label htmlFor="reprocesso-dialog-data-ini" className="text-xs text-muted-foreground">
@@ -5317,9 +5415,14 @@ function Producao() {
                               </div>
                             </div>
                           </div>
-                          <Button type="button" onClick={applyReprocessoFiltrosDialog} className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90">
-                            Filtrar
-                          </Button>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                            <Button type="button" variant="outline" onClick={clearReprocessoFiltros} className="w-full h-9">
+                              Limpar filtros
+                            </Button>
+                            <Button type="button" onClick={applyReprocessoFiltrosDialog} className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90">
+                              Filtrar
+                            </Button>
+                          </div>
                         </DialogContent>
                       </Dialog>
                       <Button
@@ -5384,83 +5487,110 @@ function Producao() {
                           variant="ghost"
                           size="sm"
                           className="h-9 text-muted-foreground hover:text-foreground"
-                          onClick={() => {
-                            setReprocessoFiltroTipo("");
-                            setReprocessoAppliedTipo("");
-                            setReprocessoFiltroLinha("");
-                            setReprocessoAppliedLinha("");
-                            setReprocessoFiltroGrupo("");
-                            setReprocessoAppliedGrupo("");
-                            setReprocessoFiltroCodigo("");
-                            setReprocessoAppliedCodigo("");
-                            setReprocessoAppliedDataInicio("");
-                            setReprocessoAppliedDataFim("");
-                            setReprocessoFiltroTipoPending("");
-                            setReprocessoFiltroLinhaPending("");
-                            setReprocessoFiltroGrupoPending("");
-                            setReprocessoFiltroCodigoPending("");
-                            setReprocessoFiltroDataInicioPending("");
-                            setReprocessoFiltroDataFimPending("");
-                          }}
+                          onClick={clearReprocessoFiltros}
                         >
                           Limpar filtros
                         </Button>
                       )}
                     </div>
-                    {(reprocessoAppliedDataInicio && reprocessoAppliedDataFim && !reprocessoAppliedCodigo.trim()) && (
-                      <p className="text-xs text-muted-foreground">
-                        Informe o código do reprocesso para ver o total Cortado e Usado somados em todos os documentos entre as datas do documento.
-                      </p>
-                    )}
-                    {(reprocessoAppliedDataInicio && reprocessoAppliedDataFim && reprocessoAppliedCodigo.trim()) && (
-                      <div className="rounded-lg border border-border/50 bg-muted/30 p-3 text-sm space-y-2">
-                        <p className="font-medium text-card-foreground">
-                          Totais no período (todos os documentos, filial atual)
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Código filtrado: <span className="font-mono text-foreground">{reprocessoAppliedCodigo.trim()}</span>
-                          {" · "}
-                          {new Date(reprocessoAppliedDataInicio + "T12:00:00").toLocaleDateString("pt-BR")}
-                          {" — "}
-                          {new Date(reprocessoAppliedDataFim + "T12:00:00").toLocaleDateString("pt-BR")}
-                        </p>
-                        {reprocessoPeriodoLoading && (
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                            <span>Carregando somas…</span>
+                    {filialNomeReprocesso &&
+                      reprocessoPediuResumoPeriodo &&
+                      reprocessoPeriodoDatasEfetivas.de &&
+                      reprocessoPeriodoDatasEfetivas.ate && (
+                        <div
+                          className="rounded-lg border border-border/50 bg-muted/30 p-3 text-sm"
+                          role="region"
+                          aria-label="Totais de reprocesso no período"
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div ref={reprocessoTotaisPeriodoExportRef} className="min-w-0 flex-1 space-y-2">
+                              <p className="font-medium text-card-foreground">
+                                Totais no período (todos os documentos, filial atual)
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {reprocessoAppliedCodigo.trim() ? (
+                                  <>
+                                    Código filtrado:{" "}
+                                    <span className="font-mono text-foreground">{reprocessoAppliedCodigo.trim()}</span>
+                                    {" · "}
+                                  </>
+                                ) : (
+                                  <>
+                                    {[
+                                      reprocessoAppliedTipo ? `Tipo: ${reprocessoAppliedTipo}` : null,
+                                      reprocessoAppliedLinha.trim()
+                                        ? `Linha: ${productionLines.find((l) => (l.code ? String(l.code) : `line-${l.id}`) === reprocessoAppliedLinha.trim())?.name ?? reprocessoAppliedLinha.trim()}`
+                                        : null,
+                                      reprocessoAppliedGrupo ? `Grupo: ${reprocessoAppliedGrupo}` : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ") || "Todos os códigos (com os filtros acima)"}
+                                    {" · "}
+                                  </>
+                                )}
+                                {new Date(reprocessoPeriodoDatasEfetivas.de + "T12:00:00").toLocaleDateString("pt-BR")}
+                                {" — "}
+                                {new Date(reprocessoPeriodoDatasEfetivas.ate + "T12:00:00").toLocaleDateString("pt-BR")}
+                                {reprocessoPeriodoDatasEfetivas.fonte !== "filtro" ? (
+                                  <span className="text-[10px] block mt-1 text-muted-foreground/90">
+                                    {reprocessoPeriodoDatasEfetivas.fonte === "grid"
+                                      ? "Intervalo herdado do período do grid (Filtros de produção). Defina as datas em Filtros de reprocesso para fixar."
+                                      : "Intervalo = data do documento. Defina De/Até em Filtros de reprocesso para outro período."}
+                                  </span>
+                                ) : null}
+                              </p>
+                              {reprocessoPeriodoLoading && (
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                                  <span>Carregando somas…</span>
+                                </div>
+                              )}
+                              {reprocessoPeriodoError && (
+                                <p className="text-destructive text-xs">{reprocessoPeriodoError}</p>
+                              )}
+                              {!reprocessoPeriodoLoading && !reprocessoPeriodoError && reprocessoPeriodoResumo && (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                                  <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
+                                    <span className="text-xs text-muted-foreground">Cortado (soma)</span>
+                                    <span className="text-base font-bold tabular-nums">
+                                      {reprocessoPeriodoResumo.totalCortado.toLocaleString("pt-BR", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
+                                    <span className="text-xs text-muted-foreground">Usado (soma)</span>
+                                    <span className="text-base font-bold tabular-nums">
+                                      {reprocessoPeriodoResumo.totalUsado.toLocaleString("pt-BR", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
+                                    <span className="text-xs text-muted-foreground">
+                                      {reprocessoAppliedCodigo.trim() ? "Documentos com o item" : "Documentos no filtro"}
+                                    </span>
+                                    <span className="text-base font-bold tabular-nums">
+                                      {reprocessoPeriodoResumo.documentosComItem}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <ExportToPng
+                              targetRef={reprocessoTotaisPeriodoExportRef}
+                              filenamePrefix="reprocesso-totais-periodo"
+                              expandScrollable={false}
+                              disabled={reprocessoPeriodoLoading}
+                              className="inline-flex h-9 shrink-0 self-start sm:self-auto"
+                              label="Exportar PNG"
+                              title="Exportar totais de reprocesso no período como imagem PNG"
+                            />
                           </div>
-                        )}
-                        {reprocessoPeriodoError && (
-                          <p className="text-destructive text-xs">{reprocessoPeriodoError}</p>
-                        )}
-                        {!reprocessoPeriodoLoading && !reprocessoPeriodoError && reprocessoPeriodoResumo && (
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                            <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
-                              <span className="text-xs text-muted-foreground">Cortado (soma)</span>
-                              <span className="text-base font-bold tabular-nums">
-                                {reprocessoPeriodoResumo.totalCortado.toLocaleString("pt-BR", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
-                            </div>
-                            <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
-                              <span className="text-xs text-muted-foreground">Usado (soma)</span>
-                              <span className="text-base font-bold tabular-nums">
-                                {reprocessoPeriodoResumo.totalUsado.toLocaleString("pt-BR", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
-                            </div>
-                            <div className="flex flex-col gap-0.5 rounded-md bg-background/80 border border-border/40 px-3 py-2">
-                              <span className="text-xs text-muted-foreground">Documentos com o item</span>
-                              <span className="text-base font-bold tabular-nums">{reprocessoPeriodoResumo.documentosComItem}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                        </div>
+                      )}
                   </div>
 
                   <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -6989,7 +7119,7 @@ function Producao() {
             <DialogHeader>
               <DialogTitle className="text-base">Filtros de produção</DialogTitle>
               <DialogDescription className="text-sm text-muted-foreground">
-                Período da lista de documentos (data do documento). O mesmo intervalo alimenta o resumo de reprocesso no card Reprocesso, se você informar o código abaixo.
+                Período da lista de documentos (data do documento). O mesmo intervalo alimenta o card destacado de totais Cortado/Usado no Reprocesso; o código abaixo é opcional.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-3 py-2">
@@ -7028,7 +7158,7 @@ function Producao() {
               <div className="rounded-lg border border-primary/20 bg-muted/20 p-3 space-y-2">
                 <p className="text-xs font-semibold text-foreground">Reprocesso (opcional)</p>
                 <p className="text-[11px] text-muted-foreground leading-snug">
-                  Com código preenchido, o card Reprocesso mostra totais Cortado/Usado no período acima para todos os documentos da filial.
+                  Opcional: refine os totais por código. Sem código, o card destacado soma tudo no período (e respeita os filtros do botão Filtros do reprocesso).
                 </p>
                 <div className="grid gap-1">
                   <Label htmlFor="grid-dialog-reprocesso-codigo" className="text-xs text-muted-foreground">
