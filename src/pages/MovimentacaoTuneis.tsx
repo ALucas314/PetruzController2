@@ -700,10 +700,13 @@ export default function MovimentacaoTuneis() {
   }
 
   function onEditar(row: OCMTRow) {
+    const idxNaLista = rows.findIndex((r) => r.id === row.id);
+    /** Número exibido = posição 1-based na lista filtrada (não o doc_entry global do banco). */
+    const ordemExibicao = idxNaLista >= 0 ? idxNaLista + 1 : Number(row.numeroDocumento || row.docEntry || 0) || 1;
     setForm({
       id: row.id,
       docEntryPreview: padDoc(row.docEntry),
-      docNumPreview: padDoc(row.numeroDocumento),
+      docNumPreview: padDoc(ordemExibicao),
       filialNome: row.filialNome,
       codigoTunel: String(row.codigoTunel),
       codigoTipoProduto: String(row.codigoTipoProduto),
@@ -730,11 +733,12 @@ export default function MovimentacaoTuneis() {
   useEffect(() => {
     if (form.id) return;
     const maxDoc = rows.reduce((m, r) => Math.max(m, Number(r.docEntry || 0)), 0);
-    const next = maxDoc + 1;
+    const proximoDocEntry = maxDoc + 1;
+    const proximaOrdemNaLista = rows.length + 1;
     setForm((p) => ({
       ...p,
-      docEntryPreview: padDoc(next),
-      docNumPreview: padDoc(next),
+      docEntryPreview: padDoc(proximoDocEntry),
+      docNumPreview: padDoc(proximaOrdemNaLista),
     }));
   }, [rows, form.id]);
 
@@ -982,7 +986,16 @@ export default function MovimentacaoTuneis() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 justify-items-center">
                     <div className="space-y-1.5 w-full sm:w-[220px]">
                       <Label>Número de Documento</Label>
-                      <Input readOnly value={form.docNumPreview} className="bg-muted font-mono tabular-nums" />
+                      <Input
+                        readOnly
+                        value={form.docNumPreview}
+                        className="bg-muted font-mono tabular-nums"
+                        title={
+                          form.id
+                            ? `Ordem entre as movimentações deste filtro (interno no banco: doc. ${form.docEntryPreview})`
+                            : `Próximo número nesta lista (${rows.length + 1}º). O doc. interno após salvar segue a sequência do sistema (${form.docEntryPreview}).`
+                        }
+                      />
                     </div>
                     <div className="space-y-1.5 w-full sm:w-[220px]">
                       <Label>Filial</Label>
