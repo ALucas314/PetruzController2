@@ -3063,23 +3063,25 @@ function Producao() {
 
   // Função para navegar para registro anterior
   const navigateToPreviousRecord = () => {
+    const list = getRecordsForDocNav();
     const currentIndex = currentRecordIndex >= 0 ? currentRecordIndex : findCurrentRecordIndex();
 
     if (currentIndex > 0) {
       loadRecordByIndex(currentIndex - 1);
-    } else if (currentIndex === -1 && allRecords.length > 0) {
-      loadRecordByIndex(allRecords.length - 1); // formulário vazio: voltar = ir ao último documento
+    } else if (currentIndex === -1 && list.length > 0) {
+      loadRecordByIndex(list.length - 1); // formulário vazio: voltar = último doc da lista do header (cadastro ou bi)
     }
   };
 
   // Função para navegar para próximo registro
   const navigateToNextRecord = () => {
+    const list = getRecordsForDocNav();
     const currentIndex = currentRecordIndex >= 0 ? currentRecordIndex : findCurrentRecordIndex();
 
-    if (currentIndex >= 0 && currentIndex < allRecords.length - 1) {
+    if (currentIndex >= 0 && currentIndex < list.length - 1) {
       loadRecordByIndex(currentIndex + 1);
-    } else if (currentIndex === -1 && allRecords.length > 0) {
-      loadRecordByIndex(0); // formulário vazio: próximo = ir ao primeiro documento
+    } else if (currentIndex === -1 && list.length > 0) {
+      loadRecordByIndex(0); // formulário vazio: próximo = primeiro doc da mesma lista
     }
   };
 

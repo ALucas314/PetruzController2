@@ -60,8 +60,17 @@ export function SiteHeader() {
   const { notifications, clearLoadNotifications } = useLoadNotifications();
   const notifCount = notifications.length;
   const headerRef = useRef<HTMLElement>(null);
+  /** Evita duplo disparo (touch+click, TooltipTrigger+Button, re-render rápido) que fazia as setas “ciclarem” sozinhas. */
+  const lastDocNavAtRef = useRef(0);
 
   const hasDocNav = !!documentNav?.showNav;
+
+  const runDocNav = (fn: () => void) => {
+    const now = Date.now();
+    if (now - lastDocNavAtRef.current < 450) return;
+    lastDocNavAtRef.current = now;
+    fn();
+  };
 
   // Atualiza a variável CSS com a altura real do header para o main reservar o mesmo espaço (evita conteúdo atrás do header em 640px–1024px)
   const setHeaderHeight = () => {
@@ -120,43 +129,41 @@ export function SiteHeader() {
         {/* Navegação entre documentos (setas) - quando a tela de cadastro fornece; abaixo de 410px sem label para caber */}
         {documentNav?.showNav && (
           <div className="flex items-center gap-0.5 sm:gap-1.5 shrink-0">
-            <TooltipProvider delayDuration={300}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 rounded-lg"
-                    disabled={!documentNav.canGoPrev}
-                    onClick={documentNav.onPrev}
-                    aria-label="Documento anterior"
-                  >
-                    <ChevronLeft className="h-4 w-4 sm:h-4 sm:w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Documento anterior</TooltipContent>
-              </Tooltip>
-              {documentNav.navLabel && (
-                <span className="min-w-[3.5rem] sm:min-w-[4rem] text-center text-xs text-muted-foreground shrink-0">
-                  {documentNav.navLabel}
-                </span>
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 rounded-lg"
-                    disabled={!documentNav.canGoNext}
-                    onClick={documentNav.onNext}
-                    aria-label="Próximo documento"
-                  >
-                    <ChevronRight className="h-4 w-4 sm:h-4 sm:w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Próximo documento</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 rounded-lg"
+              disabled={!documentNav.canGoPrev}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runDocNav(documentNav.onPrev);
+              }}
+              aria-label="Documento anterior"
+            >
+              <ChevronLeft className="h-4 w-4 sm:h-4 sm:w-4" />
+            </Button>
+            {documentNav.navLabel && (
+              <span className="min-w-[3.5rem] sm:min-w-[4rem] text-center text-xs text-muted-foreground shrink-0">
+                {documentNav.navLabel}
+              </span>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 rounded-lg"
+              disabled={!documentNav.canGoNext}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runDocNav(documentNav.onNext);
+              }}
+              aria-label="Próximo documento"
+            >
+              <ChevronRight className="h-4 w-4 sm:h-4 sm:w-4" />
+            </Button>
           </div>
         )}
 

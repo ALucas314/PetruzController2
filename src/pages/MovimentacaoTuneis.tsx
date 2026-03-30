@@ -92,6 +92,15 @@ function round2(n: number): number {
   return Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
 }
 
+/** Valores possíveis de Status do Túnel no relatório por túnel (para filtro). */
+const RELATORIO_POR_TUNEL_STATUS_FILTRO: readonly string[] = [
+  "Nenhuma transação",
+  "Túnel em Manutenção",
+  "Túnel alagado",
+  "Túnel ocupado",
+  "Túnel ativo - Aberto",
+];
+
 function toDateTime(dateIso: string | null, timeRaw: string | null): Date | null {
   if (!dateIso) return null;
   const day = String(dateIso).split("T")[0];
@@ -261,6 +270,15 @@ export default function MovimentacaoTuneis() {
   const [filtroFilialPending, setFiltroFilialPending] = useState("");
   const [filtroDataInicioPending, setFiltroDataInicioPending] = useState("");
   const [filtroDataFimPending, setFiltroDataFimPending] = useState("");
+  /** Relatório por túnel: filtros extras (aplicados após Filtrar). */
+  const [filtroRelPorTunelStatus, setFiltroRelPorTunelStatus] = useState("");
+  /** Código numérico do túnel como string, ex. "7", ou vazio = todos. */
+  const [filtroRelPorTunelCodigo, setFiltroRelPorTunelCodigo] = useState("");
+  const [filtroRelPorTunelStatusPending, setFiltroRelPorTunelStatusPending] = useState("");
+  const [filtroRelPorTunelCodigoPending, setFiltroRelPorTunelCodigoPending] = useState("");
+  /** Relatório previsto: número do documento (aplicado na grade; não altera a API). */
+  const [filtroRelPrevistoNumeroDoc, setFiltroRelPrevistoNumeroDoc] = useState("");
+  const [filtroRelPrevistoNumeroDocPending, setFiltroRelPrevistoNumeroDocPending] = useState("");
 
   const tuneisDaFilial = useMemo(
     () => tuneis.filter((t) => t.filial === form.filialNome).sort((a, b) => Number(a.code) - Number(b.code)),
@@ -280,7 +298,7 @@ export default function MovimentacaoTuneis() {
     for (const t of tiposProduto) map.set(`${t.filial}|${String(t.code)}`, t);
     return map;
   }, [tiposProduto]);
-  const analysisRows = useMemo(() => {
+  const analysisRowsBase = useMemo(() => {
     return rows.map((row) => {
       const tunel = tuneisByKey.get(`${row.filialNome}|${String(row.codigoTunel)}`);
       const tipo = tiposByKey.get(`${row.filialNome}|${String(row.codigoTipoProduto)}`);
@@ -359,7 +377,14 @@ export default function MovimentacaoTuneis() {
       };
     });
   }, [rows, tuneisByKey, tiposByKey]);
-  const relatorioPorTunelRows = useMemo(() => {
+
+  const analysisRows = useMemo(() => {
+    const want = normalizeCodigoDocumento(filtroRelPrevistoNumeroDoc);
+    if (!want) return analysisRowsBase;
+    return analysisRowsBase.filter((a) => Number(a.row.numeroDocumento || 0) === want);
+  }, [analysisRowsBase, filtroRelPrevistoNumeroDoc]);
+
+  const relatorioPorTunelRowsBase = useMemo(() => {
     const tuneisFiltrados = filtroFilial
       ? tuneis.filter((t) => t.filial === filtroFilial)
       : tuneis;
@@ -437,6 +462,27 @@ export default function MovimentacaoTuneis() {
       })
       .sort((a, b) => a.codigoTunel - b.codigoTunel);
   }, [tuneis, rows, filtroFilial]);
+
+  const relatorioPorTunelRows = useMemo(() => {
+    return relatorioPorTunelRowsBase.filter((r) => {
+      if (filtroRelPorTunelStatus && r.statusTunel !== filtroRelPorTunelStatus) return false;
+      if (filtroRelPorTunelCodigo) {
+        const want = Number(filtroRelPorTunelCodigo);
+        if (!Number.isFinite(want) || r.codigoTunel !== want) return false;
+      }
+      return true;
+    });
+  }, [relatorioPorTunelRowsBase, filtroRelPorTunelStatus, filtroRelPorTunelCodigo]);
+
+  const relPorTunelCodigosSelect = useMemo(() => {
+    const base = filtroFilialPending ? tuneis.filter((t) => t.filial === filtroFilialPending) : tuneis;
+    const s = new Set<number>();
+    for (const t of base) {
+      const n = Number(t.code || 0);
+      if (n > 0) s.add(n);
+    }
+    return Array.from(s).sort((a, b) => a - b);
+  }, [tuneis, filtroFilialPending]);
 
   const relatorioPorTunelTotals = useMemo(() => {
     return relatorioPorTunelRows.reduce(
@@ -529,7 +575,7 @@ export default function MovimentacaoTuneis() {
     };
   }, []);
 
-  async function aplicarFiltros() {
+  async function aplicarFiltros(options?: { aplicarNumeroDocPrevisto?: boolean }) {
     try {
       setLoading(true);
       const dataInicioNorm = filtroDataInicioPending || filtroDataFimPending || "";
@@ -543,6 +589,9 @@ export default function MovimentacaoTuneis() {
       setFiltroFilial(filtroFilialPending);
       setFiltroDataInicio(dataInicioNorm);
       setFiltroDataFim(dataFimNorm);
+      if (options?.aplicarNumeroDocPrevisto) {
+        setFiltroRelPrevistoNumeroDoc(filtroRelPrevistoNumeroDocPending.trim());
+      }
       setFiltrosDialogOpen(false);
       setActiveTab("analise");
       // Mantém "por túnel" ou "previsto" se o filtro foi aplicado já na aba de relatórios; só força previsto vindo da movimentação ou do menu.
@@ -568,6 +617,8 @@ export default function MovimentacaoTuneis() {
         dataFim: "",
       });
       setFiltroFilial(filtroFilialPending);
+      setFiltroRelPorTunelStatus(filtroRelPorTunelStatusPending);
+      setFiltroRelPorTunelCodigo(filtroRelPorTunelCodigoPending);
       setFiltroDataInicio("");
       setFiltroDataFim("");
       setFiltroDataInicioPending("");
@@ -702,14 +753,39 @@ export default function MovimentacaoTuneis() {
     }
   }
 
+  const rowsNavRef = useRef(rows);
+  rowsNavRef.current = rows;
+  const formIdNavRef = useRef(form.id);
+  formIdNavRef.current = form.id;
+  const onEditarNavRef = useRef(onEditar);
+  onEditarNavRef.current = onEditar;
+  const onNovoDocumentoNavRef = useRef(onNovoDocumento);
+  onNovoDocumentoNavRef.current = onNovoDocumento;
+
   useEffect(() => {
     if (!filtrosDialogOpen) return;
     setFiltroFilialPending(filtroFilial);
     setFiltroDataInicioPending(filtroDataInicio);
     setFiltroDataFimPending(filtroDataFim);
-  }, [filtrosDialogOpen, filtroFilial, filtroDataInicio, filtroDataFim]);
+    setFiltroRelPorTunelStatusPending(filtroRelPorTunelStatus);
+    setFiltroRelPorTunelCodigoPending(filtroRelPorTunelCodigo);
+    setFiltroRelPrevistoNumeroDocPending(filtroRelPrevistoNumeroDoc);
+  }, [
+    filtrosDialogOpen,
+    filtroFilial,
+    filtroDataInicio,
+    filtroDataFim,
+    filtroRelPorTunelStatus,
+    filtroRelPorTunelCodigo,
+    filtroRelPrevistoNumeroDoc,
+  ]);
 
   useEffect(() => {
+    if (activeTab !== "movimentacao") {
+      setDocumentNav(null);
+      return;
+    }
+
     const total = rows.length;
     const currentIndex = form.id != null ? rows.findIndex((r) => r.id === form.id) : -1;
     const hasCurrent = currentIndex >= 0;
@@ -719,27 +795,37 @@ export default function MovimentacaoTuneis() {
       canGoPrev: total > 0 && (hasCurrent ? currentIndex > 0 : true),
       canGoNext: total > 0 && (hasCurrent ? currentIndex < total - 1 : true),
       onPrev: () => {
-        if (total === 0) return;
-        if (!hasCurrent) {
-          onEditar(rows[total - 1]);
+        const r = rowsNavRef.current;
+        const fid = formIdNavRef.current;
+        const t = r.length;
+        const ci = fid != null ? r.findIndex((x) => x.id === fid) : -1;
+        const hc = ci >= 0;
+        if (t === 0) return;
+        if (!hc) {
+          onEditarNavRef.current(r[t - 1]);
           return;
         }
-        if (currentIndex > 0) onEditar(rows[currentIndex - 1]);
+        if (ci > 0) onEditarNavRef.current(r[ci - 1]);
       },
       onNext: () => {
-        if (total === 0) return;
-        if (!hasCurrent) {
-          onEditar(rows[0]);
+        const r = rowsNavRef.current;
+        const fid = formIdNavRef.current;
+        const t = r.length;
+        const ci = fid != null ? r.findIndex((x) => x.id === fid) : -1;
+        const hc = ci >= 0;
+        if (t === 0) return;
+        if (!hc) {
+          onEditarNavRef.current(r[0]);
           return;
         }
-        if (currentIndex < total - 1) onEditar(rows[currentIndex + 1]);
+        if (ci < t - 1) onEditarNavRef.current(r[ci + 1]);
       },
-      onNewDocument: onNovoDocumento,
+      onNewDocument: () => onNovoDocumentoNavRef.current(),
       navLabel: total > 0 ? `${hasCurrent ? currentIndex + 1 : 1} de ${total}` : "0 de 0",
     });
 
     return () => setDocumentNav(null);
-  }, [rows, form.id, setDocumentNav]);
+  }, [activeTab, rows, form.id, setDocumentNav]);
 
   return (
     <AppLayout>
@@ -1276,6 +1362,18 @@ export default function MovimentacaoTuneis() {
                                   <Label>Data final</Label>
                                   <Input type="date" value={filtroDataFimPending} onChange={(e) => setFiltroDataFimPending(e.target.value)} />
                                 </div>
+                                <div className="space-y-1.5">
+                                  <Label htmlFor="rel-previsto-num-doc">Número do documento</Label>
+                                  <Input
+                                    id="rel-previsto-num-doc"
+                                    type="number"
+                                    min={1}
+                                    placeholder="Todos"
+                                    value={filtroRelPrevistoNumeroDocPending}
+                                    onChange={(e) => setFiltroRelPrevistoNumeroDocPending(e.target.value)}
+                                    className="h-9 text-sm tabular-nums"
+                                  />
+                                </div>
                               </div>
                               <div className="flex gap-2">
                                 <Button
@@ -1286,6 +1384,7 @@ export default function MovimentacaoTuneis() {
                                     setFiltroFilialPending("");
                                     setFiltroDataInicioPending("");
                                     setFiltroDataFimPending("");
+                                    setFiltroRelPrevistoNumeroDocPending("");
                                   }}
                                 >
                                   Limpar
@@ -1293,7 +1392,7 @@ export default function MovimentacaoTuneis() {
                                 <Button
                                   type="button"
                                   className="flex-1 h-9 bg-primary text-primary-foreground hover:bg-primary/90"
-                                  onClick={() => void aplicarFiltros()}
+                                  onClick={() => void aplicarFiltros({ aplicarNumeroDocPrevisto: true })}
                                 >
                                   Filtrar
                                 </Button>
@@ -1308,6 +1407,13 @@ export default function MovimentacaoTuneis() {
                             <div className="flex flex-col items-center justify-center py-10 text-center">
                               <AlertCircle className="h-10 w-10 text-muted-foreground mb-2" />
                               <p className="text-sm text-muted-foreground">Nenhuma movimentação encontrada para o período.</p>
+                            </div>
+                          ) : analysisRows.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-10 text-center">
+                              <AlertCircle className="h-10 w-10 text-muted-foreground mb-2" />
+                              <p className="text-sm text-muted-foreground">
+                                Nenhuma linha corresponde ao número do documento informado.
+                              </p>
                             </div>
                           ) : (
                             <Table className="min-w-[190rem]">
@@ -1426,18 +1532,73 @@ export default function MovimentacaoTuneis() {
                               <DialogHeader>
                                 <DialogTitle className="text-base">Filtros — Relatório por Túnel</DialogTitle>
                                 <DialogDescription className="text-sm text-muted-foreground">
-                                  Filtre por filial. As movimentações são carregadas sem período (últimos registros, conforme limite do sistema).
+                                  Filial recarrega as movimentações (sem período, conforme limite do sistema). Status e código do túnel filtram a grade abaixo.
                                 </DialogDescription>
                               </DialogHeader>
                               <div className="grid gap-3 py-2">
                                 <div className="space-y-1.5">
                                   <Label>Filial</Label>
-                                  <Select value={filtroFilialPending || "__todas__"} onValueChange={(v) => setFiltroFilialPending(v === "__todas__" ? "" : v)}>
+                                  <Select
+                                    value={filtroFilialPending || "__todas__"}
+                                    onValueChange={(v) => {
+                                      const nome = v === "__todas__" ? "" : v;
+                                      setFiltroFilialPending(nome);
+                                      if (filtroRelPorTunelCodigoPending) {
+                                        const c = Number(filtroRelPorTunelCodigoPending);
+                                        const existe = tuneis.some(
+                                          (t) => (!nome || t.filial === nome) && Number(t.code || 0) === c
+                                        );
+                                        if (!Number.isFinite(c) || !existe) setFiltroRelPorTunelCodigoPending("");
+                                      }
+                                    }}
+                                  >
                                     <SelectTrigger><SelectValue placeholder="Todas as filiais" /></SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="__todas__">Todas as filiais</SelectItem>
                                       {filiais.map((f) => (
                                         <SelectItem key={f.id} value={f.nome}>{f.nome}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <Label>Status do túnel</Label>
+                                  <Select
+                                    value={filtroRelPorTunelStatusPending || "__todos_status__"}
+                                    onValueChange={(v) =>
+                                      setFiltroRelPorTunelStatusPending(v === "__todos_status__" ? "" : v)
+                                    }
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Todos" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__todos_status__">Todos</SelectItem>
+                                      {RELATORIO_POR_TUNEL_STATUS_FILTRO.map((s) => (
+                                        <SelectItem key={s} value={s}>
+                                          {s}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <Label>Código do túnel</Label>
+                                  <Select
+                                    value={filtroRelPorTunelCodigoPending || "__todos_cod__"}
+                                    onValueChange={(v) =>
+                                      setFiltroRelPorTunelCodigoPending(v === "__todos_cod__" ? "" : v)
+                                    }
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Todos" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="__todos_cod__">Todos</SelectItem>
+                                      {relPorTunelCodigosSelect.map((c) => (
+                                        <SelectItem key={c} value={String(c)}>
+                                          {String(c).padStart(4, "0")}
+                                        </SelectItem>
                                       ))}
                                     </SelectContent>
                                   </Select>
@@ -1448,7 +1609,11 @@ export default function MovimentacaoTuneis() {
                                   type="button"
                                   variant="outline"
                                   className="flex-1 h-9"
-                                  onClick={() => setFiltroFilialPending("")}
+                                  onClick={() => {
+                                    setFiltroFilialPending("");
+                                    setFiltroRelPorTunelStatusPending("");
+                                    setFiltroRelPorTunelCodigoPending("");
+                                  }}
                                 >
                                   Limpar
                                 </Button>

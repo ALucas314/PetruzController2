@@ -847,6 +847,11 @@ export default function PlanejamentoProducao() {
     return list;
   }, [registrosNavegacao, filialFiltro, getDocKey]);
 
+  const documentosParaNavegacaoRef = useRef(documentosParaNavegacao);
+  documentosParaNavegacaoRef.current = documentosParaNavegacao;
+  const selectedDocKeyNavRef = useRef<string | null>(selectedDocKey);
+  selectedDocKeyNavRef.current = selectedDocKey;
+
   /**
    * Com a tabela aberta: garante documento selecionado para KPIs/rodapé.
    * Com o grid aberto (após Filtrar): não força seleção — o usuário escolhe o card.
@@ -1266,9 +1271,12 @@ export default function PlanejamentoProducao() {
       canGoPrev,
       canGoNext,
       onPrev: () => {
-        if (idx > 0) {
+        const list = documentosParaNavegacaoRef.current;
+        const key = selectedDocKeyNavRef.current;
+        const i = key ? list.findIndex((d) => d.key === key) : -1;
+        if (i > 0) {
           setNewDocumentIndex(null);
-          const target = documentosParaNavegacao[idx - 1];
+          const target = list[i - 1];
           const launchDay = addCalendarDays(target.data_dia, -1);
           setDataFiltro(launchDay);
           setDataFiltroPara(launchDay);
@@ -1277,9 +1285,12 @@ export default function PlanejamentoProducao() {
         }
       },
       onNext: () => {
-        if (idx >= 0 && idx < documentosParaNavegacao.length - 1) {
+        const list = documentosParaNavegacaoRef.current;
+        const key = selectedDocKeyNavRef.current;
+        const i = key ? list.findIndex((d) => d.key === key) : -1;
+        if (i >= 0 && i < list.length - 1) {
           setNewDocumentIndex(null);
-          const target = documentosParaNavegacao[idx + 1];
+          const target = list[i + 1];
           const launchDay = addCalendarDays(target.data_dia, -1);
           setDataFiltro(launchDay);
           setDataFiltroPara(launchDay);
@@ -1291,7 +1302,7 @@ export default function PlanejamentoProducao() {
       navLabel: `${current} de ${total}`,
     });
     return () => setDocumentNav(null);
-  }, [documentosParaNavegacao, selectedDocKey, newDocumentIndex, registrosExibidos.length, createNewDocument, setDocumentNav]);
+  }, [documentosParaNavegacao, selectedDocKey, newDocumentIndex, createNewDocument, setDocumentNav]);
 
   useEffect(() => {
     return () => {
