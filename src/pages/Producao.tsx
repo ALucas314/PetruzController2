@@ -49,6 +49,7 @@ import {
   saveDraft,
   getProducaoHistory,
   getOcphDocIdsComBiHoraria,
+  getBiHorariaResumoPorPeriodo,
   getDashboardStats,
   subscribeOCPDRealtime,
   getOCTPByInicio,
@@ -608,6 +609,20 @@ function Producao() {
   const [gridFiltrosDialogOpen, setGridFiltrosDialogOpen] = useState(false);
   const [gridDataDePending, setGridDataDePending] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [gridDataAtePending, setGridDataAtePending] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [biChartDataDe, setBiChartDataDe] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [biChartDataAte, setBiChartDataAte] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [biChartFilial, setBiChartFilial] = useState<string>("");
+  const [biChartTipoTurno, setBiChartTipoTurno] = useState<"todos" | "1" | "2" | "3">("todos");
+  const [biChartFiltrosDialogOpen, setBiChartFiltrosDialogOpen] = useState(false);
+  const [biChartDataDeApplied, setBiChartDataDeApplied] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [biChartDataAteApplied, setBiChartDataAteApplied] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [biChartFilialApplied, setBiChartFilialApplied] = useState<string>("");
+  const [biChartTipoTurnoApplied, setBiChartTipoTurnoApplied] = useState<"todos" | "1" | "2" | "3">("todos");
+  const [biChartFiltroAplicado, setBiChartFiltroAplicado] = useState(false);
+  const [biHorariaChartLoading, setBiHorariaChartLoading] = useState(false);
+  const [biHorariaRealizadoPorTurnoFiltrado, setBiHorariaRealizadoPorTurnoFiltrado] = useState<
+    Array<{ name: string; valor: number; percentual: number }>
+  >([]);
 
   /** Botão que abre o modal de filtros (grid de produção) — mesmo visual em Acompanhamento e Bi-horária */
   const producaoFiltrosTriggerClassName =
@@ -696,17 +711,27 @@ function Producao() {
     if (typeof dateValue === "string") return dateValue.split("T")[0];
     return new Date(dateValue).toISOString().split("T")[0];
   };
+  // Base do grid: na Bi-horária mostra somente docs com registro na OCPH.
+  const baseRecordsForGrid = useMemo(() => {
+    if (currentView === "bihoraria") {
+      return allRecords.filter(
+        (r) => r.doc_id != null && String(r.doc_id).trim() !== "" && ocphDocIdsComBi.has(String(r.doc_id))
+      );
+    }
+    return allRecords;
+  }, [allRecords, currentView, ocphDocIdsComBi]);
+
   // Documentos no intervalo aplicado (De/Até) — só atualiza ao clicar em Filtrar
   const documentsForSelectedDate = useMemo(() => {
-    if (!gridDataDeApplied || !gridDataAteApplied || !allRecords.length) return [];
+    if (!gridDataDeApplied || !gridDataAteApplied || !baseRecordsForGrid.length) return [];
     const de = gridDataDeApplied.split("T")[0];
     const ate = gridDataAteApplied.split("T")[0];
-    return allRecords.filter((r) => {
+    return baseRecordsForGrid.filter((r) => {
       const dateStr = normalizeDataDia(r.data_dia || r.data_cabecalho || r.data);
       if (!dateStr) return false;
       return dateStr >= de && dateStr <= ate;
     });
-  }, [allRecords, gridDataDeApplied, gridDataAteApplied]);
+  }, [baseRecordsForGrid, gridDataDeApplied, gridDataAteApplied]);
 
   // Grid: documentos no período, opcionalmente filtrados por filial e por número de documento
   const gridFilteredDocuments = useMemo(() => {
@@ -719,13 +744,13 @@ function Producao() {
     const num = parseInt(gridFilterNumeroDocApplied.trim(), 10);
     if (Number.isNaN(num) || num < 1) return list;
     return list.filter((record) => {
-      const globalIndex = allRecords.findIndex(
+      const globalIndex = baseRecordsForGrid.findIndex(
         (r) => (r.recordKey && record.recordKey && r.recordKey === record.recordKey) || (r.id === record.id && (r.doc_id ?? null) === (record.doc_id ?? null))
       );
       const numeroRegistro = globalIndex >= 0 ? globalIndex + 1 : 0;
       return numeroRegistro === num;
     });
-  }, [documentsForSelectedDate, gridFilialFilterApplied, gridFilterNumeroDocApplied, allRecords]);
+  }, [documentsForSelectedDate, gridFilialFilterApplied, gridFilterNumeroDocApplied, baseRecordsForGrid]);
 
   // OCTP (Problema, Ação, Responsável, Início, Hora inicial, Hora final, Intervalo, Status)
   const [octpItems, setOctpItems] = useState<OCTPItem[]>([]);
@@ -1695,10 +1720,54 @@ function Producao() {
     }));
   }, [biHorariaRegistros]);
 
-  /** Total realizado somando todos os turnos exibidos no gráfico (3 barras). */
-  const totalBiHorariaRealizadoPorTurno = useMemo(
+  useEffect(() => {
+    if (currentView !== "bihoraria") return;
+    if (!biChartFiltroAplicado) {
+      setBiHorariaRealizadoPorTurnoFiltrado([]);
+      setBiHorariaChartLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        setBiHorariaChartLoading(true);
+        const rows = await getBiHorariaResumoPorPeriodo({
+          dataInicio: biChartDataDeApplied,
+          dataFim: biChartDataAteApplied,
+          filialNome: biChartFilialApplied || undefined,
+          tipoTurno: biChartTipoTurnoApplied,
+        });
+        if (!cancelled) setBiHorariaRealizadoPorTurnoFiltrado(rows);
+      } catch (error) {
+        if (!cancelled) {
+          setBiHorariaRealizadoPorTurnoFiltrado([]);
+          const msg = error instanceof Error ? error.message : "Erro ao filtrar gráfico bi-horária.";
+          toast({ title: "Erro no gráfico", description: msg, variant: "destructive" });
+        }
+      } finally {
+        if (!cancelled) setBiHorariaChartLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentView, biChartFiltroAplicado, biChartDataDeApplied, biChartDataAteApplied, biChartFilialApplied, biChartTipoTurnoApplied, toast]);
+
+  const biHorariaRealizadoPorTurnoChart = useMemo(
+    () => (biChartFiltroAplicado ? biHorariaRealizadoPorTurnoFiltrado : biHorariaRealizadoPorTurno),
+    [biChartFiltroAplicado, biHorariaRealizadoPorTurnoFiltrado, biHorariaRealizadoPorTurno]
+  );
+
+  /** Total normal do documento (sem filtros do gráfico). */
+  const totalBiHorariaRealizadoPorTurnoBase = useMemo(
     () => biHorariaRealizadoPorTurno.reduce((sum, r) => sum + (r.valor ?? 0), 0),
     [biHorariaRealizadoPorTurno]
+  );
+
+  /** Total exibido no gráfico (filtrado quando o filtro do gráfico estiver aplicado). */
+  const totalBiHorariaRealizadoPorTurno = useMemo(
+    () => biHorariaRealizadoPorTurnoChart.reduce((sum, r) => sum + (r.valor ?? 0), 0),
+    [biHorariaRealizadoPorTurnoChart]
   );
 
   // Calcular totais da produção
@@ -3321,7 +3390,7 @@ function Producao() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <KpiCard
           title="Total Qtd. realizada"
-          value={formatTotal(totalBiHorariaRealizadoPorTurno)}
+          value={formatTotal(totalBiHorariaRealizadoPorTurnoBase)}
           icon={ClipboardList}
         />
       </div>
@@ -3414,16 +3483,33 @@ function Producao() {
             className="shrink-0 w-full sm:w-auto min-h-[44px] sm:min-h-0"
           />
         </div>
+        <div className="mb-4 flex justify-end">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setBiChartFiltrosDialogOpen(true);
+            }}
+            className="inline-flex items-center justify-center gap-2 h-11 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 w-full sm:w-auto"
+            aria-label="Abrir filtros do gráfico"
+            aria-haspopup="dialog"
+            aria-expanded={biChartFiltrosDialogOpen}
+          >
+            <Filter className="h-4 w-4 shrink-0" />
+            <span>Filtros</span>
+          </button>
+        </div>
         <div
           className="dashboard-linha-chart dashboard-linha-chart-wrap rounded-xl p-3 sm:p-4"
           style={{
-            height: Math.min(320, Math.max(200, biHorariaRealizadoPorTurno.length * (linhaBarSize * 2 + 32))),
+            height: Math.min(320, Math.max(200, biHorariaRealizadoPorTurnoChart.length * (linhaBarSize * 2 + 32))),
           }}
         >
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               layout="vertical"
-              data={biHorariaRealizadoPorTurno}
+              data={biHorariaRealizadoPorTurnoChart}
               margin={{ top: 8, right: 52, left: 4, bottom: 8 }}
               barCategoryGap={18}
             >
@@ -3522,9 +3608,7 @@ function Producao() {
 
                     // Em barras pequenas, usa rótulo compacto para não "vazar" do SVG.
                     if (width < 18) return null;
-                    const text = width < 32
-                      ? `${Math.round(value)}%`
-                      : `${value.toFixed(1).replace(".", ",")}%`;
+                    const text = `${Math.round(value)}%`;
 
                     return (
                       <text
@@ -3917,7 +4001,155 @@ function Producao() {
                   <p className="text-sm font-medium">{saveStatus.message}</p>
                 </div>
               )}
-              {biHorariaBlock}
+              {showDocumentGridForDate ? (
+                <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card/90 via-card/95 to-card backdrop-blur-sm p-4 sm:p-5 lg:p-6 shadow-[0_4px_20px_rgba(0,0,0,0.1)] space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[auto_auto_auto_1fr] gap-3 items-end">
+                    <div className="flex flex-col gap-1.5 w-full sm:min-w-[140px] sm:max-w-[180px]">
+                      <Label className="text-xs font-medium text-muted-foreground">De</Label>
+                      <DatePicker
+                        value={gridDataDe}
+                        onChange={(v) => v && setGridDataDe(v)}
+                        placeholder="Data inicial"
+                        className="w-full"
+                        triggerClassName="h-9 w-full min-w-0 text-sm"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5 w-full sm:min-w-[140px] sm:max-w-[180px]">
+                      <Label className="text-xs font-medium text-muted-foreground">Até</Label>
+                      <DatePicker
+                        value={gridDataAte}
+                        onChange={(v) => v && setGridDataAte(v)}
+                        placeholder="Data final"
+                        className="w-full"
+                        triggerClassName="h-9 w-full min-w-0 text-sm"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5 w-full sm:min-w-[140px] sm:max-w-[180px]">
+                      <Label className="text-xs font-medium text-muted-foreground">Filial</Label>
+                      <Select
+                        value={gridFilialFilter || "__todos__"}
+                        onValueChange={(v) => setGridFilialFilter(v === "__todos__" ? "" : v)}
+                      >
+                        <SelectTrigger className="h-9 w-full text-sm">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__todos__">Todos</SelectItem>
+                          {filiais.map((f) => (
+                            <SelectItem key={f.id} value={(f.nome || "").trim()}>
+                              {(f.nome || "").trim()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:justify-end sm:shrink-0">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-9 gap-2 w-full sm:w-auto"
+                        onClick={() => {
+                          setGridDataDeApplied(gridDataDe);
+                          setGridDataAteApplied(gridDataAte);
+                          setGridFilialFilterApplied(gridFilialFilter);
+                          setGridFilterNumeroDocApplied(gridFilterNumeroDoc.trim());
+                        }}
+                      >
+                        <Filter className="h-4 w-4" />
+                        Filtrar
+                      </Button>
+                      {(gridFilterNumeroDocApplied || gridFilialFilterApplied || gridCodigoItemApplied || gridLinhaFilterApplied) && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 w-full sm:w-auto text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            setGridFilterNumeroDoc("");
+                            setGridFilterNumeroDocApplied("");
+                            setGridFilialFilter("");
+                            setGridFilialFilterApplied("");
+                            setGridCodigoItem("");
+                            setGridCodigoItemApplied("");
+                            setGridLinhaFilter("");
+                            setGridLinhaFilterApplied("");
+                          }}
+                        >
+                          Limpar
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {gridFilteredDocuments.map((record, index) => {
+                      const globalIndex = baseRecordsForGrid.findIndex(
+                        (r) => (r.recordKey && record.recordKey && r.recordKey === record.recordKey) || (r.id === record.id && (r.doc_id ?? null) === (record.doc_id ?? null))
+                      );
+                      const recordDate = record.data_dia || record.data_cabecalho || record.data;
+                      const dateStr = recordDate ? (typeof recordDate === "string" ? recordDate.split("T")[0] : new Date(recordDate).toISOString().split("T")[0]) : "";
+                      return (
+                        <div
+                          key={record.recordKey ?? `${record.id}-${record.doc_id ?? "legacy"}`}
+                          onClick={() => {
+                            if (globalIndex >= 0) {
+                              loadRecordByIndex(globalIndex);
+                              setShowDocumentGridForDate(false);
+                            }
+                          }}
+                          className="group relative rounded-xl border border-border/50 bg-card/95 hover:border-primary/40 hover:bg-muted/60 hover:shadow-md transition-all duration-300 p-4 sm:p-5 cursor-pointer"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex min-w-[3.5rem] sm:min-w-[4rem] shrink-0 flex-col items-center justify-center rounded-lg bg-primary/10 border border-primary/20 text-primary py-1.5">
+                              <span className="text-[10px] font-bold leading-tight">N°</span>
+                              <span className="text-sm font-bold tabular-nums">{globalIndex >= 0 ? globalIndex + 1 : index + 1}</span>
+                              <span className="text-[10px] text-muted-foreground mt-0.5">de {baseRecordsForGrid.length}</span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-foreground truncate">
+                                {(record.filial_nome || "").trim() || "Sem filial"}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {dateStr ? formatDate(parseDateString(dateStr)) : ""}
+                              </p>
+                              {(record.doc_numero != null || record.doc_id) && (
+                                <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono truncate">
+                                  Doc. {record.doc_numero != null ? record.doc_numero : String(record.doc_id).slice(0, 8) + "…"}
+                                </p>
+                              )}
+                            </div>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0 mt-1" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div
+                      onClick={() => {
+                        documentNav?.onNewDocument?.();
+                        setShowDocumentGridForDate(false);
+                      }}
+                      className="group relative rounded-xl border border-dashed border-primary/40 bg-primary/5 hover:bg-muted/60 hover:border-primary/60 transition-all duration-300 p-4 sm:p-5 cursor-pointer flex flex-col items-center justify-center min-h-[100px]"
+                    >
+                      <FilePlus className="h-8 w-8 text-primary mb-2" />
+                      <span className="text-sm font-semibold text-primary">Novo documento</span>
+                    </div>
+                  </div>
+
+                  {documentsForSelectedDate.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Nenhum documento nesta data. Clique em &quot;Novo documento&quot; para criar.
+                    </p>
+                  )}
+                  {documentsForSelectedDate.length > 0 && (gridFilterNumeroDocApplied || gridFilialFilterApplied || gridCodigoItemApplied || gridLinhaFilterApplied) && gridFilteredDocuments.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      Nenhum documento encontrado com os filtros aplicados. Use &quot;Limpar&quot; para ver todos.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                biHorariaBlock
+              )}
             </div>
           </div>
         </div>
@@ -4274,7 +4506,7 @@ function Producao() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {gridFilteredDocuments.map((record, index) => {
-                      const globalIndex = allRecords.findIndex(
+                      const globalIndex = baseRecordsForGrid.findIndex(
                         (r) => (r.recordKey && record.recordKey && r.recordKey === record.recordKey) || (r.id === record.id && (r.doc_id ?? null) === (record.doc_id ?? null))
                       );
                       const recordDate = record.data_dia || record.data_cabecalho || record.data;
@@ -4294,7 +4526,7 @@ function Producao() {
                             <div className="flex min-w-[3.5rem] sm:min-w-[4rem] shrink-0 flex-col items-center justify-center rounded-lg bg-primary/10 border border-primary/20 text-primary py-1.5">
                               <span className="text-[10px] font-bold leading-tight">N°</span>
                               <span className="text-sm font-bold tabular-nums">{globalIndex >= 0 ? globalIndex + 1 : index + 1}</span>
-                              <span className="text-[10px] text-muted-foreground mt-0.5">de {allRecords.length}</span>
+                              <span className="text-[10px] text-muted-foreground mt-0.5">de {baseRecordsForGrid.length}</span>
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="font-semibold text-foreground truncate">
@@ -6552,6 +6784,83 @@ function Producao() {
             </div>
             <Button type="button" onClick={applyGridFiltrosDialog} className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90">
               Filtrar
+            </Button>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={biChartFiltrosDialogOpen} onOpenChange={setBiChartFiltrosDialogOpen}>
+          <DialogContent className="w-[340px] sm:w-[420px] max-w-[95vw] p-4 rounded-lg" onClick={(e) => e.stopPropagation()}>
+            <DialogHeader>
+              <DialogTitle className="text-base">Filtros do gráfico bi-horária</DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground">
+                Filtre por período, filial e tipo de turno.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-3 py-2">
+              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                <Label className="text-xs text-muted-foreground">De</Label>
+                <DatePicker
+                  value={biChartDataDe}
+                  onChange={(v) => v && setBiChartDataDe(v.split("T")[0])}
+                  placeholder="Data inicial"
+                  className="min-w-0"
+                  triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                />
+              </div>
+              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                <Label className="text-xs text-muted-foreground">Até</Label>
+                <DatePicker
+                  value={biChartDataAte}
+                  onChange={(v) => v && setBiChartDataAte(v.split("T")[0])}
+                  placeholder="Data final"
+                  className="min-w-0"
+                  triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
+                />
+              </div>
+              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                <Label className="text-xs text-muted-foreground">Filial</Label>
+                <Select value={biChartFilial || "__todas__"} onValueChange={(v) => setBiChartFilial(v === "__todas__" ? "" : v)}>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Todas as filiais" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__todas__">Todas as filiais</SelectItem>
+                    {filiais.map((f) => (
+                      <SelectItem key={f.id} value={(f.nome || "").trim()}>
+                        {(f.nome || "").trim()}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                <Label className="text-xs text-muted-foreground">Tipo</Label>
+                <Select value={biChartTipoTurno} onValueChange={(v) => setBiChartTipoTurno(v as "todos" | "1" | "2" | "3")}>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Todos os turnos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos os turnos</SelectItem>
+                    <SelectItem value="1">1° turno</SelectItem>
+                    <SelectItem value="2">2° turno</SelectItem>
+                    <SelectItem value="3">3° turno</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Button
+              type="button"
+              onClick={() => {
+                setBiChartDataDeApplied(biChartDataDe);
+                setBiChartDataAteApplied(biChartDataAte);
+                setBiChartFilialApplied(biChartFilial);
+                setBiChartTipoTurnoApplied(biChartTipoTurno);
+                setBiChartFiltroAplicado(true);
+                setBiChartFiltrosDialogOpen(false);
+              }}
+              className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              {biHorariaChartLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Filtrar"}
             </Button>
           </DialogContent>
         </Dialog>

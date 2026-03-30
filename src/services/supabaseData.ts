@@ -72,6 +72,14 @@ export { getTuneis, createTunel, updateTunel, deleteTunel } from "./octt";
 export type { CDTPRow } from "./cdtp";
 export { getTiposProduto, createTipoProduto, updateTipoProduto, deleteTipoProduto } from "./cdtp";
 
+export type { OCMTRow } from "./ocmt";
+export {
+  getMovimentacoesTuneis,
+  createMovimentacaoTunel,
+  updateMovimentacaoTunel,
+  deleteMovimentacaoTunel,
+} from "./ocmt";
+
 // --- OCPP (Planejamento de Produção) ---
 // Schema real no Supabase: code (minúsculo), "Previsão_Latas" (com acento), filial_nome, doc_ordem_global, doc_numero
 const OCPP_SELECT_BASE =
@@ -746,6 +754,61 @@ export async function getOcphDocIdsComBiHoraria(): Promise<Set<string>> {
     .like("observacoes", "Bi-horária nº%");
   if (error) throw error;
   return new Set((data ?? []).map((r: { doc_id: string | null }) => String(r.doc_id ?? "")).filter(Boolean));
+}
+
+export async function getBiHorariaResumoPorPeriodo(params: {
+  dataInicio: string;
+  dataFim: string;
+  filialNome?: string | null;
+  tipoTurno?: "todos" | "1" | "2" | "3";
+}): Promise<Array<{ name: string; valor: number; percentual: number }>> {
+  const de = String(params.dataInicio || "").split("T")[0];
+  const ate = String(params.dataFim || "").split("T")[0];
+  if (!de || !ate) {
+    return [
+      { name: "1° turno", valor: 0, percentual: 0 },
+      { name: "2° turno", valor: 0, percentual: 0 },
+      { name: "3° turno", valor: 0, percentual: 0 },
+    ];
+  }
+
+  let q = supabase
+    .from("OCPH")
+    .select("turno, qtd_realizada")
+    .like("observacoes", "Bi-horária nº%")
+    .gte("data_dia", de)
+    .lte("data_dia", ate);
+
+  const filial = params.filialNome != null && String(params.filialNome).trim() !== "" ? String(params.filialNome).trim() : null;
+  if (filial) q = q.eq("filial_nome", filial);
+
+  const tipo = params.tipoTurno ?? "todos";
+  if (tipo !== "todos") q = q.eq("turno", Number(tipo));
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const acc = new Map<number, number>([
+    [1, 0],
+    [2, 0],
+    [3, 0],
+  ]);
+  for (const row of data ?? []) {
+    const r = row as Record<string, unknown>;
+    const turno = Number(r.turno ?? 0);
+    if (turno < 1 || turno > 3) continue;
+    const qtd = parseBrazilNumber(r.qtd_realizada ?? 0);
+    acc.set(turno, (acc.get(turno) ?? 0) + qtd);
+  }
+
+  const rows = ([1, 2, 3] as const)
+    .map((turno) => ({
+      name: `${turno}° turno`,
+      valor: acc.get(turno) ?? 0,
+    }))
+    .sort((a, b) => b.valor - a.valor);
+  const total = rows.reduce((s, r) => s + r.valor, 0);
+  return rows.map((r) => ({ ...r, percentual: total > 0 ? (r.valor / total) * 100 : 0 }));
 }
 
 // --- Produção save (payload no formato do frontend: quantidadePlanejada, codigoItem, etc.) ---

@@ -386,6 +386,7 @@ export default function PlanejamentoProducao() {
   const [filtroSolidosPending, setFiltroSolidosPending] = useState<number | "">("");
   const [filialFiltroPending, setFilialFiltroPending] = useState("");
   const [registros, setRegistros] = useState<OCPPRow[]>([]);
+  const [registrosNavegacao, setRegistrosNavegacao] = useState<OCPPRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [savingAll, setSavingAll] = useState(false);
@@ -497,9 +498,29 @@ export default function PlanejamentoProducao() {
     }
   }, [dataFiltro, dataFiltroPara, filialFiltro, productionLines]);
 
+  /** Carrega todos os registros (independente da data filtrada) para navegação no header com setas. */
+  const loadRegistrosNavegacao = useCallback(async () => {
+    try {
+      const bounds = await getOcppDateBounds(filialFiltro || undefined);
+      if (!bounds.minDate || !bounds.maxDate) {
+        setRegistrosNavegacao([]);
+        return;
+      }
+      const list = await getOcppByDateRange(bounds.minDate, bounds.maxDate, filialFiltro || undefined);
+      setRegistrosNavegacao(list.map((row) => normalizeRowUnitsAndDerivedFor(row, productionLines)));
+    } catch (e) {
+      console.error("Erro ao carregar navegação PCP:", e);
+      setRegistrosNavegacao([]);
+    }
+  }, [filialFiltro, productionLines]);
+
   useEffect(() => {
     loadRegistros();
   }, [loadRegistros]);
+
+  useEffect(() => {
+    loadRegistrosNavegacao();
+  }, [loadRegistrosNavegacao]);
 
   useEffect(() => {
     if (registros.length === 0 || productionLines.length === 0) return;
@@ -744,6 +765,49 @@ export default function PlanejamentoProducao() {
     });
     return list;
   }, [registrosBaseFilial, getDocKey]);
+
+  const documentosParaNavegacao = useMemo(() => {
+    const base = filialFiltro && registrosNavegacao.length > 0
+      ? registrosNavegacao.filter((r) => (r.filial_nome || "").trim() === filialFiltro)
+      : registrosNavegacao;
+    const map = new Map<
+      string,
+      {
+        key: string;
+        data_dia: string;
+        doc_numero: number | null;
+        doc_ordem_global: number | null;
+        filial_nome: string | null;
+        rows: OCPPRow[];
+      }
+    >();
+    base.forEach((r) => {
+      const key = getDocKey(r);
+      const day = r.data != null && String(r.data).trim() !== "" ? String(r.data).split("T")[0] : "";
+      const existing = map.get(key);
+      if (existing) existing.rows.push(r);
+      else map.set(key, {
+        key,
+        data_dia: day,
+        doc_numero: r.doc_numero ?? null,
+        doc_ordem_global: r.doc_ordem_global ?? null,
+        filial_nome: r.filial_nome ?? null,
+        rows: [r],
+      });
+    });
+    const list = Array.from(map.values());
+    list.sort((a, b) => {
+      const cmpData = (a.data_dia || "").localeCompare(b.data_dia || "");
+      if (cmpData !== 0) return cmpData;
+      const an = a.doc_numero ?? 0;
+      const bn = b.doc_numero ?? 0;
+      if (an !== bn) return an - bn;
+      const ao = a.doc_ordem_global ?? 0;
+      const bo = b.doc_ordem_global ?? 0;
+      return ao - bo;
+    });
+    return list;
+  }, [registrosNavegacao, filialFiltro, getDocKey]);
 
   /** Ao carregar os dados, abrir sempre o último documento (vista tabela) em vez do grid de cards. */
   useEffect(() => {
@@ -1117,7 +1181,7 @@ export default function PlanejamentoProducao() {
 
   /** Criar novo documento: limpa a lista; usa filial atual (ou filial do filtro) para o novo doc; alterar filial no header não filtra. */
   const createNewDocument = useCallback(() => {
-    const totalDocs = documentosDoPeriodo.length;
+    const totalDocs = documentosParaNavegacao.length;
     pendingNovoDocIdentityRef.current = null;
     setNewDocumentIndex(totalDocs + 1);
     setFilialNovoDocumento(filialFiltro || "");
@@ -1125,7 +1189,7 @@ export default function PlanejamentoProducao() {
     setSelectedDocKey(null);
     setShowDocumentGridForRange(false);
     toast({ title: "Novo documento", description: "Selecione a filial acima se quiser. Adicione linhas e salve." });
-  }, [documentosDoPeriodo.length, filialFiltro]);
+  }, [documentosParaNavegacao.length, filialFiltro]);
 
   /** Contagem para PCP por documento: "1 de 1" = um documento (com N linhas), "2 de 3" = segundo doc de três. Setas navegam entre documentos. */
   useEffect(() => {
@@ -1134,10 +1198,10 @@ export default function PlanejamentoProducao() {
     if (newDocumentIndex != null) {
       current = newDocumentIndex;
       total = newDocumentIndex;
-    } else if (documentosDoPeriodo.length > 0) {
-      total = documentosDoPeriodo.length;
+    } else if (documentosParaNavegacao.length > 0) {
+      total = documentosParaNavegacao.length;
       if (selectedDocKey) {
-        const idx = documentosDoPeriodo.findIndex((d) => d.key === selectedDocKey);
+        const idx = documentosParaNavegacao.findIndex((d) => d.key === selectedDocKey);
         current = idx >= 0 ? idx + 1 : 1;
       } else {
         current = total;
@@ -1146,9 +1210,9 @@ export default function PlanejamentoProducao() {
       total = 0;
       current = 0;
     }
-    const idx = selectedDocKey ? documentosDoPeriodo.findIndex((d) => d.key === selectedDocKey) : -1;
-    const canGoPrev = documentosDoPeriodo.length > 0 && idx > 0;
-    const canGoNext = documentosDoPeriodo.length > 0 && idx >= 0 && idx < documentosDoPeriodo.length - 1;
+    const idx = selectedDocKey ? documentosParaNavegacao.findIndex((d) => d.key === selectedDocKey) : -1;
+    const canGoPrev = documentosParaNavegacao.length > 0 && idx > 0;
+    const canGoNext = documentosParaNavegacao.length > 0 && idx >= 0 && idx < documentosParaNavegacao.length - 1;
     setDocumentNav({
       showNav: true,
       canGoPrev,
@@ -1156,14 +1220,20 @@ export default function PlanejamentoProducao() {
       onPrev: () => {
         if (idx > 0) {
           setNewDocumentIndex(null);
-          setSelectedDocKey(documentosDoPeriodo[idx - 1].key);
+          const target = documentosParaNavegacao[idx - 1];
+          setDataFiltro(target.data_dia);
+          setDataFiltroPara(target.data_dia);
+          setSelectedDocKey(target.key);
           setShowDocumentGridForRange(false);
         }
       },
       onNext: () => {
-        if (idx >= 0 && idx < documentosDoPeriodo.length - 1) {
+        if (idx >= 0 && idx < documentosParaNavegacao.length - 1) {
           setNewDocumentIndex(null);
-          setSelectedDocKey(documentosDoPeriodo[idx + 1].key);
+          const target = documentosParaNavegacao[idx + 1];
+          setDataFiltro(target.data_dia);
+          setDataFiltroPara(target.data_dia);
+          setSelectedDocKey(target.key);
           setShowDocumentGridForRange(false);
         }
       },
@@ -1171,7 +1241,7 @@ export default function PlanejamentoProducao() {
       navLabel: `${current} de ${total}`,
     });
     return () => setDocumentNav(null);
-  }, [documentosDoPeriodo, selectedDocKey, newDocumentIndex, registrosExibidos.length, createNewDocument, setDocumentNav]);
+  }, [documentosParaNavegacao, selectedDocKey, newDocumentIndex, registrosExibidos.length, createNewDocument, setDocumentNav]);
 
   useEffect(() => {
     return () => {
