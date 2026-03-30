@@ -134,7 +134,8 @@ function formatDateTime(date: Date | null): string {
 }
 
 function fmtHHMMFromHours(hoursRaw: number): string {
-  const totalMinutes = Math.max(0, Math.trunc(hoursRaw * 60));
+  /** Round evita 19.2×60 = 1151.999… com trunc → 19:11 em vez de 19:12 (paridade SAP). */
+  const totalMinutes = Math.max(0, Math.round(hoursRaw * 60));
   const hh = Math.floor(totalMinutes / 60) % 24;
   const mm = totalMinutes % 60;
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
@@ -345,11 +346,12 @@ export default function MovimentacaoTuneis() {
       const totalHoras =
         capacidade > 0 && ratio * 100 <= 100 ? tempoMaxCongHoras : capacidade > 0 ? Math.floor(tempoMaxCongHoras * ratio) : tempoMaxCongHoras;
 
+      /** Igual ao SAP: minutos = ((TempoMaxCong×ratio) − 24)×60 com CAST; não arredondar horas antes (evita 19:00 vs 19:12). */
       const tempoAdicionalHoras =
         capacidade > 0 && ratio * 100 <= 100
           ? Math.max(Math.floor(tempoMaxCongHoras - 24), 0)
           : capacidade > 0 && tempoMaxCongHoras * ratio > 24
-            ? Math.floor(tempoMaxCongHoras * ratio - 24)
+            ? tempoMaxCongHoras * ratio - 24
             : 0;
       const tempoAdicional = fmtHHMMFromHours(tempoAdicionalHoras);
 
@@ -414,8 +416,9 @@ export default function MovimentacaoTuneis() {
         const algumaPendenteExcedeCap = transacoesTunel.some(
           (r) => r.dataAbertura == null && parseBrazilNumber(r.qtdInserida || 0) > capacidade
         );
-        /** Última movimentação (maior doc) com quantidade acima da capacidade — vale mesmo com data abertura preenchida. */
-        const ultimaExcedeCap = capacidade > 0 && ult != null && qtdUlt > capacidade;
+        /** Última mov. (maior doc) excede capacidade e ainda está pendente de abertura. Se já abriu, deixa de ser “alagado” só por essa quantidade. */
+        const ultimaExcedeCap =
+          capacidade > 0 && ult != null && qtdUlt > capacidade && ult.dataAbertura == null;
         const alagado =
           statusOperacional !== "M" &&
           capacidade > 0 &&
