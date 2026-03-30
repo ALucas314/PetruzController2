@@ -87,9 +87,25 @@ export {
 } from "./ocmt";
 
 // --- OCPP (Planejamento de Produção) ---
-// Schema real no Supabase: code (minúsculo), "Previsão_Latas" (com acento), filial_nome, doc_ordem_global, doc_numero
-const OCPP_SELECT_BASE =
-  'id, data, op, filial_nome, doc_ordem_global, doc_numero, code, descricao, unidade, grupo, quantidade, quantidade_latas, "Previsão_Latas", quantidade_kg, tipo_fruto, tipo_linha, unidade_base, unidade_chapa, solidos, solid, quantidade_kg_tuneo, quantidade_liquida_prevista, cort_solid, t_cort, quantidade_basqueta, quantidade_chapa, latas, estrutura, basqueta, chapa, tuneo, qual_maquina, mao_de_obra, utilidade, estoque, timbragem, corte_reprocesso, observacao';
+// select('*') evita 400 quando o banco tem code vs "Code" ou previsao_latas vs "Previsão_Latas" (mapOcppRow normaliza).
+const OCPP_SELECT_ALL = "*";
+
+type OcppDbCols = { code: "Code" | "code"; previsao: "previsao_latas" | "Previsão_Latas" };
+let ocppDbColumns: OcppDbCols | null = null;
+
+/** Deduz nomes reais das colunas a partir da primeira linha retornada pelo PostgREST. */
+function syncOcppDbColumnsFromRow(r: Record<string, unknown>) {
+  if (ocppDbColumns !== null) return;
+  const hasQuotedCode = Object.prototype.hasOwnProperty.call(r, "Code");
+  const hasLowerCode = Object.prototype.hasOwnProperty.call(r, "code");
+  const code: "Code" | "code" =
+    hasQuotedCode ? "Code" : hasLowerCode ? "code" : "Code";
+  const hasPrevAccent = Object.prototype.hasOwnProperty.call(r, "Previsão_Latas");
+  const hasPrevSnake = Object.prototype.hasOwnProperty.call(r, "previsao_latas");
+  const previsao: "previsao_latas" | "Previsão_Latas" =
+    hasPrevAccent ? "Previsão_Latas" : hasPrevSnake ? "previsao_latas" : "previsao_latas";
+  ocppDbColumns = { code, previsao };
+}
 
 export interface OCPPRow {
   id: number;
@@ -163,6 +179,7 @@ export function addCalendarDays(isoDate: string, delta: number): string {
 }
 
 function mapOcppRow(r: Record<string, unknown>): OCPPRow {
+  syncOcppDbColumnsFromRow(r);
   return {
     id: Number(r.id),
     data: r.data ? String(r.data).split("T")[0] : "",
@@ -222,7 +239,7 @@ export async function getOcppByDateRange(
 
   let query = supabase
     .from("OCPP")
-    .select(OCPP_SELECT_BASE)
+    .select(OCPP_SELECT_ALL)
     .gte("data", dataDocInicio)
     .lte("data", dataDocFim)
     .order("data", { ascending: true })
@@ -232,6 +249,10 @@ export async function getOcppByDateRange(
   const { data, error } = await query;
   if (error) throw error;
   const rows = (data || []) as Record<string, unknown>[];
+  if (rows.length === 0 && ocppDbColumns === null) {
+    const probe = await supabase.from("OCPP").select(OCPP_SELECT_ALL).limit(1).maybeSingle();
+    if (!probe.error && probe.data) syncOcppDbColumnsFromRow(probe.data as Record<string, unknown>);
+  }
   return rows.map((r) => mapOcppRow(r));
 }
 
@@ -299,21 +320,29 @@ export type OCPPInsertPayload = {
   observacao?: string | null;
 };
 
-/** Row para insert/update conforme schema real no Supabase: code (minúsculo), "Previsão_Latas" (com acento), filial_nome, doc_* */
+/** Row para insert; nomes code / previsão alinhados ao banco após primeira leitura (fallback OCPP_TABLE.sql). */
 function ocppPayloadToBaseRow(payload: OCPPInsertPayload): Record<string, unknown> {
+  const cols = ocppDbColumns ?? { code: "Code" as const, previsao: "previsao_latas" as const };
+  const rawCode = payload.Code != null && payload.Code !== "" ? payload.Code : null;
+  const codeVal: number | string | null =
+    rawCode == null
+      ? null
+      : cols.code === "Code"
+        ? Number(rawCode)
+        : String(rawCode);
   return {
     data: payload.data.split("T")[0],
     op: payload.op ?? null,
     filial_nome: payload.filial_nome ?? null,
     doc_numero: payload.doc_numero ?? null,
     doc_ordem_global: payload.doc_ordem_global ?? null,
-    code: payload.Code != null ? String(payload.Code) : null,
+    [cols.code]: codeVal,
     descricao: payload.descricao ?? null,
     unidade: payload.unidade ?? null,
     grupo: payload.grupo ?? null,
     quantidade: payload.quantidade ?? 0,
     quantidade_latas: payload.quantidade_latas ?? 0,
-    "Previsão_Latas": payload.previsao_latas ?? 0,
+    [cols.previsao]: payload.previsao_latas ?? 0,
     quantidade_kg: payload.quantidade_kg ?? 0,
     tipo_fruto: payload.tipo_fruto ?? null,
     tipo_linha: payload.tipo_linha ?? null,
@@ -344,7 +373,7 @@ function ocppPayloadToBaseRow(payload: OCPPInsertPayload): Record<string, unknow
 
 export async function createOcpp(payload: OCPPInsertPayload): Promise<OCPPRow> {
   const row = ocppPayloadToBaseRow(payload);
-  const { data, error } = await supabase.from("OCPP").insert(row).select(OCPP_SELECT_BASE).single();
+  const { data, error } = await supabase.from("OCPP").insert(row).select(OCPP_SELECT_ALL).single();
   if (error) throw error;
   return mapOcppRow(data as Record<string, unknown>);
 }
@@ -377,11 +406,15 @@ export async function getNextOcppDocIdentity(
   return { doc_numero: maxNum + 1, doc_ordem_global: maxOrd + 1 };
 }
 
-/** Converte campo do payload para nome da coluna no Supabase: code, "Previsão_Latas" */
+/** Converte campo do payload para nome da coluna real no Postgres. */
 function ocppUpdateFieldToDb(key: keyof OCPPInsertPayload, value: unknown): [string, unknown] {
+  const cols = ocppDbColumns ?? { code: "Code" as const, previsao: "previsao_latas" as const };
   if (key === "data") return ["data", value != null ? String(value).split("T")[0] : null];
-  if (key === "Code") return ["code", value != null ? String(value) : null];
-  if (key === "previsao_latas") return ["Previsão_Latas", value != null ? Number(value) : 0];
+  if (key === "Code") {
+    if (value == null || value === "") return [cols.code, null];
+    return [cols.code, cols.code === "Code" ? Number(value) : String(value)];
+  }
+  if (key === "previsao_latas") return [cols.previsao, value != null ? Number(value) : 0];
   return [key, value];
 }
 
@@ -400,11 +433,11 @@ export async function updateOcpp(id: number, payload: Partial<OCPPInsertPayload>
     body[dbKey] = dbVal;
   }
   if (Object.keys(body).length === 0) {
-    const { data, error: err } = await supabase.from("OCPP").select(OCPP_SELECT_BASE).eq("id", id).single();
+    const { data, error: err } = await supabase.from("OCPP").select(OCPP_SELECT_ALL).eq("id", id).single();
     if (err || !data) throw err || new Error("Registro não encontrado");
     return mapOcppRow(data as Record<string, unknown>);
   }
-  const { data, error } = await supabase.from("OCPP").update(body).eq("id", id).select(OCPP_SELECT_BASE).single();
+  const { data, error } = await supabase.from("OCPP").update(body).eq("id", id).select(OCPP_SELECT_ALL).single();
   if (error) throw error;
   return mapOcppRow(data as Record<string, unknown>);
 }
@@ -1684,3 +1717,12 @@ export async function deleteOCTP(id: number): Promise<void> {
   const { error } = await supabase.from("OCTP").delete().eq("id", id);
   if (error) throw error;
 }
+
+export type { OCTERow, OCTEPayload } from "./octe";
+export { getOCTEByDateRange, getNextOCTEDocumentCode, insertOCTE, updateOCTE, deleteOCTE } from "./octe";
+
+export type { OCTCRow, OCTCPayload } from "./octc";
+export { getOCTCList, insertOCTC, updateOCTC, deleteOCTC } from "./octc";
+
+export type { OCTRFRow, OCTRFPayload } from "./octrf";
+export { getOCTRFList, insertOCTRF, updateOCTRF, deleteOCTRF } from "./octrf";

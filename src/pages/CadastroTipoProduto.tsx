@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Edit, Trash2, Loader2, AlertCircle, Save, Tags, Filter } from "lucide-react";
+import { FILIAL_PLACEHOLDER_LABEL, FILIAL_PLACEHOLDER_VALUE } from "@/lib/filialSelect";
 import { useToast } from "@/hooks/use-toast";
 import {
   createTipoProduto,
@@ -466,9 +467,9 @@ export default function CadastroTipoProduto() {
             <div className="space-y-2">
               <Label>Filial</Label>
               <Select
-                value={formData.filial ? formData.filial : "__filial_placeholder__"}
+                value={formData.filial ? formData.filial : FILIAL_PLACEHOLDER_VALUE}
                 onValueChange={(v) => {
-                  const filial = v === "__filial_placeholder__" ? "" : v;
+                  const filial = v === FILIAL_PLACEHOLDER_VALUE ? "" : v;
                   setFormData((p) => ({
                     ...p,
                     filial,
@@ -482,11 +483,13 @@ export default function CadastroTipoProduto() {
                 disabled={filiais.length === 0}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder={filiais.length === 0 ? "Carregue filiais na OCTF" : "Selecione a filial"} />
+                  <SelectValue
+                    placeholder={filiais.length === 0 ? "Carregue filiais na OCTF" : FILIAL_PLACEHOLDER_LABEL}
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__filial_placeholder__" disabled className="text-muted-foreground">
-                    Selecione a filial
+                  <SelectItem value={FILIAL_PLACEHOLDER_VALUE} disabled>
+                    {FILIAL_PLACEHOLDER_LABEL}
                   </SelectItem>
                   {formData.filial.trim() &&
                     !filiais.some((f) => (f.nome || "").trim() === formData.filial.trim()) && (

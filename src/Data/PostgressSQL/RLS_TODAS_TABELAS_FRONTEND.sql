@@ -62,6 +62,24 @@ DROP POLICY IF EXISTS "ocpp_authenticated_all" ON "OCPP";
 CREATE POLICY "ocpp_authenticated_all" ON "OCPP"
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- OCTC (cadastro de colaboradores — documento / nome / setor / filial_nome)
+ALTER TABLE "OCTC" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "octc_authenticated_all" ON "OCTC";
+CREATE POLICY "octc_authenticated_all" ON "OCTC"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- OCTE (tabela de empacotamento)
+ALTER TABLE "OCTE" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "octe_authenticated_all" ON "OCTE";
+CREATE POLICY "octe_authenticated_all" ON "OCTE"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- OCTRF (cadastro de funções — número do documento / nome da função)
+ALTER TABLE "OCTRF" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "octrf_authenticated_all" ON "OCTRF";
+CREATE POLICY "octrf_authenticated_all" ON "OCTRF"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- OCPH (histórico / registro por item: data, código, qtds, bi-horária, observações)
 ALTER TABLE "OCPH" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "ocph_authenticated_all" ON "OCPH";

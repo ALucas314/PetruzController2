@@ -31,6 +31,8 @@ import PlanejamentoProducao from "./pages/PlanejamentoProducao";
 import Itens from "./pages/Itens";
 import ImportarExcel from "./pages/ImportarExcel";
 import CadastroLinhas from "./pages/CadastroLinhas";
+import CadastroColaboradores from "./pages/CadastroColaboradores";
+import CadastroFuncoes from "./pages/CadastroFuncoes";
 import Relatorios from "./pages/Relatorios";
 import GuiaDesenvolvedor from "./pages/GuiaDesenvolvedor";
 import ControleTuneis from "./pages/ControleTuneis";
@@ -72,8 +74,12 @@ const router = createBrowserRouter([
       { path: "dashboard", element: <ProtectedRoute><Index /></ProtectedRoute> },
       { path: "producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
       { path: "analise-producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
+      { path: "controle-empacotamento", element: <ProtectedRoute><Producao /></ProtectedRoute> },
+      { path: "bi-horaria", element: <ProtectedRoute><Producao /></ProtectedRoute> },
       { path: "planejamento-pcp", element: <ProtectedRoute><PlanejamentoProducao /></ProtectedRoute> },
       { path: "cadastro-linhas", element: <ProtectedRoute><CadastroLinhas /></ProtectedRoute> },
+      { path: "cadastro-colaboradores", element: <ProtectedRoute><CadastroColaboradores /></ProtectedRoute> },
+      { path: "cadastro-funcoes", element: <ProtectedRoute><CadastroFuncoes /></ProtectedRoute> },
       { path: "itens", element: <ProtectedRoute><Itens /></ProtectedRoute> },
       { path: "importar-excel", element: <ProtectedRoute><ImportarExcel /></ProtectedRoute> },
       { path: "relatorios", element: <ProtectedRoute><Relatorios /></ProtectedRoute> },

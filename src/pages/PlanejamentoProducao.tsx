@@ -62,6 +62,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FILIAL_PLACEHOLDER_LABEL, FILIAL_PLACEHOLDER_VALUE, sortFiliaisByNome } from "@/lib/filialSelect";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
@@ -282,9 +283,6 @@ function isFilialBelaOuPetruz(nome: string | null | undefined): boolean {
   return n.includes("BELA") || n.includes("PETRUZ");
 }
 
-/** Placeholder controlado no Select (novo documento); `undefined` no Radix fazia parecer a 1ª filial selecionada sem poder trocar. */
-const PCP_FILIAL_NOVO_DOC_PENDENTE = "__pcp_filial_novo_doc_pendente__";
-
 const emptyPayload = (data: string): OCPPInsertPayload => ({
   data,
   op: "",
@@ -395,7 +393,7 @@ export default function PlanejamentoProducao() {
   const [dataFiltroPara, setDataFiltroPara] = useState(hoje);
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
   const filiaisBelaOuPetruz = useMemo(
-    () => filiais.filter((f) => isFilialBelaOuPetruz(f.nome)),
+    () => sortFiliaisByNome(filiais.filter((f) => isFilialBelaOuPetruz(f.nome))),
     [filiais]
   );
   const [filialFiltro, setFilialFiltro] = useState<string>("");
@@ -1696,9 +1694,9 @@ export default function PlanejamentoProducao() {
                           Filial do documento (cadastro)
                         </Label>
                         <Select
-                          value={filialNovoDocumento || PCP_FILIAL_NOVO_DOC_PENDENTE}
+                          value={filialNovoDocumento || FILIAL_PLACEHOLDER_VALUE}
                           onValueChange={(v) =>
-                            setFilialNovoDocumento(v === PCP_FILIAL_NOVO_DOC_PENDENTE ? "" : v)
+                            setFilialNovoDocumento(v === FILIAL_PLACEHOLDER_VALUE ? "" : v)
                           }
                         >
                           <SelectTrigger
@@ -1712,11 +1710,11 @@ export default function PlanejamentoProducao() {
                                 : undefined
                             }
                           >
-                            <SelectValue placeholder="BELA ou Petruz (obrigatório)" />
+                            <SelectValue placeholder={`${FILIAL_PLACEHOLDER_LABEL} (obrigatório)`} />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value={PCP_FILIAL_NOVO_DOC_PENDENTE}>
-                              BELA ou Petruz (obrigatório)
+                            <SelectItem value={FILIAL_PLACEHOLDER_VALUE} disabled>
+                              {FILIAL_PLACEHOLDER_LABEL}
                             </SelectItem>
                             {filiaisBelaOuPetruz.length > 0 ? (
                               filiaisBelaOuPetruz.map((f) => (

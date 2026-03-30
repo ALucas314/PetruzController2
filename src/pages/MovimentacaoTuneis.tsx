@@ -11,6 +11,7 @@ import { AlertCircle, ArrowLeft, ArrowLeftRight, ArrowRight, Factory, FilePlus, 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Filter } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { FILIAL_PLACEHOLDER_LABEL, FILIAL_PLACEHOLDER_VALUE } from "@/lib/filialSelect";
 import { useToast } from "@/hooks/use-toast";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { formatNumberPtBr, formatNumberPtBrFixed } from "@/lib/formatLocale";
@@ -1000,19 +1001,21 @@ export default function MovimentacaoTuneis() {
                     <div className="space-y-1.5 w-full sm:w-[220px]">
                       <Label>Filial</Label>
                       <Select
-                        value={form.filialNome || "__placeholder_filial__"}
+                        value={form.filialNome || FILIAL_PLACEHOLDER_VALUE}
                         onValueChange={(v) =>
                           setForm((p) => ({
                             ...p,
-                            filialNome: v === "__placeholder_filial__" ? "" : v,
+                            filialNome: v === FILIAL_PLACEHOLDER_VALUE ? "" : v,
                             codigoTunel: "",
                             codigoTipoProduto: "",
                           }))
                         }
                       >
-                        <SelectTrigger><SelectValue placeholder="Selecione a filial" /></SelectTrigger>
+                        <SelectTrigger><SelectValue placeholder={FILIAL_PLACEHOLDER_LABEL} /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__placeholder_filial__" disabled>Selecione a filial</SelectItem>
+                          <SelectItem value={FILIAL_PLACEHOLDER_VALUE} disabled>
+                            {FILIAL_PLACEHOLDER_LABEL}
+                          </SelectItem>
                           {filiais.map((f) => (
                             <SelectItem key={f.id} value={f.nome}>{f.nome}</SelectItem>
                           ))}
@@ -1364,7 +1367,7 @@ export default function MovimentacaoTuneis() {
                                     <SelectTrigger><SelectValue placeholder="Todas as filiais" /></SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="__todas__">Todas as filiais</SelectItem>
-                                      {filiais.map((f) => (
+                                      {filiaisSortedByNome.map((f) => (
                                         <SelectItem key={f.id} value={f.nome}>{f.nome}</SelectItem>
                                       ))}
                                     </SelectContent>

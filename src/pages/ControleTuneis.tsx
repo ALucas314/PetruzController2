@@ -18,6 +18,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Edit, Trash2, Loader2, AlertCircle, Save, Thermometer, Filter } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { FILIAL_PLACEHOLDER_LABEL, FILIAL_PLACEHOLDER_VALUE } from "@/lib/filialSelect";
 import { formatNumberPtBrFixed } from "@/lib/formatLocale";
 import {
   createTunel,
@@ -541,10 +542,10 @@ export default function ControleTuneis() {
                 value={
                   formData.filial
                     ? formData.filial
-                    : "__filial_placeholder__"
+                    : FILIAL_PLACEHOLDER_VALUE
                 }
                 onValueChange={(v) => {
-                  const filial = v === "__filial_placeholder__" ? "" : v;
+                  const filial = v === FILIAL_PLACEHOLDER_VALUE ? "" : v;
                   setFormData((p) => ({
                     ...p,
                     filial,
@@ -560,11 +561,13 @@ export default function ControleTuneis() {
                 disabled={filiais.length === 0}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder={filiais.length === 0 ? "Carregue filiais na OCTF" : "Selecione a filial"} />
+                  <SelectValue
+                    placeholder={filiais.length === 0 ? "Carregue filiais na OCTF" : FILIAL_PLACEHOLDER_LABEL}
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__filial_placeholder__" disabled className="text-muted-foreground">
-                    Selecione a filial
+                  <SelectItem value={FILIAL_PLACEHOLDER_VALUE} disabled>
+                    {FILIAL_PLACEHOLDER_LABEL}
                   </SelectItem>
                   {formData.filial.trim() &&
                     !filiais.some((f) => (f.nome || "").trim() === formData.filial.trim()) && (

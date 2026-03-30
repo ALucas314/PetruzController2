@@ -21,7 +21,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FILIAL_PLACEHOLDER_LABEL, FILIAL_PLACEHOLDER_VALUE, sortFiliaisByNome } from "@/lib/filialSelect";
 import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck, FilePlus, Filter, Timer, BarChart3 } from "lucide-react";
+import { ControleEmpacotamento } from "@/components/producao/ControleEmpacotamento";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { ExportToPng, captureElementToPngBlob, combinePngBlobsVertical } from "@/components/ExportToPng";
 import {
@@ -516,6 +518,12 @@ const CustomAreaLabel = (props: any) => {
 const DRAFT_SCREEN = "producao";
 const DRAFT_DEBOUNCE_MS = 1000;
 
+/** Rota da sub-aba “Controle de empacotamento” (sidebar + URL) */
+const ROTA_PRODUCAO_EMPACOTAMENTO = "/controle-empacotamento";
+const ROTA_PRODUCAO_ACOMPANHAMENTO = "/analise-producao";
+/** Rota da tela só bi-horária (sidebar + URL) */
+const ROTA_PRODUCAO_BIHORARIA = "/bi-horaria";
+
 function Producao() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -633,6 +641,31 @@ function Producao() {
     const s = location.state as { loadData?: string; loadFilialNome?: string } | null;
     return s?.loadData && s?.loadFilialNome ? "cadastro" : "menu";
   });
+  const [cadastroSubTab, setCadastroSubTab] = useState<"acompanhamento" | "empacotamento">(() =>
+    location.pathname === ROTA_PRODUCAO_EMPACOTAMENTO ? "empacotamento" : "acompanhamento"
+  );
+
+  const navegarSubAbaProducao = useCallback(
+    (tab: "acompanhamento" | "empacotamento") => {
+      const dest = tab === "empacotamento" ? ROTA_PRODUCAO_EMPACOTAMENTO : ROTA_PRODUCAO_ACOMPANHAMENTO;
+      navigate(dest, { replace: true });
+    },
+    [navigate]
+  );
+
+  useEffect(() => {
+    if (location.pathname === ROTA_PRODUCAO_EMPACOTAMENTO) {
+      setCadastroSubTab("empacotamento");
+      setCurrentView("cadastro");
+    } else if (location.pathname === ROTA_PRODUCAO_BIHORARIA) {
+      setCurrentView("bihoraria");
+    } else if (location.pathname === ROTA_PRODUCAO_ACOMPANHAMENTO) {
+      setCadastroSubTab("acompanhamento");
+      setCurrentView("cadastro");
+    } else if (location.pathname === "/producao") {
+      setCurrentView("menu");
+    }
+  }, [location.pathname]);
   const [availableDates, setAvailableDates] = useState<Set<string>>(new Set());
   const [allRecords, setAllRecords] = useState<any[]>([]); // Todos os registros ordenados
   /** doc_id com ao menos um registro bi-horária na OCPH (navegação na view bi-horária) */
@@ -689,8 +722,10 @@ function Producao() {
   const handleVoltar = useCallback(() => {
     const s = location.state as { returnTo?: string } | null;
     if (s?.returnTo) navigate(s.returnTo);
-    else setCurrentView("menu");
-  }, [location.state, navigate]);
+    else if (location.pathname === ROTA_PRODUCAO_BIHORARIA) {
+      navigate("/producao", { replace: true });
+    } else setCurrentView("menu");
+  }, [location.state, location.pathname, navigate]);
 
   // Catálogo de itens vindo da OCTI (mapeado por código)
   const [itemCatalog, setItemCatalog] = useState<Record<string, { nome_item: string }>>({});
@@ -915,6 +950,7 @@ function Producao() {
   const [filiaisLoadError, setFiliaisLoadError] = useState<string | null>(null);
   const [itemCatalogLoadError, setItemCatalogLoadError] = useState<string | null>(null);
   const [filialSelecionada, setFilialSelecionada] = useState<string>("");
+  const filiaisSortedByNome = useMemo(() => sortFiliaisByNome(filiais), [filiais]);
 
   // Resolve filial por valor do Select (código ou id quando código vem vazio do banco)
   const filialSelecionadaObj = useMemo(() => {
@@ -3291,11 +3327,15 @@ function Producao() {
     setDataCabecalhoSelecionada(state.loadData);
     const filial = filiais.find((f) => (f.nome || "").trim() === (state.loadFilialNome || "").trim());
     if (filial) setFilialSelecionada(filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`);
+    if (location.pathname === ROTA_PRODUCAO_EMPACOTAMENTO) {
+      navigate(ROTA_PRODUCAO_ACOMPANHAMENTO, { replace: true });
+    }
+    setCadastroSubTab("acompanhamento");
     setCurrentView("cadastro");
     loadFromDatabase(state.loadData, state.loadFilialNome, state.loadDocId ?? undefined, state.loadDocOrdemGlobal ?? undefined).finally(() => {
       reportDocumentLoadedRef.current = true;
     });
-  }, [location.state, filiais]);
+  }, [location.state, location.pathname, filiais, navigate]);
 
   // Carregar dados quando a data mudar (cadastro ou tela só bi-horária)
   useEffect(() => {
@@ -3414,8 +3454,12 @@ function Producao() {
 
   // Histórico só carrega ao clicar em Filtrar (não ao abrir a aba)
 
-  // Registrar navegação entre documentos no header (setas + label); na bi-horária conta só documentos com registros bi (não o acompanhamento diário)
+  // Registrar navegação entre documentos no header (setas + label); na bi-horária conta só documentos com registros bi (não o acompanhamento diário).
+  // Na sub-aba empacotamento o ControleEmpacotamento registra navegação pela tabela OCTE — não usar OCPD aqui (return sem cleanup: evita limpar o header a cada mudança de allRecords).
   useEffect(() => {
+    if (cadastroSubTab === "empacotamento") {
+      return;
+    }
     const isDocView = currentView === "cadastro" || currentView === "bihoraria";
     const curIdx = currentRecordIndex >= 0 ? currentRecordIndex : findCurrentRecordIndex();
     const total = getRecordsForDocNav().length;
@@ -3434,7 +3478,7 @@ function Producao() {
     });
     return () => setDocumentNav(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- allRecords: contagem bi-horária no header quando entra JSONB sem mudar length
-  }, [currentView, currentRecordIndex, currentRecordId, allRecords, dataCabecalhoSelecionada, items.length, filialSelecionada]);
+  }, [cadastroSubTab, currentView, currentRecordIndex, currentRecordId, allRecords, dataCabecalhoSelecionada, items.length, filialSelecionada]);
 
   // Exporta os 4 blocos (Status de Produção, Planejado vs Realizado, Reprocesso, Histórico) como PNGs separados,
   // com dados filtrados pela filial e data do documento aberto. No mobile oferece compartilhar (ex.: WhatsApp).
@@ -4092,7 +4136,11 @@ function Producao() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-5xl mx-auto w-full">
             {/* Card: Cadastro */}
             <div
-              onClick={() => setCurrentView("cadastro")}
+              onClick={() => {
+                setCadastroSubTab("acompanhamento");
+                setCurrentView("cadastro");
+                navigate(ROTA_PRODUCAO_ACOMPANHAMENTO, { replace: true });
+              }}
               className="group/card relative rounded-2xl border border-border/50 bg-gradient-to-br from-card/95 via-card/90 to-card/85 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.1)] hover:shadow-[0_8px_30px_rgba(59,130,246,0.2)] transition-all duration-500 overflow-hidden cursor-pointer transform hover:-translate-y-1 hover:scale-[1.01]"
             >
               {/* Efeitos de fundo animados */}
@@ -4138,7 +4186,10 @@ function Producao() {
 
             {/* Card: Bi-horária — apenas o card bi-horária (sem o restante do acompanhamento) */}
             <div
-              onClick={() => setCurrentView("bihoraria")}
+              onClick={() => {
+                setCurrentView("bihoraria");
+                navigate(ROTA_PRODUCAO_BIHORARIA, { replace: true });
+              }}
               className="group/card relative rounded-2xl border border-border/50 bg-gradient-to-br from-card/95 via-card/90 to-card/85 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.1)] hover:shadow-[0_8px_30px_rgba(59,130,246,0.2)] transition-all duration-500 overflow-hidden cursor-pointer transform hover:-translate-y-1 hover:scale-[1.01]"
             >
               <div className="absolute inset-0 bg-gradient-to-br from-primary/3 via-primary/8 to-primary/3 opacity-0 group-hover/card:opacity-100 transition-opacity duration-500 pointer-events-none" />
@@ -4279,23 +4330,33 @@ function Producao() {
                       </div>
                       <div className="flex items-center gap-2">
                         <Select
-                          value={filialSelecionada || "__nenhuma__"}
-                          onValueChange={(v) => setFilialSelecionada(v === "__nenhuma__" ? "" : v)}
+                          value={filialSelecionada || FILIAL_PLACEHOLDER_VALUE}
+                          onValueChange={(v) =>
+                            setFilialSelecionada(v === FILIAL_PLACEHOLDER_VALUE ? "" : v)
+                          }
                         >
                           <SelectTrigger id="filial-select-bihoraria" className="w-full min-w-[160px] sm:w-[220px] h-9 text-sm">
-                            <SelectValue placeholder="Selecione uma filial" />
+                            <SelectValue placeholder={FILIAL_PLACEHOLDER_LABEL} />
                           </SelectTrigger>
                           <SelectContent>
                             {filiais.length === 0 ? (
-                              <SelectItem value="__nenhuma__" disabled>
+                              <SelectItem value={FILIAL_PLACEHOLDER_VALUE} disabled>
                                 Nenhuma filial disponível
                               </SelectItem>
                             ) : (
-                              filiais.map((filial) => (
-                                <SelectItem key={filial.id} value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}>
-                                  {filial.nome}
+                              <>
+                                <SelectItem value={FILIAL_PLACEHOLDER_VALUE} disabled>
+                                  {FILIAL_PLACEHOLDER_LABEL}
                                 </SelectItem>
-                              ))
+                                {filiaisSortedByNome.map((filial) => (
+                                  <SelectItem
+                                    key={filial.id}
+                                    value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}
+                                  >
+                                    {filial.nome}
+                                  </SelectItem>
+                                ))}
+                              </>
                             )}
                           </SelectContent>
                         </Select>
@@ -4458,7 +4519,7 @@ function Producao() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__todos__">Todos</SelectItem>
-                          {filiais.map((f) => (
+                          {filiaisSortedByNome.map((f) => (
                             <SelectItem key={f.id} value={(f.nome || "").trim()}>
                               {(f.nome || "").trim()}
                             </SelectItem>
@@ -4624,34 +4685,9 @@ function Producao() {
             </Button>
           </div>
 
-          {/* Abas internas: altura fixa para não mudar ao trocar de aba */}
-          <div className="flex justify-center mb-4">
-            <div className="inline-flex h-12 min-h-12 items-stretch rounded-xl border border-border/60 bg-muted/40 p-1 gap-0.5 flex-shrink-0" role="tablist" aria-label="Navegação da análise de produção">
-              <Button
-                variant="ghost"
-                size="sm"
-                role="tab"
-                aria-selected={true}
-                className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-semibold bg-primary/10 text-primary border border-primary/25 shadow-sm hover:bg-primary/15 whitespace-nowrap"
-              >
-                <span className="sm:hidden">Acompanhamento</span>
-                <span className="hidden sm:inline">Acompanhamento diário</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                role="tab"
-                aria-selected={false}
-                className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 whitespace-nowrap"
-                onClick={() => setCurrentView("historico")}
-              >
-                <span className="sm:hidden">Histórico</span>
-                <span className="hidden sm:inline">Histórico de análise</span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Card: Acompanhamento diário da produção */}
+          {cadastroSubTab === "empacotamento" ? (
+            <ControleEmpacotamento />
+          ) : (
           <div ref={producaoCardRef} data-export-target className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
             {/* Efeito de brilho removido no hover para não deixar área branca */}
             {/* Borda superior com gradiente */}
@@ -4866,7 +4902,7 @@ function Producao() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__todos__">Todos</SelectItem>
-                          {filiais.map((f) => (
+                          {filiaisSortedByNome.map((f) => (
                             <SelectItem key={f.id} value={(f.nome || "").trim()}>
                               {(f.nome || "").trim()}
                             </SelectItem>
@@ -5000,23 +5036,33 @@ function Producao() {
                     Filial:
                   </Label>
                   <Select
-                    value={filialSelecionada || "__nenhuma__"}
-                    onValueChange={(v) => setFilialSelecionada(v === "__nenhuma__" ? "" : v)}
+                    value={filialSelecionada || FILIAL_PLACEHOLDER_VALUE}
+                    onValueChange={(v) =>
+                      setFilialSelecionada(v === FILIAL_PLACEHOLDER_VALUE ? "" : v)
+                    }
                   >
                     <SelectTrigger id="filial-select" className="w-full sm:w-[400px]">
-                      <SelectValue placeholder="Selecione uma filial" />
+                      <SelectValue placeholder={FILIAL_PLACEHOLDER_LABEL} />
                     </SelectTrigger>
                     <SelectContent>
                       {filiais.length === 0 ? (
-                        <SelectItem value="__nenhuma__" disabled>
+                        <SelectItem value={FILIAL_PLACEHOLDER_VALUE} disabled>
                           Nenhuma filial disponível
                         </SelectItem>
                       ) : (
-                        filiais.map((filial) => (
-                          <SelectItem key={filial.id} value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}>
-                            {filial.nome}
+                        <>
+                          <SelectItem value={FILIAL_PLACEHOLDER_VALUE} disabled>
+                            {FILIAL_PLACEHOLDER_LABEL}
                           </SelectItem>
-                        ))
+                          {filiaisSortedByNome.map((filial) => (
+                            <SelectItem
+                              key={filial.id}
+                              value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}
+                            >
+                              {filial.nome}
+                            </SelectItem>
+                          ))}
+                        </>
                       )}
                     </SelectContent>
                   </Select>
@@ -5583,7 +5629,7 @@ function Producao() {
                                   <SelectItem value="__doc__">
                                     Filial do documento (campo Filial ou nome gravado na OCPD do doc. aberto)
                                   </SelectItem>
-                                  {filiais.map((f) => {
+                                  {filiaisSortedByNome.map((f) => {
                                     const nome = (f.nome || "").trim();
                                     if (!nome) return null;
                                     return (
@@ -6919,6 +6965,7 @@ function Producao() {
               )}
             </div>
           </div>
+          )}
         </div>
       );
     }
@@ -6939,33 +6986,6 @@ function Producao() {
             >
               <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
             </Button>
-          </div>
-
-          {/* Abas internas: mesma altura fixa que na view Cadastro */}
-          <div className="flex justify-center mb-4">
-            <div className="inline-flex h-12 min-h-12 items-stretch rounded-xl border border-border/60 bg-muted/40 p-1 gap-0.5 flex-shrink-0" role="tablist" aria-label="Navegação da análise de produção">
-              <Button
-                variant="ghost"
-                size="sm"
-                role="tab"
-                aria-selected={false}
-                className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 whitespace-nowrap"
-                onClick={() => setCurrentView("cadastro")}
-              >
-                <span className="sm:hidden">Acompanhamento</span>
-                <span className="hidden sm:inline">Acompanhamento diário</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                role="tab"
-                aria-selected={true}
-                className="rounded-lg px-4 py-2 h-full min-h-0 text-xs sm:text-sm font-semibold bg-primary/10 text-primary border border-primary/25 shadow-sm hover:bg-primary/15 whitespace-nowrap"
-              >
-                <span className="sm:hidden">Histórico</span>
-                <span className="hidden sm:inline">Histórico de análise</span>
-              </Button>
-            </div>
           </div>
 
           {/* Título e descrição — acima do card; fundo branco e linha azul (sem transition para altura estável) */}
@@ -7145,7 +7165,7 @@ function Producao() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="todas">Todas as filiais</SelectItem>
-                        {filiais.map((filial) => (
+                        {filiaisSortedByNome.map((filial) => (
                           <SelectItem
                             key={filial.id}
                             value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}
@@ -7255,6 +7275,10 @@ function Producao() {
                             if (dataDia) setDataCabecalhoSelecionada(dataDia);
                             const filial = recordFilialNome ? filiais.find((f) => (f.nome || "").trim() === recordFilialNome) : null;
                             if (filial) setFilialSelecionada(filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`);
+                            if (location.pathname === ROTA_PRODUCAO_EMPACOTAMENTO) {
+                              navigate(ROTA_PRODUCAO_ACOMPANHAMENTO, { replace: true });
+                            }
+                            setCadastroSubTab("acompanhamento");
                             setCurrentView("cadastro");
                             loadFromDatabase(dataDia, recordFilialNome || undefined);
                           };
@@ -7514,7 +7538,7 @@ function Producao() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__todas__">Todas as filiais</SelectItem>
-                    {filiais.map((f) => (
+                    {filiaisSortedByNome.map((f) => (
                       <SelectItem key={f.id} value={(f.nome || "").trim()}>
                         {(f.nome || "").trim()}
                       </SelectItem>

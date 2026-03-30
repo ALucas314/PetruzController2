@@ -14,6 +14,9 @@ import {
   Thermometer,
   Tags,
   ArrowLeftRight,
+  Users,
+  Timer,
+  Briefcase,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -47,8 +50,12 @@ const menuItems: MenuItem[] = [
     icon: Factory,
     subItems: [
       { title: "Acompanhamento diário da produção", url: "/analise-producao", icon: TrendingUp },
+      { title: "Bi-horária", url: "/bi-horaria", icon: Timer },
+      { title: "Controle de empacotamento", url: "/controle-empacotamento", icon: Package },
       // { title: "Planejamento (PCP)", url: "/planejamento-pcp", icon: Factory }, // oculto por enquanto
-      { title: "Cadastro de Linhas", url: "/cadastro-linhas", icon: Factory }
+      { title: "Cadastro de Linhas", url: "/cadastro-linhas", icon: Factory },
+      { title: "Cadastro de Colaboradores", url: "/cadastro-colaboradores", icon: Users },
+      { title: "Cadastro de funções", url: "/cadastro-funcoes", icon: Briefcase },
     ]
   },
   {
@@ -114,8 +121,8 @@ const SubNavItem = memo(({ subItem, isActive, iconOnly, onNavigate, currentPath 
   const Icon = subItem.icon;
   const [isHovered, setIsHovered] = useState(false);
 
-  // Calcular se está ativo usando a localização atual
-  const isCurrentlyActive = currentPath === subItem.url || currentPath.startsWith(subItem.url + '/');
+  const isCurrentlyActive =
+    currentPath === subItem.url || currentPath.startsWith(subItem.url + "/");
   const effectiveIsActive = isActive || isCurrentlyActive;
 
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -224,9 +231,11 @@ const NavItemWithSubmenu = memo(({
 
   const isSubItemActive = useMemo(() => {
     if (!hasSubItems) return false;
-    return item.subItems?.some(subItem =>
-      location.pathname === subItem.url || location.pathname.startsWith(subItem.url)
-    ) || false;
+    return (
+      item.subItems?.some(
+        (subItem) => location.pathname === subItem.url || location.pathname.startsWith(subItem.url + "/")
+      ) || false
+    );
   }, [hasSubItems, item.subItems, location.pathname]);
 
   const handleItemClick = useCallback((e: React.MouseEvent) => {
@@ -322,8 +331,8 @@ const NavItemWithSubmenu = memo(({
         >
           <div className="space-y-1 pl-2">
             {item.subItems?.map((subItem) => {
-              const isSubActive = location.pathname === subItem.url ||
-                location.pathname.startsWith(subItem.url);
+              const isSubActive =
+                location.pathname === subItem.url || location.pathname.startsWith(subItem.url + "/");
               return (
                 <SubNavItem
                   key={subItem.url}
@@ -481,8 +490,8 @@ const SidebarContent = memo(({
   const navItems = useMemo(() =>
     menuItems.map((item) => {
       const isActive = location.pathname === item.url;
-      const isSubItemActive = item.subItems?.some(subItem =>
-        location.pathname === subItem.url || location.pathname.startsWith(subItem.url)
+      const isSubItemActive = item.subItems?.some(
+        (subItem) => location.pathname === subItem.url || location.pathname.startsWith(subItem.url + "/")
       );
       return {
         item,
@@ -599,9 +608,12 @@ export const AppSidebar = memo(function AppSidebar() {
     setExpandedItems(prev => {
       const newSet = new Set(prev);
       menuItems.forEach(item => {
-        if (item.subItems && item.subItems.some(subItem =>
-          location.pathname === subItem.url || location.pathname.startsWith(subItem.url)
-        )) {
+        if (
+          item.subItems &&
+          item.subItems.some(
+            (subItem) => location.pathname === subItem.url || location.pathname.startsWith(subItem.url + "/")
+          )
+        ) {
           newSet.add(item.title);
         }
       });

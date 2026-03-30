@@ -43,6 +43,12 @@ DROP POLICY IF EXISTS "octf_authenticated_all" ON "OCTF";
 CREATE POLICY "octf_authenticated_all" ON "OCTF"
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- OCTRF (cadastro de funções)
+ALTER TABLE "OCTRF" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "octrf_authenticated_all" ON "OCTRF";
+CREATE POLICY "octrf_authenticated_all" ON "OCTRF"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- OCPR (reprocessos)
 ALTER TABLE "OCPR" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "ocpr_authenticated_all" ON "OCPR";
