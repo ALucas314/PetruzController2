@@ -150,6 +150,9 @@ const PEND_OK_OPCOES = [
   { value: "OK", label: "OK" },
 ] as const;
 
+/** Após alterar a grade só no estado local, adia recarga via realtime da OCPP (evita sumir com o que ainda não foi gravado). */
+const PLANNING_REALTIME_QUIET_MS = 5000;
+
 /** Qtd. Liq. Prev. = Qtd. Latas × Solid, arredondado ao kg inteiro (ex.: 14999,936 → 15.000). */
 function calcQtdLiqPrev(latas: number, solid: number | null): number {
   const s = solid ?? 0;
@@ -239,6 +242,13 @@ function isSticker(tipoLinha: string): boolean {
   const s = (tipoLinha ?? "").trim().toLowerCase();
   if (!s) return false;
   return s === "sticker" || s.includes("sticker");
+}
+
+/** 4 soldas: Uni. Basqueta 4, Uni. Chapa 6. */
+function is4Soldas(tipoLinha: string): boolean {
+  const s = (tipoLinha ?? "").trim().toLowerCase();
+  if (!s) return false;
+  return /\b4\s*soldas\b/.test(s);
 }
 
 const parseFormattedNumber = (value: string | number | null | undefined): number => {
@@ -334,6 +344,7 @@ function getLinhaRuleUnitsFor(tipoLinha: string | null | undefined, productionLi
   if (is5Kg(nomeLinhaParaRegra)) return { unidadeBase: "10", unidadeChapa: "0" };
   if (isCubos(nomeLinhaParaRegra)) return { unidadeBase: "22", unidadeChapa: "0" };
   if (isSticker(nomeLinhaParaRegra)) return { unidadeBase: "10", unidadeChapa: "3" };
+  if (is4Soldas(nomeLinhaParaRegra)) return { unidadeBase: "4", unidadeChapa: "6" };
   return null;
 }
 
@@ -423,6 +434,8 @@ export default function PlanejamentoProducao() {
   const [currentTime, setCurrentTime] = useState(() => new Date());
   /** Mantém o texto digitado (com vírgula) nos campos numéricos até o blur, para permitir digitar "142,85". */
   const [editingNumeric, setEditingNumeric] = useState<{ rowId: number; field: string; value: string } | null>(null);
+  const editingNumericRef = useRef(editingNumeric);
+  editingNumericRef.current = editingNumeric;
   /** Ao clicar em "Novo documento", guarda o próximo número (ex.: 2) para exibir "2 de 2" no header até carregar de novo. */
   const [newDocumentIndex, setNewDocumentIndex] = useState<number | null>(null);
   /** Filial do novo documento (ao clicar em "Novo documento"); alterar aqui não dispara filtro. */
@@ -432,6 +445,8 @@ export default function PlanejamentoProducao() {
   const isMobile = useIsMobile();
   /** Marca o momento da última alteração feita por este usuário; evita recarregar ao receber o próprio evento realtime. */
   const lastLocalChangeAtRef = useRef(0);
+  /** Enquanto `Date.now()` for menor que este valor, o realtime não recarrega a lista (edição local / foco em célula). */
+  const planningRealtimeQuietUntilRef = useRef(0);
   /** Timeout do debounce do realtime para não recarregar a cada tecla. */
   const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** doc_numero/doc_ordem_global reutilizados em todas as linhas do mesmo "Novo documento" até recarregar. */
@@ -555,14 +570,29 @@ export default function PlanejamentoProducao() {
     setRegistros((prev) => prev.map((row) => normalizeRowUnitsAndDerivedFor(row, productionLines)));
   }, [productionLines]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Continua bloqueando realtime enquanto o usuário edita uma célula numérica (valor só vai para `registros` no blur). */
+  useEffect(() => {
+    if (editingNumeric != null) {
+      planningRealtimeQuietUntilRef.current = Date.now() + PLANNING_REALTIME_QUIET_MS;
+    }
+  }, [editingNumeric]);
+
   /** Sincronização em tempo real OCPP: mesmo padrão da bi-horária (debounce curto + ignorar eco do próprio save neste aparelho). */
   useEffect(() => {
     const unsubscribe = subscribeOCPPRealtime(() => {
       const now = Date.now();
+      if (now < planningRealtimeQuietUntilRef.current) return;
+      if (editingNumericRef.current != null) return;
+      if (codeLookupTimeoutRef.current != null) return;
       if (now - lastLocalChangeAtRef.current < REALTIME_SUPPRESS_OWN_WRITE_MS) return;
       if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
       realtimeDebounceRef.current = setTimeout(() => {
         realtimeDebounceRef.current = null;
+        const t = Date.now();
+        if (t < planningRealtimeQuietUntilRef.current) return;
+        if (editingNumericRef.current != null) return;
+        if (codeLookupTimeoutRef.current != null) return;
+        if (t - lastLocalChangeAtRef.current < REALTIME_SUPPRESS_OWN_WRITE_MS) return;
         loadRegistros();
       }, REALTIME_COLLAPSE_MS);
     });
@@ -978,6 +1008,7 @@ export default function PlanejamentoProducao() {
   };
 
   const setRowField = useCallback((id: number, field: keyof OCPPRow, value: unknown) => {
+    planningRealtimeQuietUntilRef.current = Date.now() + PLANNING_REALTIME_QUIET_MS;
     setRegistros((prev) =>
       prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
     );
@@ -2433,6 +2464,12 @@ export default function PlanejamentoProducao() {
                                   const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
                                   payload.quantidade_basqueta = qtdBasqueta;
                                   payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "3");
+                                } else if (is4Soldas(nomeLinhaParaRegra)) {
+                                  payload.unidade_base = "4";
+                                  payload.unidade_chapa = "6";
+                                  const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "4");
+                                  payload.quantidade_basqueta = qtdBasqueta;
+                                  payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "6");
                                 } else {
                                   payload.unidade_base = "0";
                                   payload.unidade_chapa = "0";
@@ -2517,6 +2554,12 @@ export default function PlanejamentoProducao() {
                                       const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
                                       payload.quantidade_basqueta = qtdBasqueta;
                                       payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "3");
+                                    } else if (is4Soldas(nomeLinhaParaRegra)) {
+                                      payload.unidade_base = "4";
+                                      payload.unidade_chapa = "6";
+                                      const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "4");
+                                      payload.quantidade_basqueta = qtdBasqueta;
+                                      payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "6");
                                     } else {
                                       payload.unidade_base = "0";
                                       payload.unidade_chapa = "0";
@@ -2583,6 +2626,12 @@ export default function PlanejamentoProducao() {
                                     const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "10");
                                     payload.quantidade_basqueta = qtdBasqueta;
                                     payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "3");
+                                  } else if (is4Soldas(newVal)) {
+                                    payload.unidade_base = "4";
+                                    payload.unidade_chapa = "6";
+                                    const qtdBasqueta = calcQtdBasqueta(row.quantidade_kg_tuneo ?? 0, "4");
+                                    payload.quantidade_basqueta = qtdBasqueta;
+                                    payload.quantidade_chapa = calcQtdChapa(qtdBasqueta, "6");
                                   } else {
                                     payload.unidade_base = "0";
                                     payload.unidade_chapa = "0";
