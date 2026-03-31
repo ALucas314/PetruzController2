@@ -1,18 +1,12 @@
-import { useEffect, type ComponentProps, type KeyboardEvent } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { Trash2 } from "lucide-react";
 import { getItemByCode } from "@/services/supabaseData";
 import { cn } from "@/lib/utils";
-import {
-  QTY_SLOTS,
-  formatCommittedSummary,
-  parseTokenToNumber,
-  sumCommitted,
-} from "./octeQuantidadesHelpers";
+import { QTY_SLOTS, parseTokenToNumber, sumCommitted } from "./octeQuantidadesHelpers";
 import { formatNumberPtBrFixed } from "@/lib/formatLocale";
 import type { OCTCRow } from "@/services/octc";
 import type { OCTRFRow } from "@/services/octrf";
@@ -150,22 +144,6 @@ export function OcteItemFieldsGrid({
             placeholder={line.catalogResolved ? "" : "Descrição"}
           />
         </div>
-        <div className="shrink-0 w-[6.5rem] space-y-1.5">
-          <OcteLineTextField
-            label="Peso (kg)"
-            className="font-mono tabular-nums w-full"
-            type="number"
-            step="0.0001"
-            min={0}
-            value={line.peso ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              onPatch({ peso: v === "" ? null : Number(v) });
-            }}
-            placeholder="0"
-            title="Peso digitável em quilogramas"
-          />
-        </div>
       </div>
     );
   }
@@ -210,22 +188,6 @@ export function OcteItemFieldsGrid({
             placeholder={line.catalogResolved ? "" : "UN, KG…"}
           />
         </div>
-        <div className="space-y-1.5 min-w-0">
-          <OcteLineTextField
-            label="Peso (kg)"
-            className="font-mono tabular-nums"
-            type="number"
-            step="0.0001"
-            min={0}
-            value={line.peso ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              onPatch({ peso: v === "" ? null : Number(v) });
-            }}
-            placeholder="0"
-            title="Peso digitável em quilogramas"
-          />
-        </div>
       </div>
     </div>
   );
@@ -256,40 +218,57 @@ export function EmpacotamentoLinhaBlock({
   funcoesOctrf = [],
   funcoesOctrfLoading = false,
 }: Props) {
-  const { toast } = useToast();
-  const nextSlot = line.committedQtys.length < QTY_SLOTS ? line.committedQtys.length + 1 : null;
   const totalAcumulado = sumCommitted(line.committedQtys);
+  const [qtyDrafts, setQtyDrafts] = useState<string[]>(() =>
+    Array.from({ length: QTY_SLOTS }, (_, i) => {
+      const n = Number(line.committedQtys[i] ?? 0);
+      return Number.isFinite(n) && n !== 0 ? formatNumberPtBrFixed(n, 2) : "";
+    })
+  );
 
-  const addQuantity = () => {
-    if (line.committedQtys.length >= QTY_SLOTS) {
-      toast({
-        title: "Limite",
-        description: `No máximo ${QTY_SLOTS} quantidades (Q1…Q${QTY_SLOTS}).`,
-        variant: "destructive",
-      });
-      return;
+  useEffect(() => {
+    setQtyDrafts(
+      Array.from({ length: QTY_SLOTS }, (_, i) => {
+        const n = Number(line.committedQtys[i] ?? 0);
+        return Number.isFinite(n) && n !== 0 ? formatNumberPtBrFixed(n, 2) : "";
+      })
+    );
+  }, [line.committedQtys]);
+  const setQtyAt = (slotIndex: number, raw: string) => {
+    const values = Array.from({ length: QTY_SLOTS }, (_, i) => Number(line.committedQtys[i] ?? 0));
+    const token = String(raw).trim();
+    if (token === "") {
+      values[slotIndex] = 0;
+    } else {
+      const parsed = parseTokenToNumber(token);
+      if (!Number.isFinite(parsed)) return;
+      values[slotIndex] = parsed;
     }
-    const v = parseTokenToNumber(line.draftQty);
-    if (!Number.isFinite(v) || String(line.draftQty).trim() === "") {
-      toast({
-        title: "Quantidade",
-        description: "Digite um valor numérico antes de adicionar.",
-        variant: "destructive",
-      });
-      return;
-    }
-    onPatch({ committedQtys: [...line.committedQtys, v], draftQty: "" });
+    let end = QTY_SLOTS - 1;
+    while (end >= 0 && values[end] === 0) end -= 1;
+    onPatch({ committedQtys: end >= 0 ? values.slice(0, end + 1) : [] });
   };
 
-  const undoLastQuantity = () => {
-    if (line.committedQtys.length === 0) return;
-    onPatch({ committedQtys: line.committedQtys.slice(0, -1) });
+  const updateDraftQty = (slotIndex: number, raw: string) => {
+    setQtyDrafts((prev) => {
+      const next = [...prev];
+      next[slotIndex] = raw;
+      return next;
+    });
   };
 
-  const onDraftKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    addQuantity();
+  const commitDraftQty = (slotIndex: number) => {
+    const raw = String(qtyDrafts[slotIndex] ?? "").trim();
+    if (raw === "") {
+      setQtyAt(slotIndex, "");
+      updateDraftQty(slotIndex, "");
+      return;
+    }
+    const parsed = parseTokenToNumber(raw);
+    if (!Number.isFinite(parsed)) return;
+    // Mantém o texto original para não perder separador decimal durante o parse interno.
+    setQtyAt(slotIndex, raw);
+    updateDraftQty(slotIndex, parsed === 0 ? "" : formatNumberPtBrFixed(parsed, 2));
   };
 
   return (
@@ -312,56 +291,56 @@ export function EmpacotamentoLinhaBlock({
         loading={funcoesOctrfLoading}
         aria-label={`Função registro ${index + 1}`}
       />
+      <div className="shrink-0 w-[32rem] space-y-1.5">
+        <Label className="text-xs sm:text-sm font-medium whitespace-nowrap">Quantidades (Q1…Q{QTY_SLOTS})</Label>
+        <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
+          {Array.from({ length: QTY_SLOTS }, (_, slotIndex) => {
+            const slotLabel = `Q${slotIndex + 1}`;
+            return (
+              <div key={slotLabel} className="shrink-0 flex items-center gap-1">
+                <Label className="text-[11px] text-muted-foreground whitespace-nowrap">{slotLabel}</Label>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  className="h-9 w-[3.6rem] px-1.5 font-mono tabular-nums text-sm"
+                  placeholder="0,00"
+                  value={qtyDrafts[slotIndex] ?? ""}
+                  onChange={(e) => updateDraftQty(slotIndex, e.target.value)}
+                  onBlur={() => commitDraftQty(slotIndex)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitDraftQty(slotIndex);
+                    }
+                  }}
+                  aria-label={`Quantidade ${slotIndex + 1} registro ${index + 1}`}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
       <div className="shrink-0 w-[9.5rem] space-y-1.5 pb-px">
         <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Total Q1…Q{QTY_SLOTS}</Label>
         <div className="h-9 flex items-center text-sm font-semibold tabular-nums text-foreground border border-input rounded-md px-2 bg-background">
           {formatNumberPtBrFixed(totalAcumulado, 2)}
         </div>
       </div>
-      {line.committedQtys.length > 0 ? (
-        <div className="shrink-0 flex items-end pb-px">
-          <Button type="button" variant="outline" size="sm" className="h-9 text-xs whitespace-nowrap" onClick={undoLastQuantity}>
-            Desfazer Q
-          </Button>
-        </div>
-      ) : null}
-      <div className="shrink-0 w-[14rem] space-y-1.5">
-        {nextSlot != null ? (
-          <>
-            <Label className="text-xs sm:text-sm font-medium whitespace-nowrap">
-              Q<span className="text-primary">{nextSlot}</span>
-              <span className="text-muted-foreground font-normal"> / {QTY_SLOTS}</span>
-            </Label>
-            <div className="flex gap-2 items-center">
-              <Input
-                type="text"
-                inputMode="decimal"
-                className="h-9 flex-1 min-w-0 font-mono tabular-nums text-sm min-w-[5rem]"
-                placeholder="Ex.: 100"
-                value={line.draftQty}
-                onChange={(e) => onPatch({ draftQty: e.target.value })}
-                onKeyDown={onDraftKeyDown}
-                aria-label={`Quantidade ${nextSlot} registro ${index + 1}`}
-              />
-              <Button type="button" size="sm" className="h-9 shrink-0 gap-1 px-2.5" onClick={addQuantity} title="Adicionar quantidade">
-                <Plus className="h-4 w-4 shrink-0" />
-                <span className="text-xs whitespace-nowrap">Add</span>
-              </Button>
-            </div>
-          </>
-        ) : (
-          <p className="text-xs text-muted-foreground pb-2">Limite Q{QTY_SLOTS}.</p>
-        )}
-      </div>
-      <div className="shrink-0 w-[13rem] min-h-[3.25rem] max-h-[4.5rem] overflow-y-auto rounded-md border border-border/60 bg-background/80 px-2 py-1.5 text-[11px] text-muted-foreground leading-snug">
-        {line.committedQtys.length > 0 ? (
-          <>
-            <span className="font-medium text-foreground">Q: </span>
-            {formatCommittedSummary(line.committedQtys)}
-          </>
-        ) : (
-          <span className="text-muted-foreground/80">Sem Q confirmada</span>
-        )}
+      <div className="shrink-0 w-[6.5rem] space-y-1.5">
+        <Label className="text-xs sm:text-sm whitespace-nowrap">Peso (kg)</Label>
+        <Input
+          type="number"
+          step="0.0001"
+          min={0}
+          className="h-9 w-full font-mono tabular-nums"
+          value={line.peso ?? ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            onPatch({ peso: v === "" ? null : Number(v) });
+          }}
+          placeholder="0"
+          title="Peso digitável em quilogramas"
+        />
       </div>
       <div className="shrink-0 w-[5.5rem] space-y-1.5">
         <Label className="text-xs sm:text-sm whitespace-nowrap">Meta</Label>

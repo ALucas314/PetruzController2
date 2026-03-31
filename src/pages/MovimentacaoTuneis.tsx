@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -272,6 +273,7 @@ export default function MovimentacaoTuneis() {
   const [filtroFilialPending, setFiltroFilialPending] = useState("");
   const [filtroDataInicioPending, setFiltroDataInicioPending] = useState("");
   const [filtroDataFimPending, setFiltroDataFimPending] = useState("");
+  const [filtroMesmaDataPending, setFiltroMesmaDataPending] = useState(false);
   /** Relatório por túnel: filtros extras (aplicados após Filtrar). */
   const [filtroRelPorTunelStatus, setFiltroRelPorTunelStatus] = useState("");
   /** Código numérico do túnel como string, ex. "7", ou vazio = todos. */
@@ -923,11 +925,41 @@ export default function MovimentacaoTuneis() {
                           </div>
                           <div className="space-y-1.5">
                             <Label>Data inicial</Label>
-                            <Input type="date" value={filtroDataInicioPending} onChange={(e) => setFiltroDataInicioPending(e.target.value)} />
+                            <Input
+                              type="date"
+                              value={filtroDataInicioPending}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setFiltroDataInicioPending(value);
+                                if (filtroMesmaDataPending) setFiltroDataFimPending(value);
+                              }}
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id="mov-tuneis-mesma-data"
+                              checked={filtroMesmaDataPending}
+                              onCheckedChange={(checked) => {
+                                const value = Boolean(checked);
+                                setFiltroMesmaDataPending(value);
+                                if (value && filtroDataInicioPending) setFiltroDataFimPending(filtroDataInicioPending);
+                              }}
+                            />
+                            <Label htmlFor="mov-tuneis-mesma-data" className="text-xs text-muted-foreground cursor-pointer">
+                              Mesma data
+                            </Label>
                           </div>
                           <div className="space-y-1.5">
                             <Label>Data final</Label>
-                            <Input type="date" value={filtroDataFimPending} onChange={(e) => setFiltroDataFimPending(e.target.value)} />
+                            <Input
+                              type="date"
+                              value={filtroDataFimPending}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setFiltroDataFimPending(value);
+                                if (filtroMesmaDataPending) setFiltroDataInicioPending(value);
+                              }}
+                            />
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -939,6 +971,7 @@ export default function MovimentacaoTuneis() {
                               setFiltroFilialPending("");
                               setFiltroDataInicioPending("");
                               setFiltroDataFimPending("");
+                              setFiltroMesmaDataPending(false);
                             }}
                           >
                             Limpar
@@ -1367,7 +1400,7 @@ export default function MovimentacaoTuneis() {
                                     <SelectTrigger><SelectValue placeholder="Todas as filiais" /></SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="__todas__">Todas as filiais</SelectItem>
-                                      {filiaisSortedByNome.map((f) => (
+                                      {filiais.map((f) => (
                                         <SelectItem key={f.id} value={f.nome}>{f.nome}</SelectItem>
                                       ))}
                                     </SelectContent>
@@ -1375,11 +1408,41 @@ export default function MovimentacaoTuneis() {
                                 </div>
                                 <div className="space-y-1.5">
                                   <Label>Data inicial</Label>
-                                  <Input type="date" value={filtroDataInicioPending} onChange={(e) => setFiltroDataInicioPending(e.target.value)} />
+                                  <Input
+                                    type="date"
+                                    value={filtroDataInicioPending}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setFiltroDataInicioPending(value);
+                                      if (filtroMesmaDataPending) setFiltroDataFimPending(value);
+                                    }}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Checkbox
+                                    id="rel-tuneis-mesma-data"
+                                    checked={filtroMesmaDataPending}
+                                    onCheckedChange={(checked) => {
+                                      const value = Boolean(checked);
+                                      setFiltroMesmaDataPending(value);
+                                      if (value && filtroDataInicioPending) setFiltroDataFimPending(filtroDataInicioPending);
+                                    }}
+                                  />
+                                  <Label htmlFor="rel-tuneis-mesma-data" className="text-xs text-muted-foreground cursor-pointer">
+                                    Mesma data
+                                  </Label>
                                 </div>
                                 <div className="space-y-1.5">
                                   <Label>Data final</Label>
-                                  <Input type="date" value={filtroDataFimPending} onChange={(e) => setFiltroDataFimPending(e.target.value)} />
+                                  <Input
+                                    type="date"
+                                    value={filtroDataFimPending}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setFiltroDataFimPending(value);
+                                      if (filtroMesmaDataPending) setFiltroDataInicioPending(value);
+                                    }}
+                                  />
                                 </div>
                                 <div className="space-y-1.5">
                                   <Label htmlFor="rel-previsto-num-doc">Número do documento</Label>
@@ -1403,6 +1466,7 @@ export default function MovimentacaoTuneis() {
                                     setFiltroFilialPending("");
                                     setFiltroDataInicioPending("");
                                     setFiltroDataFimPending("");
+                                    setFiltroMesmaDataPending(false);
                                     setFiltroRelPrevistoNumeroDocPending("");
                                   }}
                                 >

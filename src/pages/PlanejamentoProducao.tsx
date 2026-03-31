@@ -409,6 +409,7 @@ export default function PlanejamentoProducao() {
   /** Valores dos filtros dentro do card (só aplicados ao clicar em "Filtrar"). */
   const [dataFiltroPending, setDataFiltroPending] = useState(hoje);
   const [dataFiltroParaPending, setDataFiltroParaPending] = useState(hoje);
+  const [filtrosCardMesmaDataPending, setFiltrosCardMesmaDataPending] = useState(false);
   const [filtroCodigoPending, setFiltroCodigoPending] = useState("");
   const [filtroTipoLinhaPending, setFiltroTipoLinhaPending] = useState("");
   const [filtroSolidosPending, setFiltroSolidosPending] = useState<number | "">("");
@@ -450,6 +451,7 @@ export default function PlanejamentoProducao() {
   const [dashboardFiltersOpen, setDashboardFiltersOpen] = useState(false);
   const [dashboardDateFromPending, setDashboardDateFromPending] = useState(hoje);
   const [dashboardDateToPending, setDashboardDateToPending] = useState(hoje);
+  const [dashboardMesmaDataPending, setDashboardMesmaDataPending] = useState(false);
   const [dashboardUnidadePending, setDashboardUnidadePending] = useState("");
   const [dashboardGrupoPending, setDashboardGrupoPending] = useState("");
   const [dashboardTipoLinhaPending, setDashboardTipoLinhaPending] = useState("");
@@ -1482,12 +1484,30 @@ export default function PlanejamentoProducao() {
                   <div className="grid gap-4 py-2">
                     <div className="grid gap-2">
                       <Label>Data (intervalo)</Label>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="dashboard-filtros-mesma-data-desktop"
+                          checked={dashboardMesmaDataPending}
+                          onCheckedChange={(checked) => {
+                            const value = Boolean(checked);
+                            setDashboardMesmaDataPending(value);
+                            if (value && dashboardDateFromPending) setDashboardDateToPending(dashboardDateFromPending);
+                          }}
+                        />
+                        <Label htmlFor="dashboard-filtros-mesma-data-desktop" className="text-xs text-muted-foreground cursor-pointer">
+                          Mesma data
+                        </Label>
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <Label className="text-xs text-muted-foreground">De</Label>
                           <DatePicker
                             value={dashboardDateFromPending}
-                            onChange={(v) => v && setDashboardDateFromPending(v)}
+                            onChange={(v) => {
+                              if (!v) return;
+                              setDashboardDateFromPending(v);
+                              if (dashboardMesmaDataPending) setDashboardDateToPending(v);
+                            }}
                             placeholder="Data"
                             triggerClassName="h-9 border rounded-md w-full text-sm"
                           />
@@ -1496,7 +1516,11 @@ export default function PlanejamentoProducao() {
                           <Label className="text-xs text-muted-foreground">Até</Label>
                           <DatePicker
                             value={dashboardDateToPending}
-                            onChange={(v) => v && setDashboardDateToPending(v)}
+                            onChange={(v) => {
+                              if (!v) return;
+                              setDashboardDateToPending(v);
+                              if (dashboardMesmaDataPending) setDashboardDateFromPending(v);
+                            }}
                             placeholder="Data"
                             triggerClassName="h-9 border rounded-md w-full text-sm"
                           />
@@ -1901,12 +1925,30 @@ export default function PlanejamentoProducao() {
                       Período pela data de lançamento (cadastro). A data do documento no planejamento é o dia seguinte.
                     </p>
                     <div className="grid gap-3">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="card-filtros-mesma-data"
+                          checked={filtrosCardMesmaDataPending}
+                          onCheckedChange={(checked) => {
+                            const value = Boolean(checked);
+                            setFiltrosCardMesmaDataPending(value);
+                            if (value && dataFiltroPending) setDataFiltroParaPending(dataFiltroPending);
+                          }}
+                        />
+                        <Label htmlFor="card-filtros-mesma-data" className="text-xs text-muted-foreground cursor-pointer">
+                          Mesma data
+                        </Label>
+                      </div>
                       <div className="grid grid-cols-[auto_1fr] items-center gap-2">
                         <Label htmlFor="card-filtro-de" className="text-xs text-muted-foreground">De</Label>
                         <DatePicker
                           id="card-filtro-de"
                           value={dataFiltroPending}
-                          onChange={(v) => v && setDataFiltroPending(v)}
+                          onChange={(v) => {
+                            if (!v) return;
+                            setDataFiltroPending(v);
+                            if (filtrosCardMesmaDataPending) setDataFiltroParaPending(v);
+                          }}
                           placeholder="Lançamento"
                           className="min-w-0"
                           triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -1917,7 +1959,11 @@ export default function PlanejamentoProducao() {
                         <DatePicker
                           id="card-filtro-para"
                           value={dataFiltroParaPending}
-                          onChange={(v) => v && setDataFiltroParaPending(v)}
+                          onChange={(v) => {
+                            if (!v) return;
+                            setDataFiltroParaPending(v);
+                            if (filtrosCardMesmaDataPending) setDataFiltroPending(v);
+                          }}
                           placeholder="Lançamento"
                           className="min-w-0"
                           triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -3034,12 +3080,30 @@ export default function PlanejamentoProducao() {
                   <div className="grid gap-3 sm:gap-4 py-2 overflow-y-auto min-h-0 pr-1 -mr-1 overscroll-contain">
                     <div className="grid gap-2">
                       <Label className="text-sm">Data de lançamento (intervalo)</Label>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="dashboard-filtros-mesma-data-mobile"
+                          checked={dashboardMesmaDataPending}
+                          onCheckedChange={(checked) => {
+                            const value = Boolean(checked);
+                            setDashboardMesmaDataPending(value);
+                            if (value && dashboardDateFromPending) setDashboardDateToPending(dashboardDateFromPending);
+                          }}
+                        />
+                        <Label htmlFor="dashboard-filtros-mesma-data-mobile" className="text-xs text-muted-foreground cursor-pointer">
+                          Mesma data
+                        </Label>
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                           <Label className="text-xs text-muted-foreground">De</Label>
                           <DatePicker
                             value={dashboardDateFromPending}
-                            onChange={(v) => v && setDashboardDateFromPending(v)}
+                            onChange={(v) => {
+                              if (!v) return;
+                              setDashboardDateFromPending(v);
+                              if (dashboardMesmaDataPending) setDashboardDateToPending(v);
+                            }}
                             placeholder="Lançamento"
                             triggerClassName="h-9 sm:h-9 border rounded-md w-full text-sm min-h-[2.25rem]"
                           />
@@ -3048,7 +3112,11 @@ export default function PlanejamentoProducao() {
                           <Label className="text-xs text-muted-foreground">Até</Label>
                           <DatePicker
                             value={dashboardDateToPending}
-                            onChange={(v) => v && setDashboardDateToPending(v)}
+                            onChange={(v) => {
+                              if (!v) return;
+                              setDashboardDateToPending(v);
+                              if (dashboardMesmaDataPending) setDashboardDateFromPending(v);
+                            }}
                             placeholder="Lançamento"
                             triggerClassName="h-9 sm:h-9 border rounded-md w-full text-sm min-h-[2.25rem]"
                           />

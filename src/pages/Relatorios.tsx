@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, Filter, ArrowRight } from "lucide-react";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import {
@@ -21,7 +22,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { getFiliais, getProducaoHistory, subscribeOCPDRealtime, REALTIME_COLLAPSE_MS } from "@/services/supabaseData";
+import {
+  getFiliais,
+  getMovimentacoesTuneis,
+  getOcppByDateRange,
+  getOcphDocIdsComBiHoraria,
+  getOCTEByDateRange,
+  getProducaoHistory,
+  REALTIME_COLLAPSE_MS,
+  subscribeOCPDRealtime,
+} from "@/services/supabaseData";
 
 function formatDate(str: string): string {
   if (!str) return "—";
@@ -44,6 +54,7 @@ function formatDateLong(dateStr: string): string {
 
 interface DocRecord {
   recordKey: string;
+  tipoDocumento: TipoDocumentoRelatorio;
   data_dia: string;
   filial_nome: string;
   doc_id?: string | null;
@@ -53,6 +64,21 @@ interface DocRecord {
   data_cabecalho?: string;
   data?: string;
 }
+
+type TipoDocumentoRelatorio =
+  | "acompanhamento"
+  | "bihoraria"
+  | "empacotamento"
+  | "planejamento"
+  | "movimentacao_tuneis";
+
+const TIPO_DOCUMENTO_OPTIONS: Array<{ id: TipoDocumentoRelatorio; label: string }> = [
+  { id: "acompanhamento", label: "Acompanhamento diário da produção" },
+  { id: "bihoraria", label: "Bi-horária" },
+  { id: "empacotamento", label: "Controle de empacotamento" },
+  { id: "planejamento", label: "Planejamento de produção" },
+  { id: "movimentacao_tuneis", label: "Movimentação de túneis" },
+];
 
 export default function Relatorios() {
   const navigate = useNavigate();
@@ -64,12 +90,15 @@ export default function Relatorios() {
   // Documentos no período (grid com filtros De/Até, Filial, N° documento)
   const [docGridDataDe, setDocGridDataDe] = useState(primeiroDiaMes);
   const [docGridDataAte, setDocGridDataAte] = useState(hojeStrDoc);
+  const [docGridMesmaData, setDocGridMesmaData] = useState(false);
   const [docGridDataDeApplied, setDocGridDataDeApplied] = useState(primeiroDiaMes);
   const [docGridDataAteApplied, setDocGridDataAteApplied] = useState(hojeStrDoc);
   const [docGridFilialFilter, setDocGridFilialFilter] = useState("");
   const [docGridFilialFilterApplied, setDocGridFilialFilterApplied] = useState("");
   const [docGridNumeroFilter, setDocGridNumeroFilter] = useState("");
   const [docGridNumeroFilterApplied, setDocGridNumeroFilterApplied] = useState("");
+  const [docGridTipoFilter, setDocGridTipoFilter] = useState<TipoDocumentoRelatorio>("acompanhamento");
+  const [docGridTipoFilterApplied, setDocGridTipoFilterApplied] = useState<TipoDocumentoRelatorio>("acompanhamento");
   const [filtrosDialogOpen, setFiltrosDialogOpen] = useState(false);
   const [docGridRecords, setDocGridRecords] = useState<DocRecord[]>([]);
   const [docGridLoading, setDocGridLoading] = useState(false);
@@ -92,31 +121,96 @@ export default function Relatorios() {
       }
       const [y, m] = de.split("-").map(Number);
       const primeiroDiaMes = `${y}-${String(m).padStart(2, "0")}-01`;
-      const result = await getProducaoHistory({ dataInicio: primeiroDiaMes, dataFim: ate, limit: 2000 });
       const recordsMap = new Map<string, DocRecord>();
-      (result as any[]).forEach((item: any) => {
-        const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
-        if (!dateStr) return;
-        const filialNome = (item.filial_nome || "").trim();
-        const docId = item.doc_id ?? null;
-        const docOrdem = item.doc_ordem_global != null ? Number(item.doc_ordem_global) : null;
-        const docNum = item.doc_numero != null ? Number(item.doc_numero) : null;
-        const legacySuffix = docId == null ? `_${docOrdem ?? docNum ?? item.id ?? ""}` : "";
-        const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}${legacySuffix}`;
-        if (!recordsMap.has(recordKey)) {
-          recordsMap.set(recordKey, {
-            recordKey,
-            data_dia: dateStr,
-            filial_nome: filialNome,
-            doc_id: docId,
-            doc_ordem_global: docOrdem ?? undefined,
-            doc_numero: docNum ?? undefined,
-            id: item.id,
-            data_cabecalho: item.data_cabecalho,
-            data: item.data,
-          });
-        }
-      });
+      if (docGridTipoFilterApplied === "acompanhamento" || docGridTipoFilterApplied === "bihoraria") {
+        const result = await getProducaoHistory({ dataInicio: primeiroDiaMes, dataFim: ate, limit: 2000 });
+        const biDocIds = docGridTipoFilterApplied === "bihoraria" ? await getOcphDocIdsComBiHoraria() : null;
+        (result as any[]).forEach((item: any) => {
+          const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+          if (!dateStr) return;
+          const docId = item.doc_id ?? null;
+          if (biDocIds && (!docId || !biDocIds.has(String(docId)))) return;
+          const filialNome = (item.filial_nome || "").trim();
+          const docOrdem = item.doc_ordem_global != null ? Number(item.doc_ordem_global) : null;
+          const docNum = item.doc_numero != null ? Number(item.doc_numero) : null;
+          const legacySuffix = docId == null ? `_${docOrdem ?? docNum ?? item.id ?? ""}` : "";
+          const recordKey = `${docGridTipoFilterApplied}_${dateStr}_${filialNome}_${docId ?? "legacy"}${legacySuffix}`;
+          if (!recordsMap.has(recordKey)) {
+            recordsMap.set(recordKey, {
+              recordKey,
+              tipoDocumento: docGridTipoFilterApplied,
+              data_dia: dateStr,
+              filial_nome: filialNome,
+              doc_id: docId,
+              doc_ordem_global: docOrdem ?? undefined,
+              doc_numero: docNum ?? undefined,
+              id: item.id,
+              data_cabecalho: item.data_cabecalho,
+              data: item.data,
+            });
+          }
+        });
+      } else if (docGridTipoFilterApplied === "empacotamento") {
+        const result = await getOCTEByDateRange(de, ate);
+        result.forEach((item) => {
+          const dateStr = normalizeDataDia(item.data);
+          const filialNome = (item.filialNome || "").trim();
+          const codigo = (item.codigoDocumento || "").trim();
+          const recordKey = `empacotamento_${dateStr}_${filialNome}_${codigo || item.id}`;
+          if (!recordsMap.has(recordKey)) {
+            recordsMap.set(recordKey, {
+              recordKey,
+              tipoDocumento: "empacotamento",
+              data_dia: dateStr,
+              filial_nome: filialNome,
+              doc_id: codigo || null,
+              doc_numero: /^\d+$/.test(codigo) ? Number(codigo) : undefined,
+              id: item.id,
+              data: item.data,
+            });
+          }
+        });
+      } else if (docGridTipoFilterApplied === "planejamento") {
+        const result = await getOcppByDateRange(de, ate, undefined);
+        result.forEach((item) => {
+          const dateStr = normalizeDataDia(item.data);
+          const filialNome = (item.filial_nome || "").trim();
+          const docOrdem = item.doc_ordem_global != null ? Number(item.doc_ordem_global) : null;
+          const docNum = item.doc_numero != null ? Number(item.doc_numero) : null;
+          const recordKey = `planejamento_${dateStr}_${filialNome}_${docOrdem ?? docNum ?? item.id}`;
+          if (!recordsMap.has(recordKey)) {
+            recordsMap.set(recordKey, {
+              recordKey,
+              tipoDocumento: "planejamento",
+              data_dia: dateStr,
+              filial_nome: filialNome,
+              doc_ordem_global: docOrdem ?? undefined,
+              doc_numero: docNum ?? undefined,
+              id: item.id,
+              data: item.data,
+            });
+          }
+        });
+      } else if (docGridTipoFilterApplied === "movimentacao_tuneis") {
+        const result = await getMovimentacoesTuneis({ dataInicio: de, dataFim: ate });
+        result.forEach((item) => {
+          const dateStr = normalizeDataDia(item.dataFechamento || item.dataAbertura || "");
+          if (!dateStr) return;
+          const filialNome = (item.filialNome || "").trim();
+          const docNum = item.numeroDocumento || item.docEntry || item.id;
+          const recordKey = `mov_tuneis_${dateStr}_${filialNome}_${docNum}`;
+          if (!recordsMap.has(recordKey)) {
+            recordsMap.set(recordKey, {
+              recordKey,
+              tipoDocumento: "movimentacao_tuneis",
+              data_dia: dateStr,
+              filial_nome: filialNome,
+              doc_numero: Number(docNum),
+              id: item.id,
+            });
+          }
+        });
+      }
       const sorted = Array.from(recordsMap.values()).sort((a, b) => {
         const tA = new Date(a.data_dia).getTime();
         const tB = new Date(b.data_dia).getTime();
@@ -135,7 +229,7 @@ export default function Relatorios() {
     } finally {
       setDocGridLoading(false);
     }
-  }, [docGridDataDeApplied, docGridDataAteApplied]);
+  }, [docGridDataDeApplied, docGridDataAteApplied, docGridTipoFilterApplied]);
 
   const docGridListAfterFilial = useMemo(() => {
     let list = docGridRecords;
@@ -185,6 +279,45 @@ export default function Relatorios() {
       .catch((e) => console.error("Erro ao carregar filiais:", e));
   }, []);
 
+  const openRecordFromRelatorio = useCallback(
+    (record: DocRecord) => {
+      if (record.tipoDocumento === "acompanhamento") {
+        navigate("/analise-producao", {
+          state: {
+            loadData: record.data_dia,
+            loadFilialNome: record.filial_nome || "",
+            loadDocId: record.doc_id ?? undefined,
+            loadDocOrdemGlobal: record.doc_id == null ? (record.doc_ordem_global ?? undefined) : undefined,
+            returnTo: "/relatorios",
+          },
+        });
+        return;
+      }
+      if (record.tipoDocumento === "bihoraria") {
+        navigate("/bi-horaria", {
+          state: {
+            loadData: record.data_dia,
+            loadFilialNome: record.filial_nome || "",
+            loadDocId: record.doc_id ?? undefined,
+            loadDocOrdemGlobal: record.doc_id == null ? (record.doc_ordem_global ?? undefined) : undefined,
+            returnTo: "/relatorios",
+          },
+        });
+        return;
+      }
+      if (record.tipoDocumento === "empacotamento") {
+        navigate("/controle-empacotamento");
+        return;
+      }
+      if (record.tipoDocumento === "planejamento") {
+        navigate("/planejamento-pcp");
+        return;
+      }
+      navigate("/estoque/movimentacao-tuneis");
+    },
+    [navigate]
+  );
+
   return (
     <AppLayout>
       <div className="space-y-6 pt-4 sm:pt-6">
@@ -202,7 +335,7 @@ export default function Relatorios() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm font-medium text-muted-foreground">
               Documentos no período: {formatDate(docGridDataDeApplied)} até {formatDate(docGridDataAteApplied)}
-              {(docGridFilialFilterApplied || docGridNumeroFilterApplied) && (
+              {(docGridFilialFilterApplied || docGridNumeroFilterApplied || docGridTipoFilterApplied !== "acompanhamento") && (
                 <span className="ml-2 text-xs text-muted-foreground/80">
                   (filtros ativos)
                 </span>
@@ -218,6 +351,7 @@ export default function Relatorios() {
                     setDocGridDataAte(docGridDataAteApplied);
                     setDocGridFilialFilter(docGridFilialFilterApplied);
                     setDocGridNumeroFilter(docGridNumeroFilterApplied);
+                    setDocGridTipoFilter(docGridTipoFilterApplied);
                   }
                 }}
               >
@@ -236,27 +370,62 @@ export default function Relatorios() {
                   <DialogHeader>
                     <DialogTitle className="text-base">Filtros de relatórios</DialogTitle>
                     <DialogDescription className="text-sm text-muted-foreground">
-                      Defina o período, filial e número do documento. Ao clicar em Filtrar, a lista será atualizada.
+                      Defina o período, tipo, filial e número do documento. Ao clicar em Filtrar, a lista será atualizada.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-3 py-2">
+                    <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                      <Label htmlFor="rel-tipo" className="text-xs text-muted-foreground">Tipo</Label>
+                      <Select value={docGridTipoFilter} onValueChange={(v) => setDocGridTipoFilter(v as TipoDocumentoRelatorio)}>
+                        <SelectTrigger id="rel-tipo" className="h-9 text-sm">
+                          <SelectValue placeholder="Tipo de documento" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TIPO_DOCUMENTO_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.id} value={opt.id}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <div className="grid grid-cols-[auto_1fr] items-center gap-2">
                       <Label htmlFor="rel-de" className="text-xs text-muted-foreground">De</Label>
                       <DatePicker
                         id="rel-de"
                         value={docGridDataDe}
-                        onChange={(v) => v && setDocGridDataDe(v)}
+                        onChange={(v) => {
+                          if (!v) return;
+                          setDocGridDataDe(v);
+                          if (docGridMesmaData) setDocGridDataAte(v);
+                        }}
                         placeholder="Data inicial"
                         className="min-w-0"
                         triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
                       />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="rel-mesma-data"
+                        checked={docGridMesmaData}
+                        onCheckedChange={(checked) => {
+                          const value = Boolean(checked);
+                          setDocGridMesmaData(value);
+                          if (value && docGridDataDe) setDocGridDataAte(docGridDataDe);
+                        }}
+                      />
+                      <Label htmlFor="rel-mesma-data" className="text-xs text-muted-foreground cursor-pointer">Mesma data</Label>
                     </div>
                     <div className="grid grid-cols-[auto_1fr] items-center gap-2">
                       <Label htmlFor="rel-ate" className="text-xs text-muted-foreground">Até</Label>
                       <DatePicker
                         id="rel-ate"
                         value={docGridDataAte}
-                        onChange={(v) => v && setDocGridDataAte(v)}
+                        onChange={(v) => {
+                          if (!v) return;
+                          setDocGridDataAte(v);
+                          if (docGridMesmaData) setDocGridDataDe(v);
+                        }}
                         placeholder="Data final"
                         className="min-w-0"
                         triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -303,13 +472,14 @@ export default function Relatorios() {
                         setDocGridDataAteApplied(docGridDataAte);
                         setDocGridFilialFilterApplied(docGridFilialFilter);
                         setDocGridNumeroFilterApplied(docGridNumeroFilter.trim());
+                        setDocGridTipoFilterApplied(docGridTipoFilter);
                         setFiltrosDialogOpen(false);
                       }}
                     >
                       {docGridLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
                       Filtrar
                     </Button>
-                    {(docGridNumeroFilterApplied || docGridFilialFilterApplied) && (
+                    {(docGridNumeroFilterApplied || docGridFilialFilterApplied || docGridTipoFilterApplied !== "acompanhamento") && (
                       <Button
                         type="button"
                         variant="ghost"
@@ -320,6 +490,8 @@ export default function Relatorios() {
                           setDocGridFilialFilterApplied("");
                           setDocGridNumeroFilter("");
                           setDocGridNumeroFilterApplied("");
+                          setDocGridTipoFilter("acompanhamento");
+                          setDocGridTipoFilterApplied("acompanhamento");
                           setFiltrosDialogOpen(false);
                         }}
                       >
@@ -347,29 +519,11 @@ export default function Relatorios() {
                       key={record.recordKey}
                       role="button"
                       tabIndex={0}
-                      onClick={() =>
-                        navigate("/analise-producao", {
-                          state: {
-                            loadData: record.data_dia,
-                            loadFilialNome: record.filial_nome || "",
-                            loadDocId: record.doc_id ?? undefined,
-                            loadDocOrdemGlobal: record.doc_id == null ? (record.doc_ordem_global ?? undefined) : undefined,
-                            returnTo: "/relatorios",
-                          },
-                        })
-                      }
+                      onClick={() => openRecordFromRelatorio(record)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          navigate("/analise-producao", {
-                            state: {
-                              loadData: record.data_dia,
-                              loadFilialNome: record.filial_nome || "",
-                              loadDocId: record.doc_id ?? undefined,
-                              loadDocOrdemGlobal: record.doc_id == null ? (record.doc_ordem_global ?? undefined) : undefined,
-                              returnTo: "/relatorios",
-                            },
-                          });
+                          openRecordFromRelatorio(record);
                         }
                       }}
                       className="group relative rounded-xl border border-border/50 bg-card/95 hover:border-primary/40 hover:bg-muted/60 hover:shadow-md transition-all duration-300 p-4 sm:p-5 cursor-pointer"

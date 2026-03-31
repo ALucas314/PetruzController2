@@ -1251,6 +1251,24 @@ export async function deleteProducaoRecord(id: number) {
   if (error) throw error;
 }
 
+/**
+ * Atualiza somente qtd_hs (em lote) para um conjunto de linhas OCPD por id.
+ * O cálculo de p_hora_final deve ser feito no banco (trigger).
+ */
+export async function updateOcpdQtdHsByIds(ids: number[], qtdHs: number): Promise<void> {
+  const safeIds = (ids || []).map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0);
+  if (safeIds.length === 0) return;
+  if (!Number.isFinite(qtdHs)) throw new Error("Qtd. Hs inválida.");
+  const { error } = await supabase.from("OCPD").update({ qtd_hs: qtdHs }).in("id", safeIds);
+  if (error) {
+    const msg = String((error as { message?: string }).message || "").toLowerCase();
+    if (msg.includes("qtd_hs") && msg.includes("does not exist")) {
+      throw new Error("A coluna qtd_hs não existe na OCPD. Execute o SQL de criação da coluna no Supabase.");
+    }
+    throw error;
+  }
+}
+
 /** Exclui um documento inteiro da Produção (linhas OCPD + bi-horária OCPH). */
 export async function deleteProducaoDocumento(params: {
   docId?: string | null;

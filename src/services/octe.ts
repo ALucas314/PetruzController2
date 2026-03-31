@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 const TABLE = "OCTE";
 
 const SELECT_LIST =
-  "id, data, codigo_documento, filial_nome, codigo_item, descricao_item, unidade_item, peso, colaborador, quantidade_1, quantidade_2, quantidade_3, quantidade_4, quantidade_5, quantidade_6, quantidade_7, quantidade_8, quantidade_9, quantidade_10, quantidade_11, quantidade_12, funcao_colaborador, meta, horas, observacoes, created_at, updated_at";
+  "id, data, codigo_documento, filial_nome, codigo_item, descricao_item, unidade_item, peso, colaborador, quantidade_1, quantidade_2, quantidade_3, quantidade_4, quantidade_5, quantidade_6, quantidade_7, quantidade_8, quantidade_9, quantidade_10, quantidade_11, quantidade_12, total, t_kg, p_horas_final, eficiencia, funcao_colaborador, meta, horas, observacoes, created_at, updated_at";
 
 const FILIAL_NOME_MAX = 120;
 
@@ -35,6 +35,10 @@ export function mapOCTERow(r: Record<string, unknown>): OCTERow {
     quantidade10: num(r.quantidade_10),
     quantidade11: num(r.quantidade_11),
     quantidade12: num(r.quantidade_12),
+    total: r.total != null ? num(r.total) : null,
+    tKg: r.t_kg != null ? num(r.t_kg) : null,
+    pHorasFinal: r.p_horas_final != null ? num(r.p_horas_final) : null,
+    eficiencia: r.eficiencia != null ? num(r.eficiencia) : null,
     funcaoColaborador: r.funcao_colaborador != null ? String(r.funcao_colaborador) : "",
     meta: r.meta != null ? num(r.meta) : null,
     horas: r.horas != null ? num(r.horas) : null,
@@ -66,6 +70,10 @@ export interface OCTERow {
   quantidade10: number;
   quantidade11: number;
   quantidade12: number;
+  total: number | null;
+  tKg: number | null;
+  pHorasFinal: number | null;
+  eficiencia: number | null;
   funcaoColaborador: string;
   meta: number | null;
   horas: number | null;
@@ -96,14 +104,15 @@ export async function getNextOCTEDocumentCode(): Promise<string> {
     if (rows.length < pageSize) break;
     from += pageSize;
   }
-  let max = 0;
+  const used = new Set<number>();
   for (const c of codes) {
-    if (/^\d+$/.test(c)) {
-      const n = Number(c);
-      if (n > max) max = n;
-    }
+    if (!/^\d+$/.test(c)) continue;
+    const n = Number(c);
+    if (Number.isInteger(n) && n > 0) used.add(n);
   }
-  return String(max + 1).padStart(4, "0");
+  let next = 1;
+  while (used.has(next)) next += 1;
+  return String(next).padStart(4, "0");
 }
 
 export async function getOCTEByDateRange(dataInicio: string, dataFim: string): Promise<OCTERow[]> {
@@ -145,6 +154,7 @@ function bodyFromPayload(payload: OCTEPayload) {
     quantidade_10: num(payload.quantidade10),
     quantidade_11: num(payload.quantidade11),
     quantidade_12: num(payload.quantidade12),
+    total: payload.total == null ? null : num(payload.total),
     funcao_colaborador: payload.funcaoColaborador?.trim() || null,
     meta: payload.meta == null ? null : num(payload.meta),
     horas: payload.horas == null ? null : num(payload.horas),
@@ -173,6 +183,7 @@ export type OCTEPayload = {
   quantidade10?: number;
   quantidade11?: number;
   quantidade12?: number;
+  total?: number | null;
   funcaoColaborador?: string;
   meta?: number | null;
   horas?: number | null;

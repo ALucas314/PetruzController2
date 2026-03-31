@@ -26,6 +26,7 @@ import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, T
 import { ControleEmpacotamento } from "@/components/producao/ControleEmpacotamento";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { ExportToPng, captureElementToPngBlob, combinePngBlobsVertical } from "@/components/ExportToPng";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -65,6 +66,7 @@ import {
   deleteOCTP,
   computeDuracaoMinutos,
   parseBrazilNumber,
+  updateOcpdQtdHsByIds,
   aggregateReprocessosByCodigoInDateRange,
   type OCTPRow,
 } from "@/services/supabaseData";
@@ -521,6 +523,7 @@ const DRAFT_DEBOUNCE_MS = 1000;
 /** Rota da sub-aba “Controle de empacotamento” (sidebar + URL) */
 const ROTA_PRODUCAO_EMPACOTAMENTO = "/controle-empacotamento";
 const ROTA_PRODUCAO_ACOMPANHAMENTO = "/analise-producao";
+const ROTA_PRODUCAO_HISTORICO = "/historico-analise-producao";
 /** Rota da tela só bi-horária (sidebar + URL) */
 const ROTA_PRODUCAO_BIHORARIA = "/bi-horaria";
 
@@ -637,6 +640,7 @@ function Producao() {
   const [saveStatus, setSaveStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyData, setHistoryData] = useState<any[]>([]);
+  const [historyFiltrosDialogOpen, setHistoryFiltrosDialogOpen] = useState(false);
   const [currentView, setCurrentView] = useState<"menu" | "cadastro" | "historico" | "bihoraria">(() => {
     const s = location.state as { loadData?: string; loadFilialNome?: string } | null;
     return s?.loadData && s?.loadFilialNome ? "cadastro" : "menu";
@@ -659,6 +663,9 @@ function Producao() {
       setCurrentView("cadastro");
     } else if (location.pathname === ROTA_PRODUCAO_BIHORARIA) {
       setCurrentView("bihoraria");
+    } else if (location.pathname === ROTA_PRODUCAO_HISTORICO) {
+      setCadastroSubTab("acompanhamento");
+      setCurrentView("historico");
     } else if (location.pathname === ROTA_PRODUCAO_ACOMPANHAMENTO) {
       setCadastroSubTab("acompanhamento");
       setCurrentView("cadastro");
@@ -697,10 +704,12 @@ function Producao() {
   const [gridFiltrosDialogOpen, setGridFiltrosDialogOpen] = useState(false);
   const [gridDataDePending, setGridDataDePending] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [gridDataAtePending, setGridDataAtePending] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [gridMesmaDataPending, setGridMesmaDataPending] = useState<boolean>(false);
   /** Código do reprocesso no dialog "Filtros de produção" (ícone fábrica) — alimenta totais do período no card Reprocesso */
   const [gridDialogReprocessoCodigoPending, setGridDialogReprocessoCodigoPending] = useState<string>("");
   const [biChartDataDe, setBiChartDataDe] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [biChartDataAte, setBiChartDataAte] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [biChartMesmaData, setBiChartMesmaData] = useState<boolean>(false);
   const [biChartFilial, setBiChartFilial] = useState<string>("");
   const [biChartTipoTurno, setBiChartTipoTurno] = useState<"todos" | "1" | "2" | "3">("todos");
   const [biChartFiltrosDialogOpen, setBiChartFiltrosDialogOpen] = useState(false);
@@ -722,7 +731,7 @@ function Producao() {
   const handleVoltar = useCallback(() => {
     const s = location.state as { returnTo?: string } | null;
     if (s?.returnTo) navigate(s.returnTo);
-    else if (location.pathname === ROTA_PRODUCAO_BIHORARIA) {
+    else if (location.pathname === ROTA_PRODUCAO_BIHORARIA || location.pathname === ROTA_PRODUCAO_HISTORICO) {
       navigate("/producao", { replace: true });
     } else setCurrentView("menu");
   }, [location.state, location.pathname, navigate]);
@@ -760,6 +769,7 @@ function Producao() {
   const [reprocessoFiltroCodigoPending, setReprocessoFiltroCodigoPending] = useState<string>("");
   const [reprocessoFiltroDataInicioPending, setReprocessoFiltroDataInicioPending] = useState<string>("");
   const [reprocessoFiltroDataFimPending, setReprocessoFiltroDataFimPending] = useState<string>("");
+  const [reprocessoMesmaDataPending, setReprocessoMesmaDataPending] = useState<boolean>(false);
   /** Valor do Select: "" = filial do documento; senão nome da OCTF */
   const [reprocessoFiltroFilialNomePending, setReprocessoFiltroFilialNomePending] = useState<string>("");
   const [reprocessoPeriodoResumo, setReprocessoPeriodoResumo] = useState<{
@@ -865,6 +875,7 @@ function Producao() {
     setReprocessoFiltroCodigoPending("");
     setReprocessoFiltroDataInicioPending("");
     setReprocessoFiltroDataFimPending("");
+    setReprocessoMesmaDataPending(false);
     setReprocessoAppliedFilialNome("");
     setReprocessoFiltroFilialNomePending("");
   }, []);
@@ -937,6 +948,7 @@ function Producao() {
   const [octpFilterResponsavelPending, setOctpFilterResponsavelPending] = useState<string>("");
   const [octpFilterDataInicioPending, setOctpFilterDataInicioPending] = useState<string>("");
   const [octpFilterDataFimPending, setOctpFilterDataFimPending] = useState<string>("");
+  const [octpMesmaDataPending, setOctpMesmaDataPending] = useState<boolean>(false);
   /** Filial aplicada na busca por período (`filial_nome` na OCTP). */
   const [octpFilterFilialNome, setOctpFilterFilialNome] = useState<string>("");
   const [octpFilterFilialNomePending, setOctpFilterFilialNomePending] = useState<string>("");
@@ -1068,7 +1080,13 @@ function Producao() {
   // Filtros do histórico: intervalo de datas, linha e filial (padrão = data de hoje, permitindo seleção)
   const [historyDataInicio, setHistoryDataInicio] = useState<string>(() => new Date().toISOString().split("T")[0]);
   const [historyDataFim, setHistoryDataFim] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [historyMesmaData, setHistoryMesmaData] = useState<boolean>(false);
   const [historyLinhaFilter, setHistoryLinhaFilter] = useState<string>("");
+  const [historyQtdHsValorGeral, setHistoryQtdHsValorGeral] = useState<boolean>(true);
+  const [historyQtdHsInput, setHistoryQtdHsInput] = useState<string>("");
+  const [historyQtdHsApplied, setHistoryQtdHsApplied] = useState<string>("");
+  const [historyQtdHsPorLinhaInput, setHistoryQtdHsPorLinhaInput] = useState<Record<number, string>>({});
+  const [historyQtdHsAppliedById, setHistoryQtdHsAppliedById] = useState<Record<number, string>>({});
   /** IDs das linhas do histórico destacadas em vermelho (botão "Marcar") — persistido por usuário no localStorage */
   const [historicoLinhasVermelhas, setHistoricoLinhasVermelhas] = useState<Set<string>>(new Set());
   const [historyFilialFilter, setHistoryFilialFilter] = useState<string>("todas");
@@ -2803,6 +2821,63 @@ function Producao() {
     }
   };
 
+  const cadastrarQtdHsNoBanco = async () => {
+    const ids = historyData.map((r) => Number(r?.id)).filter((id) => Number.isInteger(id) && id > 0);
+    if (ids.length === 0) {
+      toast({ title: "Atenção", description: "Não há linhas válidas no histórico para atualizar.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      setHistoryLoading(true);
+      if (historyQtdHsValorGeral) {
+        const valorRaw = historyQtdHsInput.trim();
+        if (!valorRaw) {
+          toast({ title: "Validação", description: "Digite o valor de Qtd. Hs para cadastrar no banco.", variant: "destructive" });
+          return;
+        }
+        const qtdHs = parseBrazilNumber(valorRaw);
+        if (!Number.isFinite(qtdHs) || qtdHs < 0) {
+          toast({ title: "Validação", description: "Qtd. Hs inválida.", variant: "destructive" });
+          return;
+        }
+        await updateOcpdQtdHsByIds(ids, qtdHs);
+        setHistoryQtdHsApplied(valorRaw);
+        setHistoryQtdHsAppliedById({});
+      } else {
+        const entries = Object.entries(historyQtdHsPorLinhaInput)
+          .map(([id, value]) => ({ id: Number(id), value: String(value ?? "").trim() }))
+          .filter((e) => Number.isInteger(e.id) && e.id > 0 && e.value !== "");
+        if (entries.length === 0) {
+          toast({ title: "Validação", description: "Digite ao menos um valor por linha para cadastrar no banco.", variant: "destructive" });
+          return;
+        }
+        for (const entry of entries) {
+          const qtdHs = parseBrazilNumber(entry.value);
+          if (!Number.isFinite(qtdHs) || qtdHs < 0) {
+            toast({ title: "Validação", description: `Qtd. Hs inválida na linha ID ${entry.id}.`, variant: "destructive" });
+            return;
+          }
+        }
+        await Promise.all(entries.map((entry) => updateOcpdQtdHsByIds([entry.id], parseBrazilNumber(entry.value))));
+        const appliedById: Record<number, string> = {};
+        entries.forEach((entry) => {
+          appliedById[entry.id] = entry.value;
+        });
+        setHistoryQtdHsApplied("");
+        setHistoryQtdHsAppliedById(appliedById);
+      }
+      toast({ title: "Sucesso", description: "Qtd. Hs cadastrada no banco para as linhas filtradas." });
+      await loadHistory();
+      setHistoryFiltrosDialogOpen(false);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Erro ao cadastrar Qtd. Hs no banco.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   // Busca documentos de uma data específica e mescla em allRecords/availableDates (resolve "nenhum registro" em 12/03 etc.)
   const loadDocumentsForDate = useCallback(async (date: string) => {
     if (!date || !date.match(/^\d{4}-\d{2}-\d{2}$/)) return;
@@ -2997,10 +3072,23 @@ function Producao() {
     return allRecords;
   };
 
+  /** Índice atual válido dentro da lista de navegação do header (evita usar índice herdado de outra lista). */
+  const getCurrentDocNavIndex = (): number => {
+    const list = getRecordsForDocNav();
+    if (list.length === 0) return -1;
+    if (currentRecordIndex >= 0 && currentRecordIndex < list.length) {
+      const candidate = list[currentRecordIndex];
+      const sameId = currentRecordId != null && candidate?.id === currentRecordId;
+      const sameDoc = (candidate?.doc_id ?? null) === (currentDocId ?? null);
+      if (sameId || sameDoc) return currentRecordIndex;
+    }
+    return findCurrentRecordIndex();
+  };
+
   // Função para verificar se há registro anterior (ou se está em "novo" e existe algum documento para voltar)
   const hasPreviousRecord = (): boolean => {
     const list = getRecordsForDocNav();
-    const currentIndex = currentRecordIndex >= 0 ? currentRecordIndex : findCurrentRecordIndex();
+    const currentIndex = getCurrentDocNavIndex();
     if (currentIndex > 0) return true;
     if (currentIndex === -1 && list.length > 0) return true; // formulário vazio: seta "voltar" leva ao último doc
     return false;
@@ -3009,7 +3097,7 @@ function Producao() {
   // Função para verificar se há próximo registro (ou se está em "novo" e existe algum documento para acessar)
   const hasNextRecord = (): boolean => {
     const list = getRecordsForDocNav();
-    const currentIndex = currentRecordIndex >= 0 ? currentRecordIndex : findCurrentRecordIndex();
+    const currentIndex = getCurrentDocNavIndex();
     if (currentIndex >= 0 && currentIndex < list.length - 1) return true;
     if (currentIndex === -1 && list.length > 0) return true; // formulário vazio: seta "próximo" leva ao primeiro doc
     return false;
@@ -3100,7 +3188,7 @@ function Producao() {
   // Função para navegar para registro anterior
   const navigateToPreviousRecord = () => {
     const list = getRecordsForDocNav();
-    const currentIndex = currentRecordIndex >= 0 ? currentRecordIndex : findCurrentRecordIndex();
+    const currentIndex = getCurrentDocNavIndex();
 
     if (currentIndex > 0) {
       loadRecordByIndex(currentIndex - 1);
@@ -3112,7 +3200,7 @@ function Producao() {
   // Função para navegar para próximo registro
   const navigateToNextRecord = () => {
     const list = getRecordsForDocNav();
-    const currentIndex = currentRecordIndex >= 0 ? currentRecordIndex : findCurrentRecordIndex();
+    const currentIndex = getCurrentDocNavIndex();
 
     if (currentIndex >= 0 && currentIndex < list.length - 1) {
       loadRecordByIndex(currentIndex + 1);
@@ -3461,7 +3549,7 @@ function Producao() {
       return;
     }
     const isDocView = currentView === "cadastro" || currentView === "bihoraria";
-    const curIdx = currentRecordIndex >= 0 ? currentRecordIndex : findCurrentRecordIndex();
+    const curIdx = getCurrentDocNavIndex();
     const total = getRecordsForDocNav().length;
 
     setDocumentNav({
@@ -5643,6 +5731,20 @@ function Producao() {
                             </div>
                             <div className="rounded-lg border border-primary/30 bg-muted/25 p-3 space-y-2">
                               <p className="text-xs font-semibold text-foreground">Data do Documento</p>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id="reprocesso-dialog-mesma-data"
+                                  checked={reprocessoMesmaDataPending}
+                                  onCheckedChange={(checked) => {
+                                    const value = Boolean(checked);
+                                    setReprocessoMesmaDataPending(value);
+                                    if (value && reprocessoFiltroDataInicioPending) setReprocessoFiltroDataFimPending(reprocessoFiltroDataInicioPending);
+                                  }}
+                                />
+                                <Label htmlFor="reprocesso-dialog-mesma-data" className="text-xs text-muted-foreground cursor-pointer">
+                                  Mesma data
+                                </Label>
+                              </div>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div className="grid gap-1">
                                   <Label htmlFor="reprocesso-dialog-data-ini" className="text-xs text-muted-foreground">
@@ -5651,7 +5753,12 @@ function Producao() {
                                   <DatePicker
                                     id="reprocesso-dialog-data-ini"
                                     value={reprocessoFiltroDataInicioPending}
-                                    onChange={(v) => v && setReprocessoFiltroDataInicioPending(v.split("T")[0])}
+                                    onChange={(v) => {
+                                      if (!v) return;
+                                      const d = v.split("T")[0];
+                                      setReprocessoFiltroDataInicioPending(d);
+                                      if (reprocessoMesmaDataPending) setReprocessoFiltroDataFimPending(d);
+                                    }}
                                     placeholder="Data inicial"
                                     className="min-w-0"
                                     triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -5664,7 +5771,12 @@ function Producao() {
                                   <DatePicker
                                     id="reprocesso-dialog-data-fim"
                                     value={reprocessoFiltroDataFimPending}
-                                    onChange={(v) => v && setReprocessoFiltroDataFimPending(v.split("T")[0])}
+                                    onChange={(v) => {
+                                      if (!v) return;
+                                      const d = v.split("T")[0];
+                                      setReprocessoFiltroDataFimPending(d);
+                                      if (reprocessoMesmaDataPending) setReprocessoFiltroDataInicioPending(d);
+                                    }}
                                     placeholder="Data final"
                                     className="min-w-0"
                                     triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -6083,6 +6195,20 @@ function Producao() {
                           <div className="grid gap-3 py-2">
                             <div className="rounded-lg border border-primary/30 bg-muted/25 p-3 space-y-2">
                               <p className="text-xs font-semibold text-foreground">Data do Documento</p>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id="octp-dialog-mesma-data"
+                                  checked={octpMesmaDataPending}
+                                  onCheckedChange={(checked) => {
+                                    const value = Boolean(checked);
+                                    setOctpMesmaDataPending(value);
+                                    if (value && octpFilterDataInicioPending) setOctpFilterDataFimPending(octpFilterDataInicioPending);
+                                  }}
+                                />
+                                <Label htmlFor="octp-dialog-mesma-data" className="text-xs text-muted-foreground cursor-pointer">
+                                  Mesma data
+                                </Label>
+                              </div>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div className="grid gap-1">
                                   <Label htmlFor="octp-dialog-data-ini" className="text-xs text-muted-foreground">
@@ -6091,7 +6217,12 @@ function Producao() {
                                   <DatePicker
                                     id="octp-dialog-data-ini"
                                     value={octpFilterDataInicioPending}
-                                    onChange={(v) => v && setOctpFilterDataInicioPending(v.split("T")[0])}
+                                    onChange={(v) => {
+                                      if (!v) return;
+                                      const d = v.split("T")[0];
+                                      setOctpFilterDataInicioPending(d);
+                                      if (octpMesmaDataPending) setOctpFilterDataFimPending(d);
+                                    }}
                                     placeholder="Data inicial"
                                     className="min-w-0"
                                     triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -6104,7 +6235,12 @@ function Producao() {
                                   <DatePicker
                                     id="octp-dialog-data-fim"
                                     value={octpFilterDataFimPending}
-                                    onChange={(v) => v && setOctpFilterDataFimPending(v.split("T")[0])}
+                                    onChange={(v) => {
+                                      if (!v) return;
+                                      const d = v.split("T")[0];
+                                      setOctpFilterDataFimPending(d);
+                                      if (octpMesmaDataPending) setOctpFilterDataInicioPending(d);
+                                    }}
                                     placeholder="Data final"
                                     className="min-w-0"
                                     triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -6191,6 +6327,7 @@ function Producao() {
                                 setOctpFilterResponsavelPending("");
                                 setOctpFilterDataInicioPending("");
                                 setOctpFilterDataFimPending("");
+                                setOctpMesmaDataPending(false);
                                 setOctpFilterDuracaoMinPending("");
                                 setOctpFilterDuracaoMaxPending("");
                               }}
@@ -7124,91 +7261,205 @@ function Producao() {
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />
 
             <div className="relative z-10">
-              {/* Filtros: intervalo de datas, filial e linha — coluna em telas menores, linha apenas em telas grandes (mais espaço com sidebar) */}
               <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between w-full p-4 lg:p-8 lg:pb-5 lg:pt-6 transition-all duration-500 bg-gradient-to-r from-card via-card to-card rounded-t-2xl overflow-visible">
-                <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-3 overflow-visible">
-                  <div className="flex items-center gap-2 w-full min-w-0 lg:flex-1 lg:min-w-[150px] overflow-visible">
-                    <Label htmlFor="history-data-inicio" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">De</Label>
-                    <DatePicker
-                      id="history-data-inicio"
-                      value={historyDataInicio}
-                      onChange={setHistoryDataInicio}
-                      placeholder="Data inicial"
-                      className="h-9 flex-1 min-w-[120px] w-full lg:w-[130px] text-sm overflow-visible"
-                      triggerClassName="h-9 text-sm"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2 w-full min-w-0 lg:flex-1 lg:min-w-[150px] overflow-visible">
-                    <Label htmlFor="history-data-fim" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Até</Label>
-                    <DatePicker
-                      id="history-data-fim"
-                      value={historyDataFim}
-                      onChange={setHistoryDataFim}
-                      placeholder="Data final"
-                      className="h-9 flex-1 min-w-[120px] w-full lg:w-[130px] text-sm overflow-visible"
-                      triggerClassName="h-9 text-sm"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2 w-full min-w-0 lg:w-auto">
-                    <Label htmlFor="history-filial" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-                      Filial
-                    </Label>
-                    <Select
-                      value={historyFilialFilter}
-                      onValueChange={(v) => setHistoryFilialFilter(v)}
-                    >
-                      <SelectTrigger
-                        id="history-filial"
-                        className="h-9 w-full min-w-0 lg:w-[220px] text-sm"
+                <div className="flex flex-wrap items-center gap-2">
+                  <Dialog open={historyFiltrosDialogOpen} onOpenChange={setHistoryFiltrosDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={producaoFiltrosTriggerClassName}
+                        aria-expanded={historyFiltrosDialogOpen}
                       >
-                        <SelectValue placeholder="Todas as filiais" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="todas">Todas as filiais</SelectItem>
-                        {filiaisSortedByNome.map((filial) => (
-                          <SelectItem
-                            key={filial.id}
-                            value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}
+                        <Filter className="h-4 w-4 shrink-0" />
+                        <span>Filtros</span>
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[560px]">
+                      <DialogHeader>
+                        <DialogTitle className="text-base">Filtros do histórico</DialogTitle>
+                        <DialogDescription>
+                          Defina intervalo de datas, filial e linha para filtrar o Histórico de Análise de Produção.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="sm:col-span-2 flex items-center gap-2">
+                            <Checkbox
+                              id="history-mesma-data"
+                              checked={historyMesmaData}
+                              onCheckedChange={(checked) => {
+                                const value = Boolean(checked);
+                                setHistoryMesmaData(value);
+                                if (value && historyDataInicio) setHistoryDataFim(historyDataInicio);
+                              }}
+                            />
+                            <Label htmlFor="history-mesma-data" className="text-sm font-medium cursor-pointer">
+                              Mesma data
+                            </Label>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="history-data-inicio">De</Label>
+                            <DatePicker
+                              id="history-data-inicio"
+                              value={historyDataInicio}
+                              onChange={(v) => {
+                                setHistoryDataInicio(v);
+                                if (historyMesmaData) setHistoryDataFim(v);
+                              }}
+                              placeholder="Data inicial"
+                              className="h-9"
+                              triggerClassName="h-9"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label htmlFor="history-data-fim">Até</Label>
+                            <DatePicker
+                              id="history-data-fim"
+                              value={historyDataFim}
+                              onChange={(v) => {
+                                setHistoryDataFim(v);
+                                if (historyMesmaData) setHistoryDataInicio(v);
+                              }}
+                              placeholder="Data final"
+                              className="h-9"
+                              triggerClassName="h-9"
+                            />
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <Label htmlFor="history-filial">Filial</Label>
+                            <Select value={historyFilialFilter} onValueChange={(v) => setHistoryFilialFilter(v)}>
+                              <SelectTrigger id="history-filial" className="h-9">
+                                <SelectValue placeholder="Todas as filiais" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="todas">Todas as filiais</SelectItem>
+                                {filiaisSortedByNome.map((filial) => (
+                                  <SelectItem
+                                    key={filial.id}
+                                    value={filial.codigo?.trim() ? filial.codigo.trim() : `id:${filial.id}`}
+                                  >
+                                    {filial.nome}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1.5 sm:col-span-2">
+                            <Label htmlFor="history-linha">Linha</Label>
+                            <Select value={historyLinhaFilter || "todas"} onValueChange={(v) => setHistoryLinhaFilter(v === "todas" ? "" : v)}>
+                              <SelectTrigger id="history-linha" className="h-9">
+                                <SelectValue placeholder="Todas as linhas" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="todas">Todas as linhas</SelectItem>
+                                {productionLines.map((line) => (
+                                  <SelectItem key={line.id} value={line.code ? String(line.code) : `line-${line.id}`}>
+                                    {line.name || line.code || `Linha ${line.id}`}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2 sm:col-span-2">
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id="history-qtd-hs-valor-geral"
+                                checked={historyQtdHsValorGeral}
+                                onCheckedChange={(checked) => setHistoryQtdHsValorGeral(Boolean(checked))}
+                              />
+                              <Label htmlFor="history-qtd-hs-valor-geral" className="text-sm font-medium cursor-pointer">
+                                Valor geral
+                              </Label>
+                            </div>
+
+                            {historyQtdHsValorGeral ? (
+                              <div className="space-y-1.5">
+                                <Label htmlFor="history-qtd-hs">Digite o valor Qtd. Hs</Label>
+                                <Input
+                                  id="history-qtd-hs"
+                                  value={historyQtdHsInput}
+                                  onChange={(e) => setHistoryQtdHsInput(e.target.value)}
+                                  placeholder="Ex.: 504 ou 12,5"
+                                  className="h-9"
+                                />
+                              </div>
+                            ) : (
+                              <div className="space-y-2 max-h-64 overflow-auto rounded-md border border-border/60 p-3">
+                                {historyData.length === 0 ? (
+                                  <p className="text-xs text-muted-foreground">Sem linhas no histórico para editar por item.</p>
+                                ) : (
+                                  historyData.map((record, idx) => {
+                                    const id = Number(record?.id);
+                                    if (!Number.isInteger(id) || id <= 0) return null;
+                                    const desc = String(record?.descricao_item ?? "").trim() || `Linha ${idx + 1}`;
+                                    return (
+                                      <div key={`qtd-hs-line-${id}`} className="space-y-1.5">
+                                        <p className="text-xs text-muted-foreground leading-snug">{desc}</p>
+                                        <Input
+                                          value={historyQtdHsPorLinhaInput[id] ?? ""}
+                                          onChange={(e) =>
+                                            setHistoryQtdHsPorLinhaInput((prev) => ({ ...prev, [id]: e.target.value }))
+                                          }
+                                          placeholder="Digite Qtd. Hs desta linha"
+                                          className="h-8"
+                                        />
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
+                          <Button type="button" variant="outline" className="h-9" onClick={() => setHistoryFiltrosDialogOpen(false)}>
+                            Cancelar
+                          </Button>
+                          <Button
+                            type="button"
+                            className="h-9 bg-emerald-600 text-white hover:bg-emerald-700"
+                            onClick={() => void cadastrarQtdHsNoBanco()}
+                            disabled={
+                              historyLoading ||
+                              (historyQtdHsValorGeral
+                                ? !historyQtdHsInput.trim()
+                                : Object.values(historyQtdHsPorLinhaInput).every((v) => String(v ?? "").trim() === ""))
+                            }
                           >
-                            {filial.nome}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-2 w-full min-w-0 lg:w-auto">
-                    <Label htmlFor="history-linha" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Linha</Label>
-                    <Select value={historyLinhaFilter || "todas"} onValueChange={(v) => setHistoryLinhaFilter(v === "todas" ? "" : v)}>
-                      <SelectTrigger id="history-linha" className="h-8 flex-1 min-w-0 sm:flex-none sm:w-[130px] text-xs">
-                        <SelectValue placeholder="Todas as linhas" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="todas">Todas as linhas</SelectItem>
-                        {productionLines.map((line) => (
-                          <SelectItem key={line.id} value={line.code ? String(line.code) : `line-${line.id}`}>
-                            {line.name || line.code || `Linha ${line.id}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      loadHistory();
-                    }}
-                    disabled={historyLoading}
-                    className="w-full min-[791px]:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/30 rounded-lg shadow-sm hover:from-primary/20 hover:to-primary/10 hover:border-primary/40 hover:shadow-md transition-all duration-300 text-sm font-semibold text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Filtrar histórico pelo intervalo e linha"
-                  >
-                    {historyLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Database className="h-4 w-4" />
-                    )}
-                    <span>{historyLoading ? "Carregando..." : "Filtrar"}</span>
-                  </button>
+                            {historyLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                            Cadastrar no banco
+                          </Button>
+                          <Button
+                            type="button"
+                            className="h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+                            onClick={() => {
+                              if (historyQtdHsValorGeral) {
+                                setHistoryQtdHsApplied(historyQtdHsInput.trim());
+                                setHistoryQtdHsAppliedById({});
+                              } else {
+                                const perLineApplied: Record<number, string> = {};
+                                Object.entries(historyQtdHsPorLinhaInput).forEach(([id, value]) => {
+                                  const n = Number(id);
+                                  const v = String(value ?? "").trim();
+                                  if (Number.isInteger(n) && n > 0 && v !== "") perLineApplied[n] = v;
+                                });
+                                setHistoryQtdHsApplied("");
+                                setHistoryQtdHsAppliedById(perLineApplied);
+                              }
+                              void loadHistory();
+                              setHistoryFiltrosDialogOpen(false);
+                            }}
+                            disabled={historyLoading}
+                          >
+                            {historyLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Filter className="h-4 w-4 mr-2" />}
+                            Filtrar
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+
                   <ExportToPng
                     targetRef={historicoCardRef}
                     filenamePrefix="historico-analise-producao"
@@ -7248,10 +7499,11 @@ function Producao() {
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Planejada</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Realizada</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Diferença</TableHead>
-                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Kg/h</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Restante</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Hora final</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">% Meta</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Hs</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">P. Hora Final</TableHead>
                           <TableHead className="text-xs sm:text-sm text-right w-[100px] whitespace-nowrap">Ações</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -7297,9 +7549,22 @@ function Producao() {
                           const linhaNome = productionLines.find(
                             (l) => String(l.id) === String(record.line_id) || l.code === linhaStr || l.name === linhaStr
                           )?.name ?? (linhaStr || "-");
-                          const kgPorHora = record.calculo_1_horas != null && record.calculo_1_horas !== ""
-                            ? String(record.calculo_1_horas).replace(".", ",")
-                            : "-";
+                          const recordId = Number(record.id);
+                          const qtdHsFromPerLine =
+                            Number.isInteger(recordId) && recordId > 0 ? historyQtdHsAppliedById[recordId] : undefined;
+                          const qtdHs =
+                            qtdHsFromPerLine != null && String(qtdHsFromPerLine).trim() !== ""
+                              ? String(qtdHsFromPerLine).trim()
+                              : historyQtdHsApplied !== ""
+                                ? historyQtdHsApplied
+                                : (record.qtd_hs != null && String(record.qtd_hs).trim() !== ""
+                                  ? String(record.qtd_hs).replace(".", ",")
+                                  : "-");
+                          const qtdHsNum = qtdHs !== "-" ? parseBrazilNumber(qtdHs) : NaN;
+                          const prodHora =
+                            Number.isFinite(qtdHsNum) && qtdHsNum > 0
+                              ? formatTotal(qtdRealizadaNum / qtdHsNum)
+                              : "-";
 
                           // Mesma lógica do Acompanhamento diário: restante e hora final ao vivo (hora atual + restante)
                           // quando a previsão salva já passou e ainda há trabalho — evita valores congelados no histórico.
@@ -7392,10 +7657,11 @@ function Producao() {
                               <TableCell className={`text-xs sm:text-sm text-right ${parseFloat(record.diferenca) > 0 ? "text-destructive" : "text-success"}`}>
                                 {formatTotal(Math.abs(parseFloat(record.diferenca) || 0))}
                               </TableCell>
-                              <TableCell className="text-xs sm:text-sm text-right font-mono">{kgPorHora}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{restante}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{horaFinalStr}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right font-semibold">{percentual}</TableCell>
+                              <TableCell className="text-xs sm:text-sm text-right font-mono">{qtdHs}</TableCell>
+                              <TableCell className="text-xs sm:text-sm text-right font-mono">{prodHora}</TableCell>
                               <TableCell className="text-xs sm:text-sm text-right">
                                 <Button
                                   type="button"
@@ -7449,6 +7715,20 @@ function Producao() {
                 <p className="text-[11px] text-muted-foreground leading-snug">
                   Usado para o grid de documentos e para somar Cortado/Usado do reprocesso na filial atual.
                 </p>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="grid-dialog-mesma-data"
+                    checked={gridMesmaDataPending}
+                    onCheckedChange={(checked) => {
+                      const value = Boolean(checked);
+                      setGridMesmaDataPending(value);
+                      if (value && gridDataDePending) setGridDataAtePending(gridDataDePending);
+                    }}
+                  />
+                  <Label htmlFor="grid-dialog-mesma-data" className="text-xs text-muted-foreground cursor-pointer">
+                    Mesma data
+                  </Label>
+                </div>
                 <div className="grid grid-cols-[auto_1fr] items-center gap-2">
                   <Label htmlFor="grid-dialog-de" className="text-xs text-muted-foreground">
                     De
@@ -7456,7 +7736,11 @@ function Producao() {
                   <DatePicker
                     id="grid-dialog-de"
                     value={gridDataDePending}
-                    onChange={(v) => v && setGridDataDePending(v)}
+                    onChange={(v) => {
+                      if (!v) return;
+                      setGridDataDePending(v);
+                      if (gridMesmaDataPending) setGridDataAtePending(v);
+                    }}
                     placeholder="Data"
                     className="min-w-0"
                     triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -7469,7 +7753,11 @@ function Producao() {
                   <DatePicker
                     id="grid-dialog-ate"
                     value={gridDataAtePending}
-                    onChange={(v) => v && setGridDataAtePending(v)}
+                    onChange={(v) => {
+                      if (!v) return;
+                      setGridDataAtePending(v);
+                      if (gridMesmaDataPending) setGridDataDePending(v);
+                    }}
                     placeholder="Data"
                     className="min-w-0"
                     triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
@@ -7514,17 +7802,41 @@ function Producao() {
                 <Label className="text-xs text-muted-foreground">De</Label>
                 <DatePicker
                   value={biChartDataDe}
-                  onChange={(v) => v && setBiChartDataDe(v.split("T")[0])}
+                  onChange={(v) => {
+                    if (!v) return;
+                    const d = v.split("T")[0];
+                    setBiChartDataDe(d);
+                    if (biChartMesmaData) setBiChartDataAte(d);
+                  }}
                   placeholder="Data inicial"
                   className="min-w-0"
                   triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"
                 />
               </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="bichart-dialog-mesma-data"
+                  checked={biChartMesmaData}
+                  onCheckedChange={(checked) => {
+                    const value = Boolean(checked);
+                    setBiChartMesmaData(value);
+                    if (value && biChartDataDe) setBiChartDataAte(biChartDataDe);
+                  }}
+                />
+                <Label htmlFor="bichart-dialog-mesma-data" className="text-xs text-muted-foreground cursor-pointer">
+                  Mesma data
+                </Label>
+              </div>
               <div className="grid grid-cols-[auto_1fr] items-center gap-2">
                 <Label className="text-xs text-muted-foreground">Até</Label>
                 <DatePicker
                   value={biChartDataAte}
-                  onChange={(v) => v && setBiChartDataAte(v.split("T")[0])}
+                  onChange={(v) => {
+                    if (!v) return;
+                    const d = v.split("T")[0];
+                    setBiChartDataAte(d);
+                    if (biChartMesmaData) setBiChartDataDe(d);
+                  }}
                   placeholder="Data final"
                   className="min-w-0"
                   triggerClassName="h-9 rounded-md border border-input bg-background px-2 text-sm w-full"

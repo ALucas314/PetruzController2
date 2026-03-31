@@ -29,6 +29,7 @@ const routeTitles: Record<string, string> = {
   "/dashboard": "Painel de Controle",
   "/producao": "Produção",
   "/analise-producao": "Análise de produção",
+  "/historico-analise-producao": "Histórico de Análise de produção",
   "/controle-empacotamento": "Controle de empacotamento",
   "/bi-horaria": "Bi-horária",
   "/planejamento-pcp": "Planejamento (PCP)",

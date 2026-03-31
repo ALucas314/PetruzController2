@@ -17,6 +17,8 @@ import {
   Users,
   Timer,
   Briefcase,
+  FolderOpen,
+  Search,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -24,6 +26,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSidebarContext } from "@/contexts/SidebarContext";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
 
 // ============================================================================
 // TYPES & CONSTANTS
@@ -42,6 +45,14 @@ interface MenuItem {
   subItems?: SubMenuItem[];
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .trim();
+}
+
 const menuItems: MenuItem[] = [
   { title: "Painel de Controle", url: "/dashboard", icon: LayoutDashboard },
   {
@@ -50,12 +61,10 @@ const menuItems: MenuItem[] = [
     icon: Factory,
     subItems: [
       { title: "Acompanhamento diário da produção", url: "/analise-producao", icon: TrendingUp },
+      { title: "Histórico de Análise de produção", url: "/historico-analise-producao", icon: TrendingUp },
       { title: "Bi-horária", url: "/bi-horaria", icon: Timer },
       { title: "Controle de empacotamento", url: "/controle-empacotamento", icon: Package },
-      // { title: "Planejamento (PCP)", url: "/planejamento-pcp", icon: Factory }, // oculto por enquanto
-      { title: "Cadastro de Linhas", url: "/cadastro-linhas", icon: Factory },
-      { title: "Cadastro de Colaboradores", url: "/cadastro-colaboradores", icon: Users },
-      { title: "Cadastro de funções", url: "/cadastro-funcoes", icon: Briefcase },
+      { title: "Planejamento de produção", url: "/planejamento-pcp", icon: Factory },
     ]
   },
   {
@@ -63,9 +72,19 @@ const menuItems: MenuItem[] = [
     url: "/estoque",
     icon: Package,
     subItems: [
+      { title: "Movimentação de Túneis", url: "/estoque/movimentacao-tuneis", icon: ArrowLeftRight },
+    ],
+  },
+  {
+    title: "Cadastros",
+    url: "/cadastro-linhas",
+    icon: FolderOpen,
+    subItems: [
+      { title: "Cadastro de Linhas", url: "/cadastro-linhas", icon: Factory },
+      { title: "Cadastro de Colaboradores", url: "/cadastro-colaboradores", icon: Users },
+      { title: "Cadastro de funções", url: "/cadastro-funcoes", icon: Briefcase },
       { title: "Cadastro de Túneis", url: "/estoque/cadastro-tuneis", icon: Thermometer },
       { title: "Cadastro de tipo de produtos", url: "/estoque/cadastro-tipo-produto", icon: Tags },
-      { title: "Movimentação de Túneis", url: "/estoque/movimentacao-tuneis", icon: ArrowLeftRight },
     ],
   },
   { title: "Relatórios", url: "/relatorios", icon: FileText },
@@ -483,30 +502,64 @@ const SidebarContent = memo(({
   const iconOnly = isInMobileSheet ? false : collapsed || !showExpandedLabels;
   const logoCollapsed = isInMobileSheet ? false : collapsed;
   const logoShowLabels = isInMobileSheet ? true : showExpandedLabels;
+  const [menuSearch, setMenuSearch] = useState("");
+  const normalizedSearch = normalizeSearchText(menuSearch);
   const expandedItemsKey = useMemo(() => {
     return Array.from(expandedItems).sort().join(',');
   }, [expandedItems]);
 
   const navItems = useMemo(() =>
-    menuItems.map((item) => {
+    menuItems
+    .map((item) => {
+      const parentMatch = normalizeSearchText(item.title).includes(normalizedSearch);
+      const filteredSubItems = item.subItems
+        ? (normalizedSearch
+          ? item.subItems.filter((subItem) => normalizeSearchText(subItem.title).includes(normalizedSearch))
+          : item.subItems)
+        : undefined;
+
+      const hasVisibleSubItems = !!filteredSubItems && filteredSubItems.length > 0;
+      const visible = normalizedSearch.length === 0 || parentMatch || hasVisibleSubItems;
+      if (!visible) return null;
+
+      const effectiveItem: MenuItem = filteredSubItems ? { ...item, subItems: filteredSubItems } : item;
       const isActive = location.pathname === item.url;
-      const isSubItemActive = item.subItems?.some(
+      const isSubItemActive = effectiveItem.subItems?.some(
         (subItem) => location.pathname === subItem.url || location.pathname.startsWith(subItem.url + "/")
       );
       return {
-        item,
+        item: effectiveItem,
         isActive: isActive || isSubItemActive || false,
-        isExpanded: expandedItems.has(item.title),
+        isExpanded: normalizedSearch.length > 0 ? hasVisibleSubItems : expandedItems.has(item.title),
       };
-    }),
-    [location.pathname, expandedItemsKey]
+    })
+    .filter((entry): entry is { item: MenuItem; isActive: boolean; isExpanded: boolean } => entry !== null),
+    [location.pathname, expandedItemsKey, normalizedSearch]
   );
 
   return (
     <>
       <SidebarLogo collapsed={logoCollapsed} showLabels={logoShowLabels} />
 
+      {!iconOnly && (
+        <div className="px-3 pt-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sidebar-muted-foreground" />
+            <Input
+              value={menuSearch}
+              onChange={(e) => setMenuSearch(e.target.value)}
+              placeholder="Buscar menu..."
+              className="h-9 pl-9 bg-sidebar-accent/30 border-sidebar-border/60"
+              aria-label="Buscar opções da sidebar"
+            />
+          </div>
+        </div>
+      )}
+
       <nav className="flex-1 space-y-2 py-4 overflow-y-auto overflow-x-hidden min-w-0 px-3 scrollbar-thin scrollbar-thumb-sidebar-accent/50 scrollbar-track-transparent hover:scrollbar-thumb-sidebar-accent transition-colors">
+        {!iconOnly && normalizedSearch.length > 0 && navItems.length === 0 ? (
+          <p className="px-1 text-xs text-sidebar-muted-foreground">Nenhuma opção encontrada.</p>
+        ) : null}
         {navItems.map(({ item, isActive, isExpanded }) => {
           if (item.subItems && item.subItems.length > 0) {
             return (

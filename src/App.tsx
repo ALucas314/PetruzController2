@@ -74,6 +74,7 @@ const router = createBrowserRouter([
       { path: "dashboard", element: <ProtectedRoute><Index /></ProtectedRoute> },
       { path: "producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
       { path: "analise-producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
+      { path: "historico-analise-producao", element: <ProtectedRoute><Producao /></ProtectedRoute> },
       { path: "controle-empacotamento", element: <ProtectedRoute><Producao /></ProtectedRoute> },
       { path: "bi-horaria", element: <ProtectedRoute><Producao /></ProtectedRoute> },
       { path: "planejamento-pcp", element: <ProtectedRoute><PlanejamentoProducao /></ProtectedRoute> },
