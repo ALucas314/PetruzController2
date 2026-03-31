@@ -228,7 +228,8 @@ type ColaboradorYAxisTickProps = {
 };
 
 function buildColaboradorYAxisTick(isMobile: boolean, isCompact: boolean) {
-  const lineMax = isCompact ? 11 : isMobile ? 14 : 32;
+  /** Mobile: nomes mais curtos = eixo Y mais estreito e gráfico mais à esquerda. */
+  const lineMax = isCompact ? 10 : isMobile ? 11 : 32;
   const fs = isCompact ? 9 : isMobile ? 10 : 12;
 
   return function ColaboradorYAxisTick({ x = 0, y = 0, payload }: ColaboradorYAxisTickProps) {
@@ -388,17 +389,17 @@ export function EmpacotamentoTKgMetaChart({ rows, subtitle }: Props) {
   const gradTkg = `emp-tkg-${reactId}`;
   const gradMeta = `emp-meta-${reactId}`;
 
-  /** Telas estreitas: eixo Y mais largo + nome em 2 linhas; evita “sumir” o colaborador. */
-  const yAxisWidth = isCompact ? 122 : isMobile ? 102 : 148;
+  /** Eixo Y estreito + margin.left pequeno desloca barras e grade para a esquerda. */
+  const yAxisWidth = isCompact ? 96 : isMobile ? 76 : 132;
   const chartMargin = isMobile
-    ? { top: 6, right: 10, left: 4, bottom: isCompact ? 10 : 22 }
-    : { top: 8, right: 16, left: 8, bottom: 8 };
+    ? { top: 6, right: 10, left: 2, bottom: isCompact ? 10 : 22 }
+    : { top: 8, right: 16, left: 4, bottom: 8 };
   const barThickness = isMobile ? 22 : 26;
   /** Largura mínima (px) da barra T. KG — Recharts expande a barra além do valor no eixo X só para o rótulo caber. */
   const tKgBarMinWidthPx = isCompact ? 118 : isMobile ? 110 : 124;
 
   return (
-    <div className="rounded-lg border border-border/50 bg-muted/20 px-2 py-4 sm:px-4 w-full min-w-0">
+    <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-4 sm:px-4 w-full min-w-0 max-w-full">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div ref={exportCardRef} className="min-w-0 flex-1 space-y-3">
           <div className="space-y-0.5">
@@ -419,8 +420,8 @@ export function EmpacotamentoTKgMetaChart({ rows, subtitle }: Props) {
               <span className="text-muted-foreground font-medium">Meta Kg</span>
             </span>
           </div>
-          <div className="empacotamento-tkg-meta-chart w-full min-w-0 overflow-x-auto rounded-xl border border-border/40 bg-card/40 p-2 sm:p-3 [&_.recharts-cartesian-grid-horizontal_line]:stroke-border/30 [&_.recharts-legend-item-text]:text-muted-foreground">
-            <div className={`min-w-0 sm:min-w-0 ${isCompact ? "min-w-[300px]" : isMobile ? "min-w-[280px]" : ""}`}>
+          <div className="empacotamento-tkg-meta-chart w-full min-w-0 max-w-full overflow-x-auto rounded-xl border border-border/40 bg-card/40 pl-1 pr-2 py-2 sm:pl-2 sm:pr-3 sm:py-3 [&_.recharts-cartesian-grid-horizontal_line]:stroke-border/30 [&_.recharts-legend-item-text]:text-muted-foreground">
+            <div className="min-w-0 w-full max-w-full">
               <ResponsiveContainer width="100%" height={chartHeight} minWidth={200}>
                 <BarChart
                   layout="vertical"
@@ -463,6 +464,8 @@ export function EmpacotamentoTKgMetaChart({ rows, subtitle }: Props) {
                   />
                   {!isCompact ? (
                     <Legend
+                      align="center"
+                      verticalAlign="bottom"
                       wrapperStyle={{ paddingTop: isMobile ? 4 : 8, fontSize: isMobile ? 10 : 12 }}
                       iconSize={isMobile ? 10 : 14}
                       formatter={(value) => (value === "tKg" ? "T. KG" : "Meta Kg")}
