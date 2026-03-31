@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 const TABLE = "OCTE";
 
 const SELECT_LIST =
-  "id, data, codigo_documento, filial_nome, codigo_item, descricao_item, unidade_item, peso, colaborador, quantidade_1, quantidade_2, quantidade_3, quantidade_4, quantidade_5, quantidade_6, quantidade_7, quantidade_8, quantidade_9, quantidade_10, quantidade_11, quantidade_12, total, t_kg, p_horas_final, eficiencia, funcao_colaborador, meta, horas, observacoes, created_at, updated_at";
+  "id, data, codigo_documento, filial_nome, codigo_item, descricao_item, unidade_item, peso, colaborador, quantidade_1, quantidade_2, quantidade_3, quantidade_4, quantidade_5, quantidade_6, quantidade_7, quantidade_8, quantidade_9, quantidade_10, quantidade_11, quantidade_12, total, t_kg, p_horas_final, eficiencia, funcao_colaborador, meta, meta_kg, horas, observacoes, created_at, updated_at";
 
 const FILIAL_NOME_MAX = 120;
 
@@ -41,6 +41,7 @@ export function mapOCTERow(r: Record<string, unknown>): OCTERow {
     eficiencia: r.eficiencia != null ? num(r.eficiencia) : null,
     funcaoColaborador: r.funcao_colaborador != null ? String(r.funcao_colaborador) : "",
     meta: r.meta != null ? num(r.meta) : null,
+    metaKg: r.meta_kg != null ? num(r.meta_kg) : null,
     horas: r.horas != null ? num(r.horas) : null,
     observacoes: r.observacoes != null ? String(r.observacoes) : "",
     createdAt: r.created_at != null ? String(r.created_at) : null,
@@ -76,24 +77,33 @@ export interface OCTERow {
   eficiencia: number | null;
   funcaoColaborador: string;
   meta: number | null;
+  /** Meta em kg (meta × peso); persistido em coluna `meta_kg`. */
+  metaKg: number | null;
   horas: number | null;
   observacoes: string;
   createdAt: string | null;
   updatedAt: string | null;
 }
 
-/** Próximo código de documento (0001, 0002, …) com base em códigos já usados que são só dígitos (UUIDs e outros formatos são ignorados). */
-export async function getNextOCTEDocumentCode(): Promise<string> {
+/**
+ * Próximo código de documento (0001, 0002, …) com base em códigos já usados que são só dígitos
+ * (UUIDs e outros formatos são ignorados).
+ * Com `filialNome`, considera apenas linhas daquela filial (mesma regra da conta na tela).
+ */
+export async function getNextOCTEDocumentCode(filialNome?: string | null): Promise<string> {
   const codes = new Set<string>();
   const pageSize = 1000;
   let from = 0;
+  const filial = filialNome != null ? String(filialNome).trim() : "";
   for (let p = 0; p < 100; p++) {
-    const { data, error } = await supabase
+    let q = supabase
       .from(TABLE)
       .select("codigo_documento")
       .not("codigo_documento", "is", null)
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
+    if (filial) q = q.eq("filial_nome", filial);
+    const { data, error } = await q;
     if (error) throw error;
     const rows = data || [];
     for (const r of rows) {
@@ -130,6 +140,13 @@ export async function getOCTEByDateRange(dataInicio: string, dataFim: string): P
   return (data || []).map((row) => mapOCTERow(row as Record<string, unknown>));
 }
 
+function metaKgFromMetaEPeso(meta: number | null | undefined, peso: number | null | undefined): number | null {
+  if (meta == null) return null;
+  const m = num(meta);
+  if (m <= 0) return null;
+  return m * num(peso ?? 0);
+}
+
 function bodyFromPayload(payload: OCTEPayload) {
   return {
     data: String(payload.data || "").split("T")[0],
@@ -157,6 +174,10 @@ function bodyFromPayload(payload: OCTEPayload) {
     total: payload.total == null ? null : num(payload.total),
     funcao_colaborador: payload.funcaoColaborador?.trim() || null,
     meta: payload.meta == null ? null : num(payload.meta),
+    meta_kg:
+      payload.metaKg != null
+        ? num(payload.metaKg)
+        : metaKgFromMetaEPeso(payload.meta, payload.peso),
     horas: payload.horas == null ? null : num(payload.horas),
     observacoes: payload.observacoes?.trim() || null,
   };
@@ -186,6 +207,8 @@ export type OCTEPayload = {
   total?: number | null;
   funcaoColaborador?: string;
   meta?: number | null;
+  /** Se omitido, grava `meta × peso` (igual ao relatório). */
+  metaKg?: number | null;
   horas?: number | null;
   observacoes?: string;
 };

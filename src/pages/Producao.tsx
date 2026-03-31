@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FILIAL_PLACEHOLDER_LABEL, FILIAL_PLACEHOLDER_VALUE, sortFiliaisByNome } from "@/lib/filialSelect";
-import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck, FilePlus, Filter, Timer, BarChart3 } from "lucide-react";
+import { Plus, Trash2, Clock, Calculator, Delete, Factory, Download, Calendar, TrendingUp, Target, Save, Database, Loader2, CheckCircle2, AlertCircle, ArrowRight, Sparkles, Zap, ChevronLeft, ChevronRight, Pencil, ClipboardList, CalendarCheck, FilePlus, Filter, Timer, BarChart3 } from "lucide-react";
 import { ControleEmpacotamento } from "@/components/producao/ControleEmpacotamento";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { ExportToPng, captureElementToPngBlob, combinePngBlobsVertical } from "@/components/ExportToPng";
@@ -726,15 +726,6 @@ function Producao() {
   /** Botão que abre o modal de filtros (grid de produção) — mesmo visual em Acompanhamento e Bi-horária */
   const producaoFiltrosTriggerClassName =
     "inline-flex items-center justify-center gap-2 h-9 rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted/50 shrink-0 max-[891px]:w-full max-[891px]:max-w-sm min-[892px]:max-w-none";
-
-  /** Voltar: se veio de Relatórios (returnTo no state), navega para lá; senão volta ao menu da página. */
-  const handleVoltar = useCallback(() => {
-    const s = location.state as { returnTo?: string } | null;
-    if (s?.returnTo) navigate(s.returnTo);
-    else if (location.pathname === ROTA_PRODUCAO_BIHORARIA || location.pathname === ROTA_PRODUCAO_HISTORICO) {
-      navigate("/producao", { replace: true });
-    } else setCurrentView("menu");
-  }, [location.state, location.pathname, navigate]);
 
   // Catálogo de itens vindo da OCTI (mapeado por código)
   const [itemCatalog, setItemCatalog] = useState<Record<string, { nome_item: string }>>({});
@@ -4368,19 +4359,6 @@ function Producao() {
     if (currentView === "bihoraria") {
       return (
         <div key="bihoraria" className="space-y-6 min-w-0">
-          <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleVoltar}
-              className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
-              aria-label="Voltar ao menu"
-              title="Voltar ao menu"
-            >
-              <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
-            </Button>
-          </div>
-
           {/* Card principal — mesmo shell do Planejamento de produção (PCP) */}
           <div className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />
@@ -4737,18 +4715,6 @@ function Producao() {
       if (waitingForReportDocument) {
         return (
           <div key="cadastro" className="space-y-6 min-w-0">
-            <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleVoltar}
-                className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
-                aria-label="Voltar ao menu"
-                title="Voltar ao menu"
-              >
-                <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
-              </Button>
-            </div>
             <div className="flex flex-col items-center justify-center min-h-[50vh] py-12 gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
               <p className="text-sm text-muted-foreground">Carregando documento...</p>
@@ -4759,20 +4725,6 @@ function Producao() {
 
       return (
         <div key="cadastro" className="space-y-6 min-w-0">
-          {/* Voltar — mesma estrutura que na view Histórico para altura consistente */}
-          <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleVoltar}
-              className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
-              aria-label="Voltar ao menu"
-              title="Voltar ao menu"
-            >
-              <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
-            </Button>
-          </div>
-
           {cadastroSubTab === "empacotamento" ? (
             <ControleEmpacotamento />
           ) : (
@@ -7111,20 +7063,6 @@ function Producao() {
     if (currentView === "historico") {
       return (
         <div key="historico" className="space-y-6 min-w-0 overflow-x-hidden">
-          {/* Voltar — mesma estrutura que na view Cadastro para altura consistente */}
-          <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleVoltar}
-              className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
-              aria-label="Voltar ao menu"
-              title="Voltar ao menu"
-            >
-              <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
-            </Button>
-          </div>
-
           {/* Título e descrição — acima do card; fundo branco e linha azul (sem transition para altura estável) */}
           <div className="relative mb-4 sm:mb-5 rounded-2xl p-4 sm:p-6 lg:p-8 group/button bg-background overflow-hidden border border-border/50 shadow-sm">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0 rounded-t-2xl" />

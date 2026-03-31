@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertCircle, ArrowLeft, ArrowLeftRight, ArrowRight, Factory, FilePlus, Loader2, Plus, Save, Sparkles, Trash2, Zap } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, ArrowRight, Factory, FilePlus, Loader2, Plus, Save, Sparkles, Trash2, Zap } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Filter } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -1346,19 +1346,7 @@ export default function MovimentacaoTuneis() {
                         </button>
                       </div>
                     </>
-                  ) : (
-                    <div className="flex justify-start">
-                      <button
-                        type="button"
-                        onClick={() => setRelatorioSelecionado("nenhum")}
-                        className="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:text-accent-foreground size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
-                        aria-label="Voltar ao menu"
-                        title="Voltar ao menu"
-                      >
-                        <ArrowLeft className="size-5 text-foreground shrink-0 stroke-[2.5]" />
-                      </button>
-                    </div>
-                  )}
+                  ) : null}
 
                   {relatorioSelecionado === "previsto" ? (
                     <Card className="group/card relative overflow-hidden border border-border/60 bg-card/60">

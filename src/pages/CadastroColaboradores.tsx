@@ -28,8 +28,18 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Users, Edit, Trash2, Loader2, Save } from "lucide-react";
-import { getOCTCList, getFiliais, insertOCTC, updateOCTC, deleteOCTC, type OCTCRow } from "@/services/supabaseData";
+import {
+  getOCTCList,
+  getFiliais,
+  getOCTRFList,
+  insertOCTC,
+  updateOCTC,
+  deleteOCTC,
+  type OCTCRow,
+  type OCTRFRow,
+} from "@/services/supabaseData";
 import { FilialSelectField } from "@/components/FilialSelectField";
+import { FuncaoPickerField } from "@/components/producao/FuncaoPickerField";
 import { OctGradientCadastroLayout } from "@/components/cadastro/OctGradientCadastroLayout";
 import { useToast } from "@/hooks/use-toast";
 
@@ -63,6 +73,8 @@ export default function CadastroColaboradores() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [filiaisOctf, setFiliaisOctf] = useState<{ id: number; nome: string }[]>([]);
   const [filiaisOctfLoading, setFiliaisOctfLoading] = useState(true);
+  const [funcoesOctrf, setFuncoesOctrf] = useState<OCTRFRow[]>([]);
+  const [funcoesOctrfLoading, setFuncoesOctrfLoading] = useState(true);
   const { toast } = useToast();
 
   const load = useCallback(async () => {
@@ -99,6 +111,28 @@ export default function CadastroColaboradores() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFuncoesOctrfLoading(true);
+    getOCTRFList()
+      .then((list) => {
+        if (!cancelled) setFuncoesOctrf(list);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setFuncoesOctrf([]);
+          const msg = e instanceof Error ? e.message : "Não foi possível carregar o cadastro de funções (OCTRF).";
+          toast({ title: "Aviso", description: msg, variant: "destructive" });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFuncoesOctrfLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [toast]);
 
   const openNew = () => {
     setEditing(null);
@@ -245,7 +279,7 @@ export default function CadastroColaboradores() {
       footer={
         <>
           <Dialog open={dialogOpen} onOpenChange={(o) => !o && closeDialog()}>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className="sm:max-w-[500px] overflow-visible">
               <DialogHeader>
                 <DialogTitle>{editing ? "Editar colaborador" : "Novo colaborador"}</DialogTitle>
                 <DialogDescription>
@@ -278,17 +312,22 @@ export default function CadastroColaboradores() {
                     maxLength={50}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="octc-setor">Setor *</Label>
-                  <Input
-                    id="octc-setor"
-                    value={form.setor}
-                    onChange={(e) => setForm((p) => ({ ...p, setor: e.target.value }))}
-                    placeholder="Ex.: Empacotamento"
-                    disabled={saving}
-                    maxLength={30}
-                  />
-                </div>
+                <FuncaoPickerField
+                  id="octc-setor"
+                  label="Setor (função) *"
+                  value={form.setor}
+                  onChange={(v) => setForm((p) => ({ ...p, setor: v }))}
+                  funcoes={funcoesOctrf}
+                  loading={funcoesOctrfLoading}
+                  disabled={saving}
+                  placeholder="Ex.: Empacotamento — clique para ver funções cadastradas"
+                  maxLength={30}
+                  inputClassName="h-10 text-base md:text-sm"
+                  dropdownMode="inline"
+                />
+                <p className="text-xs text-muted-foreground -mt-2">
+                  Lista do cadastro <span className="font-medium">OCTRF</span> (menu Cadastro de funções). Você pode digitar livremente ou escolher um item.
+                </p>
                 <FilialSelectField
                   id="octc-filial"
                   label="Filial"

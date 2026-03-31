@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +14,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  ArrowLeft,
   ArrowRight,
   Plus,
   Trash2,
@@ -389,7 +387,6 @@ const DASHBOARD_TABLE_COLUMNS: Array<{ id: string; label: string; isEmpty: (row:
 ];
 
 export default function PlanejamentoProducao() {
-  const navigate = useNavigate();
   const { toast } = useToast();
   const toastRef = useRef(toast);
   const cardCaptureRef = useRef<HTMLDivElement | null>(null);
@@ -1483,19 +1480,6 @@ export default function PlanejamentoProducao() {
         </AlertDialogContent>
       </AlertDialog>
       <div className="space-y-6 min-w-0 pt-4 sm:pt-6">
-        {/* Voltar — mesma estrutura do Acompanhamento diário */}
-        <div className="mt-2 mb-2 flex items-center justify-between gap-2 flex-shrink-0 min-h-[3.5rem]">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate("/analise-producao")}
-            className="size-11 min-h-[44px] min-w-[44px] rounded-full border border-border/50 bg-card/80 backdrop-blur-sm shadow-sm hover:bg-accent hover:border-primary/30 hover:shadow-md shrink-0"
-            aria-label="Voltar"
-          >
-            <ArrowLeft className="size-5 text-foreground shrink-0" strokeWidth={2.5} />
-          </Button>
-        </div>
-
         {/* Card principal — mesmo estilo do Acompanhamento diário da produção */}
         <div ref={cardCaptureRef} className="relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />

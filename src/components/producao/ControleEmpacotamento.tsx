@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -44,6 +44,20 @@ import { FuncaoPickerField } from "./FuncaoPickerField";
 import { getOCTCList, type OCTCRow } from "@/services/octc";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { FilialSelectField } from "@/components/FilialSelectField";
+import { EmpacotamentoTKgMetaChart, pctTkgRealizadoSobreMetaKg } from "./EmpacotamentoTKgMetaChart";
+
+function metaKgFromOcteRow(r: OCTERow): number {
+  return r.metaKg != null
+    ? Number(r.metaKg)
+    : r.meta != null
+      ? Number(r.meta) * Number(r.peso ?? 0)
+      : 0;
+}
+
+function pctTkgMetaPorLinhaOcte(r: OCTERow): number | null {
+  const tKg = r.tKg != null ? Number(r.tKg) : 0;
+  return pctTkgRealizadoSobreMetaKg(tKg, metaKgFromOcteRow(r));
+}
 
 function fmtData(iso: string): string {
   const d = String(iso || "").split("T")[0];
@@ -158,6 +172,7 @@ function rowToLineDraft(r: OCTERow): OCTELineDraft {
 export function ControleEmpacotamento() {
   const { toast } = useToast();
   const { setDocumentNav } = useDocumentNav();
+  const relatorioEmpacRef = useRef<HTMLDivElement>(null);
   const hoje = new Date().toISOString().split("T")[0];
   /** Valores nos date pickers da listagem (ainda não aplicados até clicar em Atualizar). */
   const [filtroListaDe, setFiltroListaDe] = useState(hoje);
@@ -168,6 +183,14 @@ export function ControleEmpacotamento() {
   const [listaAteAplicado, setListaAteAplicado] = useState(hoje);
   const [filtroListaFilial, setFiltroListaFilial] = useState("");
   const [filtroListaFilialAplicado, setFiltroListaFilialAplicado] = useState("");
+  /** id OCTRF selecionado no diálogo; vazio = todas as funções. */
+  const [filtroListaFuncaoId, setFiltroListaFuncaoId] = useState("");
+  /** Nome da função aplicado ao relatório (bate com OCTE.funcao_colaborador). */
+  const [filtroListaFuncaoAplicado, setFiltroListaFuncaoAplicado] = useState("");
+  /** Campo no diálogo: quantidade de melhores (por % T.KG/Meta Kg). */
+  const [filtroTopMelhoresQtd, setFiltroTopMelhoresQtd] = useState("");
+  /** Valor aplicado ao clicar em Filtrar; `null` = exibir todos. */
+  const [topMelhoresAplicado, setTopMelhoresAplicado] = useState<number | null>(null);
   const [rows, setRows] = useState<OCTERow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -186,18 +209,22 @@ export function ControleEmpacotamento() {
   const [funcoesOctrf, setFuncoesOctrf] = useState<OCTRFRow[]>([]);
   const [funcoesOctrfLoading, setFuncoesOctrfLoading] = useState(true);
 
-  const refreshCodigoNovoDocumento = useCallback(async () => {
+  const refreshCodigoNovoDocumento = useCallback(async (filialParaCodigo?: string) => {
     try {
-      const next = await getNextOCTEDocumentCode();
+      const f = filialParaCodigo != null ? filialParaCodigo.trim() : "";
+      const next = await getNextOCTEDocumentCode(f || undefined);
       setCodigoDocumento(next);
     } catch {
       setCodigoDocumento("0001");
     }
   }, []);
 
+  const isFormEditMode = useMemo(() => lines.some((l) => l.dbId != null), [lines]);
+
   useEffect(() => {
-    void refreshCodigoNovoDocumento();
-  }, [refreshCodigoNovoDocumento]);
+    if (isFormEditMode) return;
+    void refreshCodigoNovoDocumento(filialNome);
+  }, [filialNome, isFormEditMode, refreshCodigoNovoDocumento]);
 
   useEffect(() => {
     let cancelled = false;
@@ -280,7 +307,25 @@ export function ControleEmpacotamento() {
     setFiltroListaDe(listaDeAplicado.split("T")[0]);
     setFiltroListaAte(listaAteAplicado.split("T")[0]);
     setFiltroListaFilial(filtroListaFilialAplicado);
-  }, [filtrosListaOpen, listaDeAplicado, listaAteAplicado, filtroListaFilialAplicado]);
+    if (!filtroListaFuncaoAplicado.trim()) {
+      setFiltroListaFuncaoId("");
+    } else {
+      const aplicadoNorm = filtroListaFuncaoAplicado.trim().toLocaleLowerCase("pt-BR");
+      const m = funcoesOctrf.find(
+        (f) => (f.nomeDaFuncao || "").trim().toLocaleLowerCase("pt-BR") === aplicadoNorm,
+      );
+      setFiltroListaFuncaoId(m ? String(m.id) : "");
+    }
+    setFiltroTopMelhoresQtd(topMelhoresAplicado != null && topMelhoresAplicado > 0 ? String(topMelhoresAplicado) : "");
+  }, [
+    filtrosListaOpen,
+    listaDeAplicado,
+    listaAteAplicado,
+    filtroListaFilialAplicado,
+    filtroListaFuncaoAplicado,
+    topMelhoresAplicado,
+    funcoesOctrf,
+  ]);
 
   /** Recarrega a tabela com o período já aplicado (após salvar/excluir). */
   const refreshListaAplicada = useCallback(() => {
@@ -307,8 +352,7 @@ export function ControleEmpacotamento() {
     setDataDocumento(new Date().toISOString().split("T")[0]);
     setFilialNome("");
     setLines([newEmptyLine(crypto.randomUUID())]);
-    void refreshCodigoNovoDocumento();
-  }, [refreshCodigoNovoDocumento]);
+  }, []);
 
   const docGroups = useMemo(() => groupOcteRowsByDocument(rows), [rows]);
   const rowsFiltradasPorFilial = useMemo(() => {
@@ -316,9 +360,27 @@ export function ControleEmpacotamento() {
     if (!filial) return rows;
     return rows.filter((r) => (r.filialNome || "").trim().toLocaleLowerCase() === filial);
   }, [rows, filtroListaFilialAplicado]);
+
+  const rowsFiltradasListagem = useMemo(() => {
+    const fn = filtroListaFuncaoAplicado.trim();
+    if (!fn) return rowsFiltradasPorFilial;
+    const fnNorm = fn.toLocaleLowerCase("pt-BR");
+    return rowsFiltradasPorFilial.filter(
+      (r) => (r.funcaoColaborador || "").trim().toLocaleLowerCase("pt-BR") === fnNorm,
+    );
+  }, [rowsFiltradasPorFilial, filtroListaFuncaoAplicado]);
+
+  const funcoesFiltroOrdenadas = useMemo(
+    () =>
+      [...funcoesOctrf].sort((a, b) =>
+        a.nomeDaFuncao.localeCompare(b.nomeDaFuncao, "pt-BR", { sensitivity: "base" }),
+      ),
+    [funcoesOctrf],
+  );
+
   const reportGroups = useMemo(() => {
     const map = new Map<string, { key: string; data: string; codigoDocumento: string | null; rows: OCTERow[] }>();
-    for (const r of rowsFiltradasPorFilial) {
+    for (const r of rowsFiltradasListagem) {
       const data = (r.data || "").split("T")[0];
       const cod = (r.codigoDocumento || "").trim() || null;
       const key = `${data}__${cod || "sem_doc"}`;
@@ -326,14 +388,44 @@ export function ControleEmpacotamento() {
       if (g) g.rows.push(r);
       else map.set(key, { key, data, codigoDocumento: cod, rows: [r] });
     }
-    return Array.from(map.values()).sort((a, b) => {
-      if (a.data !== b.data) return b.data.localeCompare(a.data);
-      return (a.codigoDocumento || "").localeCompare(b.codigoDocumento || "", undefined, { numeric: true });
+    return Array.from(map.values())
+      .map((g) => ({
+        ...g,
+        /** Mesma ordem do formulário / gravação: id crescente (a consulta vem com id desc). */
+        rows: [...g.rows].sort((a, b) => a.id - b.id),
+      }))
+      .sort((a, b) => {
+        if (a.data !== b.data) return b.data.localeCompare(a.data);
+        return (a.codigoDocumento || "").localeCompare(b.codigoDocumento || "", undefined, { numeric: true });
+      });
+  }, [rowsFiltradasListagem]);
+
+  type ReportGroupView = (typeof reportGroups)[number] & { totalLinhasNoDocumento: number };
+
+  const reportGroupsExibicao = useMemo((): ReportGroupView[] => {
+    return reportGroups.map((g) => {
+      const totalLinhasNoDocumento = g.rows.length;
+      const ordemCadastro = [...g.rows].sort((a, b) => a.id - b.id);
+      if (topMelhoresAplicado == null || topMelhoresAplicado <= 0) {
+        return { ...g, rows: ordemCadastro, totalLinhasNoDocumento };
+      }
+      const n = Math.floor(topMelhoresAplicado);
+      const porPct = [...g.rows].sort((a, b) => {
+        const pa = pctTkgMetaPorLinhaOcte(a);
+        const pb = pctTkgMetaPorLinhaOcte(b);
+        const va = pa ?? Number.NEGATIVE_INFINITY;
+        const vb = pb ?? Number.NEGATIVE_INFINITY;
+        if (vb !== va) return vb - va;
+        return a.id - b.id;
+      });
+      const rows = porPct.slice(0, n);
+      return { ...g, rows, totalLinhasNoDocumento };
     });
-  }, [rowsFiltradasPorFilial]);
+  }, [reportGroups, topMelhoresAplicado]);
+
   const reportMaxQtySlot = useMemo(() => {
     let max = 1;
-    for (const r of rowsFiltradasPorFilial) {
+    for (const r of rowsFiltradasListagem) {
       const values = [
         r.quantidade1, r.quantidade2, r.quantidade3, r.quantidade4, r.quantidade5, r.quantidade6,
         r.quantidade7, r.quantidade8, r.quantidade9, r.quantidade10, r.quantidade11, r.quantidade12,
@@ -346,7 +438,7 @@ export function ControleEmpacotamento() {
       }
     }
     return max;
-  }, [rowsFiltradasPorFilial]);
+  }, [rowsFiltradasListagem]);
 
   const loadOcteDocGroup = useCallback((g: OcteDocGroup) => {
     const sorted = [...g.rows].sort((a, b) => a.id - b.id);
@@ -587,18 +679,37 @@ export function ControleEmpacotamento() {
     }
   };
 
-  const isEditMode = lines.some((l) => l.dbId != null);
-
   const aplicarFiltrosListaEfechar = () => {
     aplicarPeriodoListagem();
+    let nomeFuncao = "";
+    if (filtroListaFuncaoId) {
+      const row = funcoesOctrf.find((f) => String(f.id) === filtroListaFuncaoId);
+      nomeFuncao = (row?.nomeDaFuncao ?? "").trim();
+    }
+    setFiltroListaFuncaoAplicado(nomeFuncao);
+    const raw = filtroTopMelhoresQtd.trim();
+    if (raw === "") {
+      setTopMelhoresAplicado(null);
+    } else {
+      const n = Number.parseInt(raw, 10);
+      setTopMelhoresAplicado(Number.isFinite(n) && n > 0 ? n : null);
+    }
     setFiltrosListaOpen(false);
+    /** Leva o usuário ao bloco do relatório (gráfico + tabela), onde os resultados aparecem. */
+    queueMicrotask(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          relatorioEmpacRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+    });
   };
 
   return (
     <div className="space-y-6">
       <Card
         className={`relative rounded-2xl border border-border/50 bg-gradient-to-br from-card via-card/95 to-card/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] ${
-          isEditMode ? "ring-1 ring-primary/20" : ""
+          isFormEditMode ? "ring-1 ring-primary/20" : ""
         }`}
       >
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/80 to-primary/60 opacity-60 z-0" />
@@ -627,11 +738,14 @@ export function ControleEmpacotamento() {
                       <span>Filtros</span>
                     </button>
                   </DialogTrigger>
-                  <DialogContent className="w-[340px] sm:w-[420px] max-w-[95vw] p-4 rounded-lg">
+                  <DialogContent
+                    className="w-[340px] sm:w-[420px] max-w-[95vw] p-4 rounded-lg"
+                    onCloseAutoFocus={(e) => e.preventDefault()}
+                  >
                     <DialogHeader>
                       <DialogTitle className="text-base">Filtros — Relatório do Empacotamento</DialogTitle>
                       <DialogDescription className="text-sm text-muted-foreground">
-                        Defina período e filial para filtrar o relatório do empacotamento abaixo.
+                        Período, filial, função cadastrada (OCTRF), e opcionalmente os N melhores colaboradores (por % T. KG ÷ Meta Kg).
                       </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-3 py-2">
@@ -696,6 +810,50 @@ export function ControleEmpacotamento() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <div className="space-y-1.5">
+                        <Label>Função (cadastro OCTRF)</Label>
+                        <Select
+                          value={filtroListaFuncaoId || "__todas_funcoes__"}
+                          onValueChange={(v) => setFiltroListaFuncaoId(v === "__todas_funcoes__" ? "" : v)}
+                          disabled={funcoesOctrfLoading}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue placeholder={funcoesOctrfLoading ? "Carregando…" : "Todas as funções"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__todas_funcoes__">Todas as funções</SelectItem>
+                            {funcoesFiltroOrdenadas.map((f) => {
+                              const nome = (f.nomeDaFuncao || "").trim();
+                              if (!nome) return null;
+                              const doc = (f.numeroDoDocumento || "").trim();
+                              return (
+                                <SelectItem key={f.id} value={String(f.id)}>
+                                  {doc ? `${nome} · doc. ${doc}` : nome}
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          Restringe o relatório às linhas cuja função do colaborador coincide com a selecionada.
+                        </p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="empacotamento-filtro-top-melhores">Top melhores (opcional)</Label>
+                        <Input
+                          id="empacotamento-filtro-top-melhores"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          placeholder="Ex.: 5 — maiores % (T.KG ÷ Meta Kg)"
+                          className="h-9 text-sm"
+                          value={filtroTopMelhoresQtd}
+                          onChange={(e) => setFiltroTopMelhoresQtd(e.target.value.replace(/\D/g, ""))}
+                        />
+                        <p className="text-[11px] text-muted-foreground leading-snug">
+                          Por documento: mostra só as N pessoas com melhor atingimento (ou mais próximas da meta). Vazio = todos.
+                        </p>
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <Button
@@ -709,6 +867,10 @@ export function ControleEmpacotamento() {
                           setFiltroListaMesmaData(false);
                           setFiltroListaFilial("");
                           setFiltroListaFilialAplicado("");
+                          setFiltroListaFuncaoId("");
+                          setFiltroListaFuncaoAplicado("");
+                          setFiltroTopMelhoresQtd("");
+                          setTopMelhoresAplicado(null);
                         }}
                       >
                         Limpar
@@ -753,7 +915,7 @@ export function ControleEmpacotamento() {
           <CardContent className="space-y-5 border-t border-border/40 bg-gradient-to-b from-transparent via-muted/10 to-muted/20 p-4 sm:p-6">
             <div className="rounded-lg border border-border/60 bg-card/50 p-4 space-y-4">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-base font-semibold">{isEditMode ? "Editando empacotamento" : "Novo empacotamento"}</h3>
+                <h3 className="text-base font-semibold">{isFormEditMode ? "Editando empacotamento" : "Novo empacotamento"}</h3>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 justify-items-stretch max-w-5xl mx-auto lg:mx-0">
                 <div className="space-y-1.5 w-full sm:max-w-[220px] sm:justify-self-center lg:justify-self-start">
@@ -762,7 +924,7 @@ export function ControleEmpacotamento() {
                     readOnly
                     value={codigoDocumento}
                     className="h-9 font-mono text-xs sm:text-sm bg-muted tabular-nums cursor-default"
-                    title="Gerado automaticamente (0001, 0002, …). Todos os registros salvos juntos compartilham este código."
+                    title="Gerado por filial (0001, 0002, … na filial selecionada). Todos os registros salvos juntos compartilham este código."
                     aria-readonly
                   />
                 </div>
@@ -955,13 +1117,21 @@ export function ControleEmpacotamento() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-border/60 bg-card/50 p-4 space-y-3">
+            <div
+              ref={relatorioEmpacRef}
+              id="relatorio-empacotamento"
+              className="rounded-lg border border-border/60 bg-card/50 p-4 space-y-3 scroll-mt-24"
+            >
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
                   <h3 className="text-base font-semibold whitespace-nowrap">Relatório do Empacotamento</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Data: {fmtData(listaDeAplicado)} — {fmtData(listaAteAplicado)}
                     {filtroListaFilialAplicado.trim() ? ` • Filial: ${filtroListaFilialAplicado.trim()}` : ""}
+                    {filtroListaFuncaoAplicado.trim() ? ` • Função: ${filtroListaFuncaoAplicado.trim()}` : ""}
+                    {topMelhoresAplicado != null && topMelhoresAplicado > 0
+                      ? ` • Top ${topMelhoresAplicado} melhores (% T.KG ÷ Meta Kg)`
+                      : ""}
                   </p>
                 </div>
                 <Button
@@ -979,17 +1149,28 @@ export function ControleEmpacotamento() {
                 <div className="flex justify-center py-10">
                   <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
                 </div>
-              ) : reportGroups.length === 0 ? (
+              ) : reportGroupsExibicao.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-4">Nenhum registro para o período selecionado.</p>
               ) : (
                 <div className="space-y-4">
-                  {reportGroups.map((group) => (
+                  {reportGroupsExibicao.map((group) => (
                     <div key={group.key} className="rounded-lg border border-border/50 bg-card/40 p-3 space-y-2">
                       <div className="flex flex-wrap items-center gap-2 text-sm">
                         <span className="font-semibold whitespace-nowrap">Doc.: {group.codigoDocumento || "—"}</span>
                         <span className="text-muted-foreground whitespace-nowrap">Data: {fmtData(group.data)}</span>
-                        <span className="text-muted-foreground whitespace-nowrap">Registros: {group.rows.length}</span>
+                        <span className="text-muted-foreground whitespace-nowrap">
+                          Registros: {group.rows.length}
+                          {topMelhoresAplicado != null &&
+                          topMelhoresAplicado > 0 &&
+                          group.totalLinhasNoDocumento > group.rows.length
+                            ? ` · ${group.totalLinhasNoDocumento} no documento`
+                            : ""}
+                        </span>
                       </div>
+                      <EmpacotamentoTKgMetaChart
+                        rows={group.rows}
+                        subtitle={`Doc. ${group.codigoDocumento || "—"} · ${fmtData(group.data)}`}
+                      />
                       <div className="overflow-x-auto rounded-md border border-border/50">
                         <Table className="min-w-[1500px]">
                           <TableHeader>
@@ -1019,7 +1200,8 @@ export function ControleEmpacotamento() {
                                 r.quantidade1, r.quantidade2, r.quantidade3, r.quantidade4, r.quantidade5, r.quantidade6,
                                 r.quantidade7, r.quantidade8, r.quantidade9, r.quantidade10, r.quantidade11, r.quantidade12,
                               ];
-                              const metaKg = r.meta != null ? Number(r.meta) * Number(r.peso ?? 0) : null;
+                              const metaKg =
+                                r.metaKg ?? (r.meta != null ? Number(r.meta) * Number(r.peso ?? 0) : null);
                               return (
                                 <TableRow key={`rel-row-${r.id}`}>
                                   <TableCell className="whitespace-nowrap">{fmtData(r.data)}</TableCell>
@@ -1039,7 +1221,7 @@ export function ControleEmpacotamento() {
                                   <TableCell className="text-right tabular-nums">{r.meta != null ? formatNumberPtBrFixed(r.meta, 2) : "—"}</TableCell>
                                   <TableCell className="text-right tabular-nums">{metaKg != null ? formatNumberPtBrFixed(metaKg, 2) : "—"}</TableCell>
                                   <TableCell className="text-right tabular-nums">{r.horas != null ? formatNumberPtBrFixed(r.horas, 2) : "—"}</TableCell>
-                                  <TableCell className="text-right tabular-nums">{r.pHorasFinal != null ? formatNumberPtBrFixed(r.pHorasFinal, 4) : "—"}</TableCell>
+                                  <TableCell className="text-right tabular-nums">{r.pHorasFinal != null ? formatNumberPtBrFixed(r.pHorasFinal, 1) : "—"}</TableCell>
                                   <TableCell className="text-right tabular-nums">{r.eficiencia != null ? `${formatNumberPtBrFixed(r.eficiencia, 2)}%` : "—"}</TableCell>
                                 </TableRow>
                               );

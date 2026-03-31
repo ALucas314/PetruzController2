@@ -4,6 +4,12 @@ import { toPng } from "html-to-image";
 import { Button } from "@/components/ui/button";
 import { ImageDown, Loader2 } from "lucide-react";
 
+/**
+ * Ambos usam o mesmo fluxo (`toPng` = serializar DOM em SVG → canvas). `html2canvas` é alias por compatibilidade.
+ * Gráficos Recharts precisam do patch de `hsl(var(--))` + paint explícito nos `<text>`, igual ao restante da exportação.
+ */
+export type PngCaptureEngine = "html-to-image" | "html2canvas";
+
 export interface ExportToPngProps {
   /** Ref do elemento DOM a ser capturado (ex.: card da tabela) */
   targetRef: RefObject<HTMLElement | null>;
@@ -17,6 +23,8 @@ export interface ExportToPngProps {
   label?: string;
   /** Se true, expande containers com overflow para capturar tabela/conteúdo inteiro */
   expandScrollable?: boolean;
+  /** Legado: ignorado — o mesmo pipeline trata Recharts (patch de cores + rótulos SVG). */
+  captureEngine?: PngCaptureEngine;
   /** Marca d'água exibida no canto inferior direito do PNG (ex.: "Bela", "Petruz") */
   watermark?: string;
   /** Chamado antes da captura (ex.: substituir inputs por texto para aparecer completo no PNG) */
@@ -131,7 +139,175 @@ function restoreStyles(restores: RestoreStyle[]) {
   });
 }
 
+function getThemeCssVarPairs(): Array<[string, string]> {
+  const root = document.documentElement;
+  const pick = (name: string) => getComputedStyle(root).getPropertyValue(name).trim();
+  return [
+    ["--primary", pick("--primary")],
+    ["--muted-foreground", pick("--muted-foreground")],
+    ["--border", pick("--border")],
+    ["--foreground", pick("--foreground")],
+    ["--card", pick("--card")],
+    ["--background", pick("--background")],
+    ["--muted", pick("--muted")],
+  ];
+}
+
+function replaceHslVarsInString(value: string, vars: Array<[string, string]>): string {
+  if (!value.includes("var(")) return value;
+  let out = value;
+  for (const [vn, vv] of vars) {
+    if (!vv) continue;
+    const esc = vn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(`hsl\\(var\\(${esc}\\)\\s*\\/\\s*([^)]+)\\)`, "g"), `hsl(${vv} / $1)`);
+    out = out.replace(new RegExp(`hsl\\(var\\(${esc}\\)\\)`, "g"), `hsl(${vv})`);
+  }
+  return out;
+}
+
+type AttrPatch = { el: Element; attr: string; previous: string | null };
+
+/**
+ * Substitui temporariamente `hsl(var(--token))` no subárvore (SVG Recharts).
+ * html-to-image serializa o DOM para SVG; variáveis CSS nos atributos viram vazias → PNG branco ou sem barras.
+ */
+function patchHslVarsOnElementSubtree(root: HTMLElement): () => void {
+  const vars = getThemeCssVarPairs();
+  const patches: AttrPatch[] = [];
+  const attrs = ["stroke", "fill", "stop-color", "flood-color", "color", "background-color"] as const;
+
+  root.querySelectorAll("*").forEach((node) => {
+    for (const a of attrs) {
+      if (!node.hasAttribute(a)) continue;
+      const v = node.getAttribute(a);
+      if (!v?.includes("var(")) continue;
+      const next = replaceHslVarsInString(v, vars);
+      if (next !== v) {
+        patches.push({ el: node, attr: a, previous: v });
+        node.setAttribute(a, next);
+      }
+    }
+    const style = node.getAttribute("style");
+    if (style?.includes("var(")) {
+      let s = style;
+      for (const [vn, vv] of vars) {
+        if (!vv) continue;
+        const esc = vn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        s = s.replace(new RegExp(`hsl\\(var\\(${esc}\\)\\s*\\/\\s*([^;)]+)`, "g"), `hsl(${vv} / $1)`);
+        s = s.replace(new RegExp(`hsl\\(var\\(${esc}\\)\\)`, "g"), `hsl(${vv})`);
+      }
+      if (s !== style) {
+        patches.push({ el: node, attr: "style", previous: style });
+        node.setAttribute("style", s);
+      }
+    }
+  });
+
+  return () => {
+    patches.forEach((p) => {
+      if (p.previous == null) p.el.removeAttribute(p.attr);
+      else p.el.setAttribute(p.attr, p.previous);
+    });
+  };
+}
+
+type TextPaintPatch = { el: Element; attr: string; previous: string | null };
+
+/**
+ * `html-to-image` copia o nó para SVG; rótulos Recharts às vezes saem sem paint efetivo. Grava atributos a partir do
+ * estilo computado (igual ao que o usuário vê), depois restaura.
+ */
+function inlineSvgTextPaintForExport(root: HTMLElement): () => void {
+  const patches: TextPaintPatch[] = [];
+  root.querySelectorAll("svg text, svg tspan").forEach((node) => {
+    const cs = getComputedStyle(node);
+    const setIf = (attr: string, val: string | null) => {
+      if (!val || val === "none") return;
+      if (attr === "fill" && val.includes("rgba(0, 0, 0, 0)")) return;
+      const prev = node.getAttribute(attr);
+      if (val === prev) return;
+      node.setAttribute(attr, val);
+      patches.push({ el: node, attr, previous: prev });
+    };
+    setIf("fill", cs.fill);
+    setIf("stroke", cs.stroke !== "none" ? cs.stroke : null);
+    const sw = cs.strokeWidth;
+    if (sw && sw !== "0px") setIf("stroke-width", sw);
+    const fs = cs.fontSize;
+    if (fs) setIf("font-size", fs);
+    const fw = cs.fontWeight;
+    if (fw) setIf("font-weight", fw);
+    const ff = cs.fontFamily;
+    if (ff) {
+      const first = ff.split(",")[0]?.replace(/["']/g, "").trim();
+      if (first) setIf("font-family", first);
+    }
+  });
+  return () => {
+    for (let i = patches.length - 1; i >= 0; i--) {
+      const p = patches[i]!;
+      if (p.previous == null) p.el.removeAttribute(p.attr);
+      else p.el.setAttribute(p.attr, p.previous);
+    }
+  };
+}
+
+/** Gera data URL PNG — mesmo pipeline dos outros gráficos (`toPng`), com preparação do SVG Recharts. */
+export async function elementToPngDataUrl(element: HTMLElement, _engine: PngCaptureEngine): Promise<string> {
+  const undoPatch = patchHslVarsOnElementSubtree(element);
+  const undoText = inlineSvgTextPaintForExport(element);
+  try {
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    return toPng(element, {
+      backgroundColor: "#ffffff",
+      pixelRatio: 2,
+      quality: 1.0,
+      cacheBust: true,
+      skipAutoScale: false,
+      skipFonts: false,
+      filter: () => true,
+    });
+  } finally {
+    undoText();
+    undoPatch();
+  }
+}
+
 const PADDING = 40;
+
+/** Telas estreitas (mesmo critério do use-mobile: max-width 767px). */
+function isMobileExportViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+}
+
+/**
+ * Baixa um blob como arquivo com nome (comportamento próximo ao desktop).
+ * No celular: âncora ligada ao document.body + download — um a solto ou o atraso do async
+ * costumam fazer o navegador só “abrir” a imagem em vez de salvar.
+ */
+export function triggerBlobFileDownload(blob: Blob, fileName: string, mimeType = "image/png"): void {
+  const safeName = fileName.replace(/[/\\?%*:|"<>]/g, "-");
+  const toSave = blob.type ? blob : new Blob([blob], { type: mimeType });
+  const url = URL.createObjectURL(toSave);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = safeName;
+  a.setAttribute("download", safeName);
+  a.rel = "noopener noreferrer";
+  a.style.position = "fixed";
+  a.style.left = "-10000px";
+  a.style.top = "0";
+  a.style.opacity = "0";
+  a.style.pointerEvents = "none";
+
+  document.body.appendChild(a);
+  a.click();
+  requestAnimationFrame(() => {
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1200);
+  });
+}
 
 /** Desenha marca d'água pequena no canto inferior direito do canvas. */
 function drawWatermark(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, text: string) {
@@ -151,6 +327,7 @@ function drawWatermark(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
 
 export interface CaptureToPngBlobOptions {
   expandScrollable?: boolean;
+  captureEngine?: PngCaptureEngine;
   onBeforeCapture?: () => void | Promise<void>;
   onAfterCapture?: () => void | Promise<void>;
   filenamePrefix?: string;
@@ -225,6 +402,7 @@ export async function captureElementToPngBlob(
 ): Promise<{ blob: Blob; fileName: string }> {
   const {
     expandScrollable = true,
+    captureEngine = "html-to-image",
     onBeforeCapture,
     onAfterCapture,
     filenamePrefix = "export",
@@ -247,17 +425,7 @@ export async function captureElementToPngBlob(
       await new Promise((r) => setTimeout(r, 150));
     }
 
-    const dataUrl = await runWithLightThemeForCapture(() =>
-      toPng(element, {
-        backgroundColor: "#ffffff",
-        pixelRatio: 2,
-        quality: 1.0,
-        cacheBust: true,
-        skipAutoScale: false,
-        skipFonts: false,
-        filter: () => true,
-      })
-    );
+    const dataUrl = await runWithLightThemeForCapture(() => elementToPngDataUrl(element, captureEngine));
 
     const img = new Image();
     img.src = dataUrl;
@@ -317,6 +485,7 @@ export function ExportToPng({
   className,
   label = "Exportar PNG",
   expandScrollable = true,
+  captureEngine = "html-to-image",
   watermark,
   onBeforeCapture,
   onAfterCapture,
@@ -332,7 +501,9 @@ export function ExportToPng({
     let restores: RestoreStyle[] = [];
 
     try {
-      await new Promise((r) => setTimeout(r, 300));
+      // Mobile: atraso longo quebra a “user activation” — o atributo download no blob é ignorado e vira pré-visualização.
+      const preMs = isMobileExportViewport() ? 0 : 300;
+      await new Promise((r) => setTimeout(r, preMs));
 
       const element = targetRef.current;
 
@@ -350,17 +521,7 @@ export function ExportToPng({
         await new Promise((r) => setTimeout(r, 150));
       }
 
-      const dataUrl = await runWithLightThemeForCapture(() =>
-        toPng(element, {
-          backgroundColor: "#ffffff",
-          pixelRatio: 2,
-          quality: 1.0,
-          cacheBust: true,
-          skipAutoScale: false,
-          skipFonts: false,
-          filter: () => true,
-        })
-      );
+      const dataUrl = await runWithLightThemeForCapture(() => elementToPngDataUrl(element, captureEngine));
 
       const img = new Image();
       img.src = dataUrl;
@@ -391,13 +552,11 @@ export function ExportToPng({
                   reject(new Error("Falha ao gerar PNG"));
                   return;
                 }
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.download = fileName;
-                link.href = url;
-                link.click();
-                setTimeout(() => URL.revokeObjectURL(url), 200);
-                resolve();
+                try {
+                  triggerBlobFileDownload(blob, fileName);
+                } finally {
+                  resolve();
+                }
               },
               "image/png",
               1.0

@@ -6,10 +6,12 @@
 --   t_kg          = total * peso
 --   p_horas_final = total / horas                (NULL se horas <= 0)
 --   eficiencia    = (total / meta) * 100         (NULL se meta <= 0)
+--   meta_kg       = meta * peso                  (NULL se meta NULL ou <= 0)
 --
 -- Execute no Supabase: SQL Editor -> Run
 -- Recomendado após:
 --   - OCTE_ADD_TOTAL_TKG_P_HORAS_FINAL_EFICIENCIA.sql
+--   - OCTE_ADD_META_KG.sql (coluna meta_kg)
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.octe_calc_campos_derivados()
@@ -49,6 +51,10 @@ BEGIN
   NEW.eficiencia := CASE
     WHEN v_meta IS NULL OR v_meta <= 0 THEN NULL
     ELSE (v_total / v_meta) * 100
+  END;
+  NEW.meta_kg := CASE
+    WHEN v_meta IS NULL OR v_meta <= 0 THEN NULL
+    ELSE v_meta * v_peso
   END;
 
   RETURN NEW;
@@ -131,5 +137,9 @@ SET
         + COALESCE(quantidade_12, 0)
       ) / meta
     ) * 100
+  END,
+  meta_kg = CASE
+    WHEN meta IS NULL OR meta <= 0 THEN NULL
+    ELSE meta * COALESCE(peso, 0)
   END;
 
