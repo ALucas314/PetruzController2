@@ -61,6 +61,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FILIAL_PLACEHOLDER_LABEL, FILIAL_PLACEHOLDER_VALUE, sortFiliaisByNome } from "@/lib/filialSelect";
+import { todayLocalIsoDate } from "@/lib/formatLocale";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
@@ -396,7 +397,7 @@ export default function PlanejamentoProducao() {
   useEffect(() => {
     toastRef.current = toast;
   }, [toast]);
-  const hoje = new Date().toISOString().split("T")[0];
+  const hoje = todayLocalIsoDate();
   const [dataFiltro, setDataFiltro] = useState(hoje);
   const [dataFiltroPara, setDataFiltroPara] = useState(hoje);
   const [filiais, setFiliais] = useState<Array<{ id: number; codigo: string; nome: string }>>([]);
@@ -990,6 +991,38 @@ export default function PlanejamentoProducao() {
   /** Atualiza um registro no banco e no estado local (sem recarregar a tabela nem mostrar loading). Preserva zeros à esquerda do código. */
   const updateRow = async (id: number, payload: Partial<OCPPInsertPayload>) => {
     lastLocalChangeAtRef.current = Date.now();
+
+    /** A chave do documento inclui a data: se só uma linha mudar, some do filtro (selectedDocKey). Todas as linhas do mesmo doc recebem a nova data. */
+    if (payload.data !== undefined) {
+      const newData = String(payload.data).split("T")[0];
+      const row = registros.find((r) => r.id === id);
+      if (row && String(row.data ?? "").split("T")[0] !== newData) {
+        const oldKey = getDocKey(row);
+        const siblings = registros.filter((r) => getDocKey(r) === oldKey);
+        try {
+          const updatedList = await Promise.all(siblings.map((s) => updateOcpp(s.id, { data: newData })));
+          setRegistros((prev) =>
+            prev.map((r) => {
+              const u = updatedList.find((x) => x.id === r.id);
+              return u ? { ...u, Code: r.Code ?? u.Code } : r;
+            })
+          );
+          setSelectedDocKey((prevKey) => {
+            if (prevKey !== oldKey) return prevKey;
+            const primary = updatedList.find((u) => u.id === id);
+            return primary ? getDocKey(primary) : prevKey;
+          });
+        } catch (e) {
+          toast({
+            title: "Erro",
+            description: e instanceof Error ? e.message : "Erro ao atualizar data",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+    }
+
     try {
       const updated = await updateOcpp(id, payload);
       setRegistros((prev) =>
@@ -1356,7 +1389,12 @@ export default function PlanejamentoProducao() {
       if (first?.doc_numero != null) payload.doc_numero = first.doc_numero;
       if (first?.doc_ordem_global != null) payload.doc_ordem_global = first.doc_ordem_global;
     } else if (isNovoDoc) {
-      payload = emptyPayload(addCalendarDays(dataFiltro.split("T")[0], 1));
+      const firstRowData = registros[0]?.data;
+      const dataStr =
+        firstRowData != null && String(firstRowData).trim() !== ""
+          ? String(firstRowData).split("T")[0]
+          : todayLocalIsoDate();
+      payload = emptyPayload(dataStr);
       const filial = filialNovoDocumento;
       if (!isFilialBelaOuPetruz(filial)) {
         toast({
@@ -2027,7 +2065,12 @@ export default function PlanejamentoProducao() {
                           <TableCell className="text-center font-medium text-xs sm:text-sm">{idx + 1}</TableCell>
                           <TableCell className="p-2 sm:p-4">
                             <DatePicker
-                              value={row.data?.split("T")[0] ?? addCalendarDays(dataFiltro.split("T")[0], 1)}
+                              value={
+                                row.data?.split("T")[0] ??
+                                (newDocumentIndex != null && !selectedDocKey
+                                  ? todayLocalIsoDate()
+                                  : addCalendarDays(dataFiltro.split("T")[0], 1))
+                              }
                               onChange={(v) => v && updateRow(row.id, { data: v })}
                               size="sm"
                               triggerClassName="h-8 sm:h-9 text-xs sm:text-sm"
