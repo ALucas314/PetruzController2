@@ -50,6 +50,12 @@ DROP POLICY IF EXISTS "ocmt_authenticated_all" ON "OCMT";
 CREATE POLICY "ocmt_authenticated_all" ON "OCMT"
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- OCCE (controle de estoque)
+ALTER TABLE "OCCE" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "occe_authenticated_all" ON "OCCE";
+CREATE POLICY "occe_authenticated_all" ON "OCCE"
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- OCTP (problemas e ações / status)
 ALTER TABLE "OCTP" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "octp_authenticated_all" ON "OCTP";

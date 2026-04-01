@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode } from "react";
 
 export interface DocumentNavState {
   /** Exibir setas de navegação entre documentos */
@@ -15,6 +15,8 @@ export interface DocumentNavState {
   onNewDocument: () => void;
   /** Texto opcional: "3 de 12" */
   navLabel?: string;
+  /** Quando true, o SiteHeader exibe o botão + ao lado das setas (novo documento). */
+  showNewInHeader?: boolean;
 }
 
 type DocumentNavStateNullable = DocumentNavState | null;

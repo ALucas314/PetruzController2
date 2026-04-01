@@ -802,6 +802,7 @@ export default function MovimentacaoTuneis() {
 
     setDocumentNav({
       showNav: true,
+      showNewInHeader: true,
       canGoPrev: total > 0 && (hasCurrent ? currentIndex > 0 : true),
       canGoNext: total > 0 && (hasCurrent ? currentIndex < total - 1 : true),
       onPrev: () => {

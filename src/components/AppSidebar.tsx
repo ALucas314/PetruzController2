@@ -72,6 +72,7 @@ const menuItems: MenuItem[] = [
     url: "/estoque",
     icon: Package,
     subItems: [
+      { title: "Controle de estoque", url: "/estoque/controle-estoque", icon: Package },
       { title: "Movimentação de Túneis", url: "/estoque/movimentacao-tuneis", icon: ArrowLeftRight },
     ],
   },

@@ -86,6 +86,15 @@ export {
   subscribeOCMTRealtime,
 } from "./ocmt";
 
+export type { OCCERow } from "./occe";
+export {
+  getControleEstoque,
+  createControleEstoque,
+  updateControleEstoque,
+  deleteControleEstoque,
+  subscribeOCCERealtime,
+} from "./occe";
+
 // --- OCPP (Planejamento de Produção) ---
 // select('*') evita 400 quando o banco tem code vs "Code" ou previsao_latas vs "Previsão_Latas" (mapOcppRow normaliza).
 const OCPP_SELECT_ALL = "*";

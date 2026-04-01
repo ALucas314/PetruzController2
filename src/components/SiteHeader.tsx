@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { BarChart3, Bell, ChevronLeft, ChevronRight, CircleUser, LogOut, Menu, Moon, Sun } from "lucide-react";
+import { BarChart3, Bell, ChevronLeft, ChevronRight, CircleUser, LogOut, Menu, Moon, Plus, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -43,6 +43,7 @@ const routeTitles: Record<string, string> = {
   "/estoque/cadastro-tuneis": "Cadastro de Túneis",
   "/estoque/cadastro-tipo-produto": "Cadastro de tipo de produtos",
   "/estoque/movimentacao-tuneis": "Movimentação de Túneis",
+  "/estoque/controle-estoque": "Controle de estoque",
 };
 
 function formatDataDiaBR(iso: string): string {
@@ -169,6 +170,23 @@ export function SiteHeader() {
             >
               <ChevronRight className="h-4 w-4 sm:h-4 sm:w-4" />
             </Button>
+            {documentNav.showNewInHeader ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 rounded-lg"
+                title="Novo documento"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  runDocNav(documentNav.onNewDocument);
+                }}
+                aria-label="Novo documento"
+              >
+                <Plus className="h-4 w-4 sm:h-4 sm:w-4" />
+              </Button>
+            ) : null}
           </div>
         )}
 

@@ -38,6 +38,7 @@ import GuiaDesenvolvedor from "./pages/GuiaDesenvolvedor";
 import ControleTuneis from "./pages/ControleTuneis";
 import CadastroTipoProduto from "./pages/CadastroTipoProduto";
 import MovimentacaoTuneis from "./pages/MovimentacaoTuneis";
+import ControleEstoque from "./pages/ControleEstoque";
 
 const queryClient = new QueryClient();
 
@@ -87,6 +88,7 @@ const router = createBrowserRouter([
       { path: "guia-desenvolvedor", element: <ProtectedRoute><GuiaDesenvolvedor /></ProtectedRoute> },
       { path: "financeiro", element: <ProtectedRoute><PlaceholderPage title="Financeiro" /></ProtectedRoute> },
       { path: "estoque", element: <ProtectedRoute><PlaceholderPage title="Estoque" /></ProtectedRoute> },
+      { path: "estoque/controle-estoque", element: <ProtectedRoute><ControleEstoque /></ProtectedRoute> },
       { path: "estoque/cadastro-tuneis", element: <ProtectedRoute><ControleTuneis /></ProtectedRoute> },
       { path: "estoque/cadastro-tipo-produto", element: <ProtectedRoute><CadastroTipoProduto /></ProtectedRoute> },
       { path: "estoque/movimentacao-tuneis", element: <ProtectedRoute><MovimentacaoTuneis /></ProtectedRoute> },

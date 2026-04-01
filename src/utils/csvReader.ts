@@ -6,11 +6,42 @@ export interface CSVRow {
   [key: string]: string;
 }
 
+/** Remove BOM UTF-8 e espaços nas extremidades (cabeçalhos vindo do Excel costumam ter \\uFEFF). */
+function stripBom(s: string): string {
+  return s.replace(/^\uFEFF/, "").trim();
+}
+
+/**
+ * Lê uma célula tentando vários nomes de coluna e tolerando BOM / diferença de maiúsculas no header.
+ */
+export function getCsvCell(row: CSVRow, ...candidates: string[]): string {
+  for (const key of candidates) {
+    const v = row[key];
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+    const bomKey = "\uFEFF" + key;
+    const vBom = row[bomKey];
+    if (vBom != null && String(vBom).trim() !== "") return String(vBom).trim();
+  }
+  const rowKeys = Object.keys(row);
+  for (const rowKey of rowKeys) {
+    const nk = stripBom(rowKey);
+    for (const c of candidates) {
+      const cc = stripBom(c);
+      if (nk === cc || nk.toLowerCase() === cc.toLowerCase()) {
+        const v = row[rowKey];
+        if (v != null && String(v).trim() !== "") return String(v).trim();
+      }
+    }
+  }
+  return "";
+}
+
 /**
  * Parseia uma string CSV com delimitador ponto e vírgula
  */
 export function parseCSV(csvContent: string): CSVRow[] {
-  const lines = csvContent.split('\n').filter(line => line.trim() !== '');
+  const content = stripBom(csvContent);
+  const lines = content.split("\n").filter((line) => line.trim() !== "");
   
   if (lines.length === 0) {
     return [];
@@ -19,7 +50,7 @@ export function parseCSV(csvContent: string): CSVRow[] {
   // Primeira linha são os headers
   const headers = lines[0]
     .split(';')
-    .map(header => header.trim())
+    .map(header => stripBom(header))
     .filter(header => header !== '');
 
   // Parsear as linhas de dados
