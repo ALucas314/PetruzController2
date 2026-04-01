@@ -7437,6 +7437,7 @@ function Producao() {
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Planejada</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Qtd. Realizada</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Diferença</TableHead>
+                          <TableHead className="text-xs sm:text-sm whitespace-nowrap">Kg/h</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Restante</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">Hora final</TableHead>
                           <TableHead className="text-xs sm:text-sm whitespace-nowrap">% Meta</TableHead>
@@ -7531,7 +7532,7 @@ function Producao() {
                             }
                           }
                           const calculoHistoricoStr =
-                            record.calculo_1_horas != null && record.calculo_1_horas !== ""
+                            record.calculo_1_horas != null && String(record.calculo_1_horas).trim() !== ""
                               ? String(record.calculo_1_horas).replace(".", ",")
                               : "";
                           const itemHistoricoCalc: ProductionItem = {
@@ -7594,6 +7595,9 @@ function Producao() {
                               <TableCell className="text-xs sm:text-sm text-right">{formatTotal(parseFloat(record.qtd_realizada) || 0)}</TableCell>
                               <TableCell className={`text-xs sm:text-sm text-right ${parseFloat(record.diferenca) > 0 ? "text-destructive" : "text-success"}`}>
                                 {formatTotal(Math.abs(parseFloat(record.diferenca) || 0))}
+                              </TableCell>
+                              <TableCell className="text-xs sm:text-sm text-right font-mono tabular-nums">
+                                {calculoHistoricoStr !== "" ? calculoHistoricoStr : "—"}
                               </TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{restante}</TableCell>
                               <TableCell className="text-xs sm:text-sm font-mono">{horaFinalStr}</TableCell>

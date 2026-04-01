@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertCircle, ArrowDownToLine, ArrowUpFromLine, ChartPie, Loader2, Package, Plus, Scale, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowDownToLine, ArrowUpFromLine, BarChart3, ChartPie, Loader2, Package, Plus, Scale, Trash2 } from "lucide-react";
+import { EntradaSaidaBarChart } from "@/components/controle-estoque/EntradaSaidaBarChart";
 import { EntradaSaidaPieChart } from "@/components/controle-estoque/EntradaSaidaPieChart";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { ExportToPng } from "@/components/ExportToPng";
@@ -63,6 +64,20 @@ function daysBetween(startIso: string, endIso: string): number {
 
 function todayIso(): string {
   return new Date().toISOString().split("T")[0] || "";
+}
+
+/** Vencido se a data da movimentação é posterior à data de vencimento do lote (não usa “hoje”). */
+function statusValidadeNaDataMov(
+  dataMovimento: string,
+  dataVencimento: string | null | undefined
+): "No prazo" | "Vencido" {
+  const v = (dataVencimento ?? "").trim().split("T")[0] ?? "";
+  const m = (dataMovimento ?? "").trim().split("T")[0] ?? "";
+  if (!v || !m) return "No prazo";
+  const dv = new Date(`${v}T00:00:00`);
+  const dm = new Date(`${m}T00:00:00`);
+  if (Number.isNaN(dv.getTime()) || Number.isNaN(dm.getTime())) return "No prazo";
+  return dm > dv ? "Vencido" : "No prazo";
 }
 
 const CODE_LOOKUP_DEBOUNCE_MS = 450;
@@ -272,6 +287,7 @@ export default function ControleEstoque() {
   const codeLookupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const codeLookupSeqRef = useRef(0);
   const chartOccePizzaRef = useRef<HTMLDivElement>(null);
+  const chartOcceBarRef = useRef<HTMLDivElement>(null);
 
   const loadMovs = useCallback(async () => {
     const list = await getControleEstoque();
@@ -677,10 +693,7 @@ export default function ControleEstoque() {
     setSaving(true);
     try {
       const diffDias = daysBetween(form.dataFabricacao, form.dataVencimento);
-      const statusValidade: "No prazo" | "Vencido" =
-        form.dataVencimento && new Date(`${todayIso()}T00:00:00`) > new Date(`${form.dataVencimento}T00:00:00`)
-          ? "Vencido"
-          : "No prazo";
+      const statusValidade = statusValidadeNaDataMov(form.data, form.dataVencimento);
 
       const valorTotal = quantidade * custo;
 
@@ -1017,30 +1030,56 @@ export default function ControleEstoque() {
           </CardContent>
         </Card>
 
-        <div ref={chartOccePizzaRef} className="chart-card pl-3 pr-4 py-5 sm:p-6 lg:p-8 overflow-hidden">
-          <div className="mb-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
-            <div className="flex gap-3 min-w-0">
-              <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
-                <ChartPie className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 min-w-0">
+          <div ref={chartOccePizzaRef} className="chart-card pl-3 pr-4 py-5 sm:p-6 lg:p-8 overflow-hidden min-w-0">
+            <div className="mb-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
+              <div className="flex gap-3 min-w-0">
+                <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
+                  <ChartPie className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-lg font-bold tracking-tight text-card-foreground">Total de Entrada x Saída</h3>
+                  <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">
+                    Pizza — 100% = soma das entradas; verde = saldo (sobra), vermelho = total de saída.
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <h3 className="text-base sm:text-lg font-bold tracking-tight text-card-foreground">Entrada × saída (gráfico de pizza)</h3>
-                <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">
-                  A pizza usa como 100% a <span className="font-medium text-foreground/90">soma das entradas</span>: verde = saldo
-                  (sobra, entrada − saída), vermelho = total de saída. Novas entradas ou saídas alteram os totais e as fatias.
-                </p>
-              </div>
+              <ExportToPng
+                targetRef={chartOccePizzaRef}
+                filenamePrefix="occe-entrada-saida-pizza"
+                expandScrollable={false}
+                className="shrink-0"
+                label="Baixar PNG"
+                title="Baixar gráfico de pizza como imagem PNG"
+              />
             </div>
-            <ExportToPng
-              targetRef={chartOccePizzaRef}
-              filenamePrefix="occe-entrada-saida-pizza"
-              expandScrollable={false}
-              className="shrink-0"
-              label="Baixar PNG"
-              title="Baixar gráfico de pizza como imagem PNG"
-            />
+            <EntradaSaidaPieChart totalEntrada={totalEntrada} totalSaida={totalSaida} />
           </div>
-          <EntradaSaidaPieChart totalEntrada={totalEntrada} totalSaida={totalSaida} />
+
+          <div ref={chartOcceBarRef} className="chart-card pl-3 pr-4 py-5 sm:p-6 lg:p-8 overflow-hidden min-w-0">
+            <div className="mb-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
+              <div className="flex gap-3 min-w-0">
+                <div className="flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 via-primary/15 to-primary/10 border border-primary/25 shadow-lg shadow-primary/10">
+                  <BarChart3 className="h-6 w-6 lg:h-7 lg:w-7 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-lg font-bold tracking-tight text-card-foreground">Total de Entrada x Saída</h3>
+                  <p className="text-xs sm:text-sm text-muted-foreground/90 mt-0.5">
+                    Barras — totais acumulados: entrada em verde e saída em vermelho.
+                  </p>
+                </div>
+              </div>
+              <ExportToPng
+                targetRef={chartOcceBarRef}
+                filenamePrefix="occe-entrada-saida-barras"
+                expandScrollable={false}
+                className="shrink-0"
+                label="Baixar PNG"
+                title="Baixar gráfico de barras como imagem PNG"
+              />
+            </div>
+            <EntradaSaidaBarChart totalEntrada={totalEntrada} totalSaida={totalSaida} />
+          </div>
         </div>
 
         <Card className="rounded-2xl border border-border/50 bg-card/95">
@@ -1089,7 +1128,9 @@ export default function ControleEstoque() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {movsComSaldo.map((m) => (
+                    {movsComSaldo.map((m) => {
+                      const statusVal = statusValidadeNaDataMov(m.dataMovimento, m.dataVencimento);
+                      return (
                       <TableRow
                         key={m.id}
                         className={cn(
@@ -1121,10 +1162,11 @@ export default function ControleEstoque() {
                         <TableCell
                           className={cn(
                             "whitespace-nowrap align-middle",
-                            m.statusValidade === "Vencido" && "text-destructive font-semibold"
+                            statusVal === "Vencido" && "text-destructive font-semibold"
                           )}
+                          title="Calculado pela data da movimentação em relação ao vencimento do lote"
                         >
-                          {m.statusValidade}
+                          {statusVal}
                         </TableCell>
                         <TableCell className="whitespace-nowrap capitalize align-middle">{m.processo}</TableCell>
                         <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
@@ -1157,7 +1199,8 @@ export default function ControleEstoque() {
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
