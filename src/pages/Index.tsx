@@ -1,8 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ClipboardList, CheckCircle2, ArrowRightLeft, Factory, Percent, Target, Loader2 } from "lucide-react";
+import {
+  ClipboardList,
+  CheckCircle2,
+  ArrowRightLeft,
+  Factory,
+  Percent,
+  Target,
+  Loader2,
+  LayoutDashboard,
+  Database,
+} from "lucide-react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
 import { AppLayout } from "@/components/AppLayout";
+import { Card, CardContent, CardDescription } from "@/components/ui/card";
 import { ExportToPng } from "@/components/ExportToPng";
 import {
   getFiliais,
@@ -272,27 +283,55 @@ const Index = () => {
 
   return (
     <AppLayout>
-      {/* Header: título em cima, filtros em baixo — menos margem superior no mobile/tablet */}
-      <div className="mb-6 sm:mb-8 space-y-5 -mt-2 sm:-mt-1 lg:mt-0">
-        <div className="space-y-1 text-center sm:text-left">
-          <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-            Painel de Controle
-          </h1>
-          <p className="text-sm sm:text-base text-muted-foreground font-medium">
-            Visão geral do desempenho da empresa
-          </p>
+      <Card className="relative mb-6 sm:mb-8 overflow-hidden rounded-2xl border border-border/50 bg-card/95 shadow-xl shadow-primary/[0.07] -mt-2 sm:-mt-1 lg:mt-0">
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-primary via-primary/70 to-emerald-500/90"
+          aria-hidden
+        />
+        <div className="relative border-b border-border/40 bg-gradient-to-br from-primary/[0.07] via-card/80 to-emerald-500/[0.04] px-5 py-6 sm:px-8 sm:py-7">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-6">
+            <div className="mx-auto flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/30 via-primary/15 to-primary/5 border border-primary/30 shadow-lg shadow-primary/15 sm:mx-0 sm:h-16 sm:w-16">
+              <LayoutDashboard className="h-7 w-7 text-primary sm:h-8 sm:w-8" />
+            </div>
+            <div className="min-w-0 flex-1 space-y-2 text-center sm:text-left">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-card-foreground">
+                Painel de Controle
+              </h1>
+              <CardDescription className="border-0 p-0 text-sm font-medium leading-relaxed text-muted-foreground shadow-none sm:text-base">
+                Visão geral do desempenho da empresa — planejado, realizado e indicadores do período.
+              </CardDescription>
+            </div>
+          </div>
         </div>
-        <div className="w-full min-w-0">
-          <DashboardFilters
-            dataInicio={dataInicio} setDataInicio={setDataInicio}
-            dataFim={dataFim} setDataFim={setDataFim}
-            filial={filial} setFilial={setFilial}
-            filiais={filiais}
-            onFilter={handleApplyFilter}
-            loading={loading}
-          />
-        </div>
-      </div>
+        <CardContent className="p-4 sm:p-6 sm:pb-7">
+          <div className="rounded-xl border border-primary/15 bg-gradient-to-b from-muted/45 via-muted/25 to-muted/15 p-4 shadow-inner shadow-black/[0.02] ring-1 ring-border/50 sm:p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-center gap-2 border-b border-border/50 pb-3 sm:justify-start">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <Database className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 text-center sm:text-left">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary/90">Filtros da seção</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Defina o intervalo de datas e a filial; depois use Filtrar para atualizar KPIs e gráficos.
+                </p>
+              </div>
+            </div>
+            <div className="w-full min-w-0">
+              <DashboardFilters
+                dataInicio={dataInicio}
+                setDataInicio={setDataInicio}
+                dataFim={dataFim}
+                setDataFim={setDataFim}
+                filial={filial}
+                setFilial={setFilial}
+                filiais={filiais}
+                onFilter={handleApplyFilter}
+                loading={loading}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* KPIs */}
       {loading ? (

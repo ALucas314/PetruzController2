@@ -5,6 +5,17 @@ const TABLE = "OCCE";
 const SELECT_LIST =
   "id, doc_entry, numero_documento, data_movimento, codigo_produto, descricao_item, unidade_medida, grupo_itens, lote, data_fabricacao, data_vencimento, diferenca_dias_fab_venc, status_validade, processo, quantidade, custo_unitario, valor_total, filial_nome, codigo_tunel, created_at, updated_at";
 
+/** Extrai YYYY-MM-DD do retorno do PostgREST sem interpretar fuso (evita dia “errado”). */
+function dateOnlyFromUnknown(v: unknown): string {
+  if (v == null || v === "") return "";
+  const s = String(v).trim();
+  const head = s.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(head)) return head;
+  const t = s.split("T")[0] ?? "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  return "";
+}
+
 function fmtErr(e: { message?: string; details?: string; hint?: string; code?: string }): string {
   if (e.code === "42501") {
     return "Sem permissão para acessar controle de estoque. Verifique as políticas RLS da tabela OCCE.";
@@ -18,14 +29,14 @@ function mapRow(r: Record<string, unknown>): OCCERow {
     id: Number(r.id),
     docEntry: Number(r.doc_entry ?? 0),
     numeroDocumento: Number(r.numero_documento ?? 0),
-    dataMovimento: r.data_movimento != null ? String(r.data_movimento).split("T")[0] : "",
+    dataMovimento: dateOnlyFromUnknown(r.data_movimento),
     codigoProduto: String(r.codigo_produto ?? ""),
     descricaoItem: String(r.descricao_item ?? ""),
     unidadeMedida: String(r.unidade_medida ?? ""),
     grupoItens: String(r.grupo_itens ?? ""),
     lote: r.lote != null ? String(r.lote) : null,
-    dataFabricacao: r.data_fabricacao != null ? String(r.data_fabricacao).split("T")[0] : null,
-    dataVencimento: r.data_vencimento != null ? String(r.data_vencimento).split("T")[0] : null,
+    dataFabricacao: r.data_fabricacao != null ? dateOnlyFromUnknown(r.data_fabricacao) || null : null,
+    dataVencimento: r.data_vencimento != null ? dateOnlyFromUnknown(r.data_vencimento) || null : null,
     diferencaDiasFabVenc: Number(r.diferenca_dias_fab_venc ?? 0),
     statusValidade: (r.status_validade === "Vencido" ? "Vencido" : "No prazo") as "No prazo" | "Vencido",
     processo: (r.processo === "saida" ? "saida" : "entrada") as "entrada" | "saida",

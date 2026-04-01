@@ -29,7 +29,7 @@ export function EntradaSaidaBarChart({ totalEntrada, totalSaida }: { totalEntrad
       <ResponsiveContainer width="100%" height="100%">
         <BarChart
           data={data}
-          margin={{ top: 28, right: 8, left: 4, bottom: 8 }}
+          margin={{ top: 28, right: 8, left: 0, bottom: 8 }}
           barCategoryGap="28%"
         >
           <defs>
@@ -52,14 +52,7 @@ export function EntradaSaidaBarChart({ totalEntrada, totalSaida }: { totalEntrad
             tick={{ fontSize: 12, fontWeight: 600, fill: "hsl(var(--muted-foreground))" }}
             dy={8}
           />
-          <YAxis
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-            width={44}
-            domain={[0, yMax]}
-            tickFormatter={(v) => formatNumberPtBrFixed(v, 0)}
-          />
+          <YAxis hide domain={[0, yMax]} />
           <Tooltip
             cursor={{ fill: "hsl(var(--primary) / 0.06)", radius: 8 }}
             content={({ active, payload }) => {

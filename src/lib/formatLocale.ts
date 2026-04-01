@@ -46,3 +46,27 @@ export function formatNumberPtBr(
 export function formatPercentPtBr(value: number | string | null | undefined, fractionDigits = 1): string {
   return `${formatNumberPtBrFixed(value, fractionDigits)}%`;
 }
+
+const ISO_YMD = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Data somente (YYYY-MM-DD ou timestamp com esse prefixo) em dd/mm/aaaa.
+ * Não usa `Date` para evitar deslocamento de dia por UTC (ex.: Brasil).
+ */
+export function formatIsoDateOnlyPtBr(value: string | null | undefined): string {
+  const raw = (value ?? "").trim();
+  if (!raw) return "—";
+  const ymd = (raw.split("T")[0] ?? "").split(" ")[0] ?? "";
+  const m = ISO_YMD.exec(ymd);
+  if (!m) return raw.length > 14 ? ymd : raw;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+/** Hoje no fuso local como YYYY-MM-DD (compatível com `input type="date"`). */
+export function todayLocalIsoDate(): string {
+  const n = new Date();
+  const y = n.getFullYear();
+  const mo = String(n.getMonth() + 1).padStart(2, "0");
+  const d = String(n.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${d}`;
+}

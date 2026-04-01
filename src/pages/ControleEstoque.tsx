@@ -2,18 +2,34 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertCircle, ArrowDownToLine, ArrowUpFromLine, BarChart3, ChartPie, Loader2, Package, Plus, Scale, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  BarChart3,
+  ChartPie,
+  Columns3,
+  Filter,
+  Loader2,
+  Package,
+  Plus,
+  Scale,
+  Trash2,
+} from "lucide-react";
 import { EntradaSaidaBarChart } from "@/components/controle-estoque/EntradaSaidaBarChart";
 import { EntradaSaidaPieChart } from "@/components/controle-estoque/EntradaSaidaPieChart";
+import { OcceMovFilterCombo } from "@/components/controle-estoque/OcceMovFilterCombo";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { ExportToPng } from "@/components/ExportToPng";
 import { useToast } from "@/hooks/use-toast";
 import { useDocumentNav } from "@/contexts/DocumentNavContext";
-import { formatNumberPtBrFixed } from "@/lib/formatLocale";
+import { formatIsoDateOnlyPtBr, formatNumberPtBrFixed, todayLocalIsoDate } from "@/lib/formatLocale";
 import { cn } from "@/lib/utils";
 import {
   createControleEstoque,
@@ -55,15 +71,16 @@ type FormState = {
 };
 
 function daysBetween(startIso: string, endIso: string): number {
-  if (!startIso || !endIso) return 0;
-  const a = new Date(`${startIso}T00:00:00`);
-  const b = new Date(`${endIso}T00:00:00`);
-  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 0;
-  return Math.floor((b.getTime() - a.getTime()) / (24 * 60 * 60 * 1000));
-}
-
-function todayIso(): string {
-  return new Date().toISOString().split("T")[0] || "";
+  const parse = (s: string) => {
+    const part = (s ?? "").trim().split("T")[0]?.split(" ")[0] ?? "";
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(part);
+    if (!m) return null;
+    return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  };
+  const a = parse(startIso);
+  const b = parse(endIso);
+  if (a == null || b == null) return 0;
+  return Math.floor((b - a) / (24 * 60 * 60 * 1000));
 }
 
 /** Vencido se a data da movimentação é posterior à data de vencimento do lote (não usa “hoje”). */
@@ -71,13 +88,145 @@ function statusValidadeNaDataMov(
   dataMovimento: string,
   dataVencimento: string | null | undefined
 ): "No prazo" | "Vencido" {
-  const v = (dataVencimento ?? "").trim().split("T")[0] ?? "";
-  const m = (dataMovimento ?? "").trim().split("T")[0] ?? "";
-  if (!v || !m) return "No prazo";
-  const dv = new Date(`${v}T00:00:00`);
-  const dm = new Date(`${m}T00:00:00`);
-  if (Number.isNaN(dv.getTime()) || Number.isNaN(dm.getTime())) return "No prazo";
-  return dm > dv ? "Vencido" : "No prazo";
+  const v = ((dataVencimento ?? "").trim().split("T")[0] ?? "").split(" ")[0] ?? "";
+  const m = ((dataMovimento ?? "").trim().split("T")[0] ?? "").split(" ")[0] ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || !/^\d{4}-\d{2}-\d{2}$/.test(m)) return "No prazo";
+  return m > v ? "Vencido" : "No prazo";
+}
+
+const OCCE_MOV_TABLE_COLUMNS: Array<{ id: string; label: string }> = [
+  { id: "item", label: "Item (documento)" },
+  { id: "data", label: "Data" },
+  { id: "codigo", label: "Código" },
+  { id: "descricao", label: "Descrição" },
+  { id: "un", label: "Un." },
+  { id: "grupo", label: "Grupo" },
+  { id: "lote", label: "Lote" },
+  { id: "fabricacao", label: "Fabricação" },
+  { id: "vencimento", label: "Vencimento" },
+  { id: "difDias", label: "Dif. dias" },
+  { id: "statusValidade", label: "Status validade" },
+  { id: "processo", label: "Processo" },
+  { id: "qtd", label: "Qtd." },
+  { id: "filial", label: "Filial" },
+  { id: "tunel", label: "Túnel" },
+  { id: "saldo", label: "Saldo" },
+  { id: "custo", label: "Custo" },
+  { id: "total", label: "Total" },
+  { id: "acao", label: "Ação" },
+];
+
+function defaultOcceMovColsVisible(): Record<string, boolean> {
+  return Object.fromEntries(OCCE_MOV_TABLE_COLUMNS.map((c) => [c.id, true]));
+}
+
+/** Filtros da tabela de movimentações (texto contém; datas em intervalo; selects exatos). */
+type OcceMovFiltersState = {
+  item: string;
+  dataDe: string;
+  dataAte: string;
+  codigo: string;
+  descricao: string;
+  un: string;
+  grupo: string;
+  lote: string;
+  fabricacao: string;
+  vencimento: string;
+  difDias: string;
+  statusValidade: "__todos__" | "No prazo" | "Vencido";
+  processo: "__todos__" | "entrada" | "saida";
+  qtd: string;
+  filial: string;
+  tunel: string;
+  saldo: string;
+  custo: string;
+  total: string;
+};
+
+function defaultOcceMovFilters(): OcceMovFiltersState {
+  return {
+    item: "",
+    dataDe: "",
+    dataAte: "",
+    codigo: "",
+    descricao: "",
+    un: "",
+    grupo: "",
+    lote: "",
+    fabricacao: "",
+    vencimento: "",
+    difDias: "",
+    statusValidade: "__todos__",
+    processo: "__todos__",
+    qtd: "",
+    filial: "",
+    tunel: "",
+    saldo: "",
+    custo: "",
+    total: "",
+  };
+}
+
+function occeMovNorm(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function occeMovTextMatch(haystack: string, needle: string): boolean {
+  if (!needle.trim()) return true;
+  return occeMovNorm(haystack).includes(occeMovNorm(needle));
+}
+
+function occeMovNumberMatch(needle: string, value: number): boolean {
+  if (!needle.trim()) return true;
+  const n = occeMovNorm(needle);
+  return occeMovNorm(formatNumberPtBrFixed(value, 2)).includes(n) || occeMovNorm(String(value)).includes(n);
+}
+
+function rowMatchesOcceMovFilters(m: RowComSaldo, f: OcceMovFiltersState): boolean {
+  const dm = (m.dataMovimento ?? "").trim().split("T")[0] ?? "";
+  if (f.dataDe.trim() && dm < f.dataDe.trim()) return false;
+  if (f.dataAte.trim() && dm > f.dataAte.trim()) return false;
+  if (f.processo !== "__todos__" && m.processo !== f.processo) return false;
+  const statusVal = statusValidadeNaDataMov(m.dataMovimento, m.dataVencimento);
+  if (f.statusValidade !== "__todos__" && statusVal !== f.statusValidade) return false;
+
+  if (!occeMovTextMatch(String(m.docEntry), f.item)) return false;
+  if (!occeMovTextMatch(m.codigoProduto, f.codigo)) return false;
+  if (!occeMovTextMatch(m.descricaoItem, f.descricao)) return false;
+  if (!occeMovTextMatch(m.unidadeMedida, f.un)) return false;
+  if (!occeMovTextMatch(m.grupoItens, f.grupo)) return false;
+  const loteDisp = (m.lote || "").trim() || "—";
+  if (!occeMovTextMatch(loteDisp, f.lote)) return false;
+  const fabDisp = (m.dataFabricacao || "").trim() || "—";
+  if (!occeMovTextMatch(fabDisp, f.fabricacao)) return false;
+  const venDisp = (m.dataVencimento || "").trim() || "—";
+  if (!occeMovTextMatch(venDisp, f.vencimento)) return false;
+  if (!occeMovTextMatch(String(m.diferencaDiasFabVenc), f.difDias)) return false;
+  if (!occeMovNumberMatch(f.qtd, m.quantidade)) return false;
+  if (!occeMovTextMatch(m.filialNome, f.filial)) return false;
+  const tunPadded = String(m.codigoTunel).padStart(4, "0");
+  if (!occeMovTextMatch(tunPadded, f.tunel) && !occeMovTextMatch(String(m.codigoTunel), f.tunel)) return false;
+  if (!occeMovNumberMatch(f.saldo, m.saldo)) return false;
+  if (!occeMovNumberMatch(f.custo, m.custoUnitario)) return false;
+  if (!occeMovNumberMatch(f.total, m.valorTotal)) return false;
+  return true;
+}
+
+function occeMovFiltersActive(f: OcceMovFiltersState): boolean {
+  const d = defaultOcceMovFilters();
+  return (Object.keys(d) as (keyof OcceMovFiltersState)[]).some((k) => f[k] !== d[k]);
+}
+
+function formatOcceMovProcessoFilterDisplay(v: string): string {
+  if (v === "__todos__") return "Todos";
+  if (v === "entrada") return "Entrada";
+  if (v === "saida") return "Saída";
+  return v || "Todos";
+}
+
+function formatOcceMovStatusFilterDisplay(v: string): string {
+  if (v === "__todos__") return "Todos";
+  return v || "Todos";
 }
 
 const CODE_LOOKUP_DEBOUNCE_MS = 450;
@@ -100,7 +249,7 @@ function formatOcceDecimalTwoPlaces(raw: string): string {
 
 function emptyForm(): FormState {
   return {
-    data: todayIso(),
+    data: todayLocalIsoDate(),
     codigoProduto: "",
     descricaoItem: "",
     unidadeMedida: "",
@@ -289,6 +438,12 @@ export default function ControleEstoque() {
   const chartOccePizzaRef = useRef<HTMLDivElement>(null);
   const chartOcceBarRef = useRef<HTMLDivElement>(null);
 
+  const [occeMovColsOpen, setOcceMovColsOpen] = useState(false);
+  const [occeMovColsVisible, setOcceMovColsVisible] = useState<Record<string, boolean>>(defaultOcceMovColsVisible);
+  const [occeMovColsPending, setOcceMovColsPending] = useState<Record<string, boolean>>(defaultOcceMovColsVisible);
+  const [occeMovFilters, setOcceMovFilters] = useState<OcceMovFiltersState>(defaultOcceMovFilters);
+  const [occeMovFiltersPending, setOcceMovFiltersPending] = useState<OcceMovFiltersState>(defaultOcceMovFilters);
+
   const loadMovs = useCallback(async () => {
     const list = await getControleEstoque();
     setMovs(list);
@@ -408,6 +563,110 @@ export default function ControleEstoque() {
 
   const movsComSaldo = useMemo(() => rowsComSaldo(movs), [movs]);
 
+  const movsComSaldoFiltered = useMemo(
+    () => movsComSaldo.filter((m) => rowMatchesOcceMovFilters(m, occeMovFilters)),
+    [movsComSaldo, occeMovFilters]
+  );
+
+  const hasOcceMovFilters = useMemo(() => occeMovFiltersActive(occeMovFilters), [occeMovFilters]);
+
+  const occeMovFilterSuggestions = useMemo(() => {
+    const rows = movsComSaldo;
+    const sortLocale = (a: string, b: string) =>
+      a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" });
+    const empty = {
+      item: [] as string[],
+      data: [] as string[],
+      codigo: [] as string[],
+      descricao: [] as string[],
+      un: [] as string[],
+      grupo: [] as string[],
+      lote: [] as string[],
+      fabricacao: [] as string[],
+      vencimento: [] as string[],
+      difDias: [] as string[],
+      qtd: [] as string[],
+      filial: [] as string[],
+      tunel: [] as string[],
+      saldo: [] as string[],
+      custo: [] as string[],
+      total: [] as string[],
+      processo: [] as string[],
+      statusValidade: [] as string[],
+    };
+    if (rows.length === 0) return empty;
+
+    const item = [...new Set(rows.map((r) => r.docEntry))]
+      .sort((a, b) => a - b)
+      .map(String);
+    const data = [...new Set(rows.map((r) => (r.dataMovimento || "").split("T")[0]))]
+      .filter(Boolean)
+      .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+    const codigo = [...new Set(rows.map((r) => r.codigoProduto.trim()))].filter(Boolean).sort(sortLocale);
+    const descricao = [...new Set(rows.map((r) => r.descricaoItem.trim()))].filter(Boolean).sort(sortLocale);
+    const un = [...new Set(rows.map((r) => r.unidadeMedida.trim()))].filter(Boolean).sort(sortLocale);
+    const grupo = [...new Set(rows.map((r) => r.grupoItens.trim()))].filter(Boolean).sort(sortLocale);
+    const lote = [...new Set(rows.map((r) => ((r.lote || "").trim() || "—")))].sort(sortLocale);
+    const fabricacao = [...new Set(rows.map((r) => ((r.dataFabricacao || "").trim() || "—")))].sort(sortLocale);
+    const vencimento = [...new Set(rows.map((r) => ((r.dataVencimento || "").trim() || "—")))].sort(sortLocale);
+    const difDias = [...new Set(rows.map((r) => String(r.diferencaDiasFabVenc)))].sort(sortLocale);
+    const qtd = [...new Set(rows.map((r) => formatNumberPtBrFixed(r.quantidade, 2)))].sort(sortLocale);
+    const filial = [...new Set(rows.map((r) => r.filialNome.trim()))].filter(Boolean).sort(sortLocale);
+    const tunel = [...new Set(rows.map((r) => String(r.codigoTunel).padStart(4, "0")))].sort(sortLocale);
+    const saldo = [...new Set(rows.map((r) => formatNumberPtBrFixed(r.saldo, 2)))].sort(sortLocale);
+    const custo = [...new Set(rows.map((r) => formatNumberPtBrFixed(r.custoUnitario, 2)))].sort(sortLocale);
+    const total = [...new Set(rows.map((r) => formatNumberPtBrFixed(r.valorTotal, 2)))].sort(sortLocale);
+    const processo = [...new Set(rows.map((r) => r.processo))].sort(sortLocale);
+    const statusValidade = [
+      ...new Set(rows.map((r) => statusValidadeNaDataMov(r.dataMovimento, r.dataVencimento))),
+    ].sort(sortLocale);
+
+    return {
+      item,
+      data,
+      codigo,
+      descricao,
+      un,
+      grupo,
+      lote,
+      fabricacao,
+      vencimento,
+      difDias,
+      qtd,
+      filial,
+      tunel,
+      saldo,
+      custo,
+      total,
+      processo,
+      statusValidade,
+    };
+  }, [movsComSaldo]);
+
+  const showMovCol = useCallback((id: string) => occeMovColsVisible[id] !== false, [occeMovColsVisible]);
+
+  const occeMovTableMinRem = useMemo(() => {
+    const n = OCCE_MOV_TABLE_COLUMNS.filter((c) => occeMovColsVisible[c.id] !== false).length;
+    return Math.max(24, Math.min(110, n * 5.5));
+  }, [occeMovColsVisible]);
+
+  const openOcceMovColsDialog = useCallback(() => {
+    setOcceMovColsPending({ ...occeMovColsVisible });
+    setOcceMovFiltersPending({ ...occeMovFilters });
+    setOcceMovColsOpen(true);
+  }, [occeMovColsVisible, occeMovFilters]);
+
+  const applyOcceMovCols = useCallback(() => {
+    const anyOn = OCCE_MOV_TABLE_COLUMNS.some((c) => occeMovColsPending[c.id] !== false);
+    if (!anyOn) {
+      toast({ title: "Colunas", description: "Marque pelo menos uma coluna.", variant: "destructive" });
+      return;
+    }
+    setOcceMovColsVisible({ ...occeMovColsPending });
+    setOcceMovFilters({ ...occeMovFiltersPending });
+    setOcceMovColsOpen(false);
+  }, [occeMovColsPending, occeMovFiltersPending, toast]);
+
   /** Ordem de navegação no header: menor doc_entry = posição 1. */
   const movsNavOrder = useMemo(
     () => [...movs].sort((a, b) => a.docEntry - b.docEntry),
@@ -511,6 +770,21 @@ export default function ControleEstoque() {
     [movs]
   );
   const saldoTotal = useMemo(() => totalEntrada - totalSaida, [totalEntrada, totalSaida]);
+
+  const totalEntradaFiltrado = useMemo(
+    () =>
+      movsComSaldoFiltered.filter((m) => m.processo === "entrada").reduce((a, b) => a + b.quantidade, 0),
+    [movsComSaldoFiltered]
+  );
+  const totalSaidaFiltrado = useMemo(
+    () =>
+      movsComSaldoFiltered.filter((m) => m.processo === "saida").reduce((a, b) => a + b.quantidade, 0),
+    [movsComSaldoFiltered]
+  );
+  const saldoTotalFiltrado = useMemo(
+    () => totalEntradaFiltrado - totalSaidaFiltrado,
+    [totalEntradaFiltrado, totalSaidaFiltrado]
+  );
 
   const lotesDisponiveisSaida = useMemo(
     () =>
@@ -762,8 +1036,8 @@ export default function ControleEstoque() {
               <Package className="h-6 w-6 text-primary" />
               <div>
                 <CardTitle>Controle de estoque</CardTitle>
-                <CardDescription>
-                  Entrada e saída com validade, filial e túnel (tabela OCCE no Supabase). Clique na grade para abrir e editar; use Nova movimentação ou o + no cabeçalho para incluir outra.
+                <CardDescription className="text-sm">
+                  Movimentações de entrada e saída por lote, fabricação e validade.
                 </CardDescription>
               </div>
             </div>
@@ -1083,16 +1357,286 @@ export default function ControleEstoque() {
         </div>
 
         <Card className="rounded-2xl border border-border/50 bg-card/95">
-          <CardHeader>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between space-y-0 pb-4">
             <CardTitle className="text-base">Movimentações</CardTitle>
+            {movsComSaldo.length > 0 ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={cn("shrink-0 w-full sm:w-auto", hasOcceMovFilters && "border-primary/40")}
+                onClick={openOcceMovColsDialog}
+              >
+                <Columns3 className="h-4 w-4 mr-2" />
+                Colunas e filtros
+                {hasOcceMovFilters ? <Filter className="h-3.5 w-3.5 ml-1.5 text-primary" aria-hidden /> : null}
+              </Button>
+            ) : null}
           </CardHeader>
+          <Dialog open={occeMovColsOpen} onOpenChange={setOcceMovColsOpen}>
+            <DialogContent className="flex flex-col max-h-[min(90vh,40rem)] w-full max-w-2xl p-0 gap-0 sm:max-w-2xl overflow-hidden">
+              <DialogHeader className="px-6 pt-6 pb-2 space-y-1 shrink-0">
+                <DialogTitle>Colunas e filtros</DialogTitle>
+                <p className="text-xs text-muted-foreground font-normal leading-snug pr-8">
+                  Filtros restringem as linhas da tabela e os totais abaixo. Em cada campo, clique para ver valores já cadastrados; você pode escolher na lista ou digitar (exceto Processo e Status, apenas lista). Texto busca por trecho (sem diferenciar maiúsculas). Datas no intervalo usam a data da movimentação. A coluna Ação não tem filtro.
+                </p>
+              </DialogHeader>
+              <div className="overflow-y-auto min-h-0 px-6 py-2 space-y-6 border-y border-border/50">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold">Filtros por coluna</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => setOcceMovFiltersPending(defaultOcceMovFilters())}
+                    >
+                      Limpar filtros
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <OcceMovFilterCombo
+                      label="Item (documento)"
+                      id="occe-f-item"
+                      value={occeMovFiltersPending.item}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, item: v }))}
+                      suggestions={occeMovFilterSuggestions.item}
+                      placeholder="Contém… ou escolha na lista"
+                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:col-span-2">
+                      <OcceMovFilterCombo
+                        label="Data de"
+                        id="occe-f-data-de"
+                        value={occeMovFiltersPending.dataDe}
+                        onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, dataDe: v }))}
+                        suggestions={occeMovFilterSuggestions.data}
+                        placeholder="Digite ou use o calendário"
+                        groupHeading="Datas cadastradas"
+                        inputType="date"
+                        listTrigger="button"
+                      />
+                      <OcceMovFilterCombo
+                        label="Data até"
+                        id="occe-f-data-ate"
+                        value={occeMovFiltersPending.dataAte}
+                        onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, dataAte: v }))}
+                        suggestions={occeMovFilterSuggestions.data}
+                        placeholder="Digite ou use o calendário"
+                        groupHeading="Datas cadastradas"
+                        inputType="date"
+                        listTrigger="button"
+                      />
+                    </div>
+                    <OcceMovFilterCombo
+                      label="Código"
+                      id="occe-f-codigo"
+                      value={occeMovFiltersPending.codigo}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, codigo: v }))}
+                      suggestions={occeMovFilterSuggestions.codigo}
+                      placeholder="Contém… ou escolha na lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Descrição"
+                      id="occe-f-desc"
+                      value={occeMovFiltersPending.descricao}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, descricao: v }))}
+                      suggestions={occeMovFilterSuggestions.descricao}
+                      placeholder="Contém… ou escolha na lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Un."
+                      id="occe-f-un"
+                      value={occeMovFiltersPending.un}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, un: v }))}
+                      suggestions={occeMovFilterSuggestions.un}
+                      placeholder="Contém… ou escolha na lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Grupo"
+                      id="occe-f-grupo"
+                      value={occeMovFiltersPending.grupo}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, grupo: v }))}
+                      suggestions={occeMovFilterSuggestions.grupo}
+                      placeholder="Contém… ou escolha na lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Lote"
+                      id="occe-f-lote"
+                      value={occeMovFiltersPending.lote}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, lote: v }))}
+                      suggestions={occeMovFilterSuggestions.lote}
+                      placeholder="Contém… ou escolha na lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Fabricação"
+                      id="occe-f-fab"
+                      value={occeMovFiltersPending.fabricacao}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, fabricacao: v }))}
+                      suggestions={occeMovFilterSuggestions.fabricacao}
+                      placeholder="Data ou trecho"
+                    />
+                    <OcceMovFilterCombo
+                      label="Vencimento"
+                      id="occe-f-ven"
+                      value={occeMovFiltersPending.vencimento}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, vencimento: v }))}
+                      suggestions={occeMovFilterSuggestions.vencimento}
+                      placeholder="Data ou trecho"
+                    />
+                    <OcceMovFilterCombo
+                      label="Dif. dias"
+                      id="occe-f-dif"
+                      value={occeMovFiltersPending.difDias}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, difDias: v }))}
+                      suggestions={occeMovFilterSuggestions.difDias}
+                      placeholder="Contém… ou escolha na lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Status validade"
+                      id="occe-f-status"
+                      value={occeMovFiltersPending.statusValidade}
+                      onChange={(v) =>
+                        setOcceMovFiltersPending((p) => ({
+                          ...p,
+                          statusValidade: v as OcceMovFiltersState["statusValidade"],
+                        }))
+                      }
+                      suggestions={occeMovFilterSuggestions.statusValidade}
+                      leading={[{ value: "__todos__", label: "Todos" }]}
+                      formatDisplay={formatOcceMovStatusFilterDisplay}
+                      clearValue="__todos__"
+                      placeholder="Escolha na lista"
+                      groupHeading="Status nas movimentações"
+                    />
+                    <OcceMovFilterCombo
+                      label="Processo"
+                      id="occe-f-processo"
+                      value={occeMovFiltersPending.processo}
+                      onChange={(v) =>
+                        setOcceMovFiltersPending((p) => ({
+                          ...p,
+                          processo: v as OcceMovFiltersState["processo"],
+                        }))
+                      }
+                      suggestions={occeMovFilterSuggestions.processo}
+                      leading={[{ value: "__todos__", label: "Todos" }]}
+                      formatDisplay={formatOcceMovProcessoFilterDisplay}
+                      formatSuggestion={formatOcceMovProcessoFilterDisplay}
+                      clearValue="__todos__"
+                      placeholder="Escolha na lista"
+                      groupHeading="Processos cadastrados"
+                    />
+                    <OcceMovFilterCombo
+                      label="Qtd."
+                      id="occe-f-qtd"
+                      value={occeMovFiltersPending.qtd}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, qtd: v }))}
+                      suggestions={occeMovFilterSuggestions.qtd}
+                      placeholder="Trecho numérico ou lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Filial"
+                      id="occe-f-filial"
+                      value={occeMovFiltersPending.filial}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, filial: v }))}
+                      suggestions={occeMovFilterSuggestions.filial}
+                      placeholder="Contém… ou escolha na lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Túnel"
+                      id="occe-f-tunel"
+                      value={occeMovFiltersPending.tunel}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, tunel: v }))}
+                      suggestions={occeMovFilterSuggestions.tunel}
+                      placeholder="Código ou lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Saldo"
+                      id="occe-f-saldo"
+                      value={occeMovFiltersPending.saldo}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, saldo: v }))}
+                      suggestions={occeMovFilterSuggestions.saldo}
+                      placeholder="Trecho numérico ou lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Custo"
+                      id="occe-f-custo"
+                      value={occeMovFiltersPending.custo}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, custo: v }))}
+                      suggestions={occeMovFilterSuggestions.custo}
+                      placeholder="Trecho numérico ou lista"
+                    />
+                    <OcceMovFilterCombo
+                      label="Total"
+                      id="occe-f-total"
+                      value={occeMovFiltersPending.total}
+                      onChange={(v) => setOcceMovFiltersPending((p) => ({ ...p, total: v }))}
+                      suggestions={occeMovFilterSuggestions.total}
+                      placeholder="Trecho numérico ou lista"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-3 pt-1 border-t border-border/60">
+                  <p className="text-sm font-semibold">Colunas visíveis</p>
+                  <p className="text-xs text-muted-foreground">Marque as colunas exibidas na tabela.</p>
+                  <label className="flex items-center gap-2.5 cursor-pointer py-2 px-1 rounded-md hover:bg-muted/50 min-h-[2.5rem] border-b border-border/50 mb-1 touch-manipulation">
+                    <Checkbox
+                      checked={OCCE_MOV_TABLE_COLUMNS.every((c) => occeMovColsPending[c.id] !== false)}
+                      onCheckedChange={(checked) => {
+                        const value = checked === true;
+                        setOcceMovColsPending(() =>
+                          Object.fromEntries(OCCE_MOV_TABLE_COLUMNS.map((c) => [c.id, value]))
+                        );
+                      }}
+                      className="shrink-0"
+                    />
+                    <span className="text-sm font-medium">Selecionar tudo / Desmarcar tudo</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 max-h-[min(40vh,14rem)] overflow-y-auto py-1">
+                    {OCCE_MOV_TABLE_COLUMNS.map((col) => (
+                      <label
+                        key={col.id}
+                        className="flex items-center gap-2.5 cursor-pointer py-2 sm:py-1.5 px-1 rounded-md hover:bg-muted/50 min-h-[2.5rem] sm:min-h-0 touch-manipulation"
+                      >
+                        <Checkbox
+                          checked={occeMovColsPending[col.id] !== false}
+                          onCheckedChange={(checked) =>
+                            setOcceMovColsPending((prev) => ({ ...prev, [col.id]: checked !== false }))
+                          }
+                          className="shrink-0"
+                        />
+                        <span className="text-xs">{col.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 px-6 py-4 border-t border-border/60 shrink-0 bg-background">
+                <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setOcceMovColsOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="button" className="w-full sm:w-auto" onClick={applyOcceMovCols}>
+                  Aplicar
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
           <CardContent>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              <KpiCard title="Total Entrada" value={formatNumberPtBrFixed(totalEntrada, 2)} icon={ArrowDownToLine} />
-              <KpiCard title="Total Saída" value={formatNumberPtBrFixed(totalSaida, 2)} icon={ArrowUpFromLine} />
               <KpiCard
-                title="Saldo (entrada − saída)"
-                value={formatNumberPtBrFixed(saldoTotal, 2)}
+                title={hasOcceMovFilters ? "Total Entrada · filtrado" : "Total Entrada"}
+                value={formatNumberPtBrFixed(totalEntradaFiltrado, 2)}
+                icon={ArrowDownToLine}
+              />
+              <KpiCard
+                title={hasOcceMovFilters ? "Total Saída · filtrado" : "Total Saída"}
+                value={formatNumberPtBrFixed(totalSaidaFiltrado, 2)}
+                icon={ArrowUpFromLine}
+              />
+              <KpiCard
+                title={hasOcceMovFilters ? "Saldo (entrada − saída) · filtrado" : "Saldo (entrada − saída)"}
+                value={formatNumberPtBrFixed(saldoTotalFiltrado, 2)}
                 icon={Scale}
               />
             </div>
@@ -1101,103 +1645,163 @@ export default function ControleEstoque() {
                 <AlertCircle className="h-10 w-10 text-muted-foreground mb-2" />
                 <p className="text-sm text-muted-foreground">Nenhuma movimentação cadastrada.</p>
               </div>
+            ) : movsComSaldoFiltered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center gap-3">
+                <Filter className="h-10 w-10 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Nenhuma movimentação coincide com os filtros.</p>
+                <Button type="button" variant="outline" size="sm" onClick={openOcceMovColsDialog}>
+                  Ajustar filtros
+                </Button>
+              </div>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-border/50">
-                <Table className="min-w-[110rem]">
+                <Table style={{ minWidth: `${occeMovTableMinRem}rem` }}>
                   <TableHeader>
                     <TableRow className="bg-muted/30">
-                      <TableHead className="whitespace-nowrap">Item</TableHead>
-                      <TableHead className="whitespace-nowrap">Data</TableHead>
-                      <TableHead className="whitespace-nowrap">Código</TableHead>
-                      <TableHead className="whitespace-nowrap">Descrição</TableHead>
-                      <TableHead className="whitespace-nowrap">Un.</TableHead>
-                      <TableHead className="whitespace-nowrap">Grupo</TableHead>
-                      <TableHead className="whitespace-nowrap">Lote</TableHead>
-                      <TableHead className="whitespace-nowrap">Fabricação</TableHead>
-                      <TableHead className="whitespace-nowrap">Vencimento</TableHead>
-                      <TableHead className="whitespace-nowrap text-right">Dif. dias</TableHead>
-                      <TableHead className="whitespace-nowrap">Status validade</TableHead>
-                      <TableHead className="whitespace-nowrap">Processo</TableHead>
-                      <TableHead className="whitespace-nowrap text-right">Qtd.</TableHead>
-                      <TableHead className="whitespace-nowrap">Filial</TableHead>
-                      <TableHead className="whitespace-nowrap">Túnel</TableHead>
-                      <TableHead className="whitespace-nowrap text-right">Saldo</TableHead>
-                      <TableHead className="whitespace-nowrap text-right">Custo</TableHead>
-                      <TableHead className="whitespace-nowrap text-right">Total</TableHead>
-                      <TableHead className="whitespace-nowrap text-right">Ação</TableHead>
+                      {showMovCol("item") ? <TableHead className="whitespace-nowrap">Item</TableHead> : null}
+                      {showMovCol("data") ? <TableHead className="whitespace-nowrap">Data</TableHead> : null}
+                      {showMovCol("codigo") ? <TableHead className="whitespace-nowrap">Código</TableHead> : null}
+                      {showMovCol("descricao") ? <TableHead className="whitespace-nowrap">Descrição</TableHead> : null}
+                      {showMovCol("un") ? <TableHead className="whitespace-nowrap">Un.</TableHead> : null}
+                      {showMovCol("grupo") ? <TableHead className="whitespace-nowrap">Grupo</TableHead> : null}
+                      {showMovCol("lote") ? <TableHead className="whitespace-nowrap">Lote</TableHead> : null}
+                      {showMovCol("fabricacao") ? <TableHead className="whitespace-nowrap">Fabricação</TableHead> : null}
+                      {showMovCol("vencimento") ? <TableHead className="whitespace-nowrap">Vencimento</TableHead> : null}
+                      {showMovCol("difDias") ? (
+                        <TableHead className="whitespace-nowrap text-right">Dif. dias</TableHead>
+                      ) : null}
+                      {showMovCol("statusValidade") ? (
+                        <TableHead className="whitespace-nowrap">Status validade</TableHead>
+                      ) : null}
+                      {showMovCol("processo") ? <TableHead className="whitespace-nowrap">Processo</TableHead> : null}
+                      {showMovCol("qtd") ? <TableHead className="whitespace-nowrap text-right">Qtd.</TableHead> : null}
+                      {showMovCol("filial") ? <TableHead className="whitespace-nowrap">Filial</TableHead> : null}
+                      {showMovCol("tunel") ? <TableHead className="whitespace-nowrap">Túnel</TableHead> : null}
+                      {showMovCol("saldo") ? <TableHead className="whitespace-nowrap text-right">Saldo</TableHead> : null}
+                      {showMovCol("custo") ? <TableHead className="whitespace-nowrap text-right">Custo</TableHead> : null}
+                      {showMovCol("total") ? <TableHead className="whitespace-nowrap text-right">Total</TableHead> : null}
+                      {showMovCol("acao") ? <TableHead className="whitespace-nowrap text-right">Ação</TableHead> : null}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {movsComSaldo.map((m) => {
+                    {movsComSaldoFiltered.map((m) => {
                       const statusVal = statusValidadeNaDataMov(m.dataMovimento, m.dataVencimento);
                       return (
                       <TableRow
                         key={m.id}
                         className={cn(
-                          "cursor-pointer hover:bg-muted/40",
-                          selectedMovId === m.id && "bg-muted/60"
+                          "cursor-pointer",
+                          m.processo === "saida"
+                            ? selectedMovId === m.id
+                              ? "bg-destructive/15 hover:bg-destructive/20"
+                              : "bg-destructive/[0.06] hover:bg-destructive/10"
+                            : m.processo === "entrada"
+                              ? selectedMovId === m.id
+                                ? "bg-emerald-500/[0.08] hover:bg-emerald-500/12"
+                                : "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.06]"
+                              : selectedMovId === m.id
+                                ? "bg-muted/60 hover:bg-muted/70"
+                                : "hover:bg-muted/40"
                         )}
                         onClick={() => setSelectedMovId(m.id)}
                       >
-                        <TableCell className="whitespace-nowrap font-mono tabular-nums align-middle">
-                          {m.docEntry}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap tabular-nums font-mono align-middle">
-                          {m.dataMovimento}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap font-mono align-middle">{m.codigoProduto}</TableCell>
-                        <TableCell className="whitespace-nowrap align-middle">{m.descricaoItem}</TableCell>
-                        <TableCell className="whitespace-nowrap align-middle">{m.unidadeMedida}</TableCell>
-                        <TableCell className="whitespace-nowrap align-middle">{m.grupoItens}</TableCell>
-                        <TableCell className="whitespace-nowrap align-middle">{m.lote || "—"}</TableCell>
-                        <TableCell className="whitespace-nowrap tabular-nums font-mono align-middle">
-                          {m.dataFabricacao || "—"}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap tabular-nums font-mono align-middle">
-                          {m.dataVencimento || "—"}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
-                          {m.diferencaDiasFabVenc}
-                        </TableCell>
-                        <TableCell
-                          className={cn(
-                            "whitespace-nowrap align-middle",
-                            statusVal === "Vencido" && "text-destructive font-semibold"
-                          )}
-                          title="Calculado pela data da movimentação em relação ao vencimento do lote"
-                        >
-                          {statusVal}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap capitalize align-middle">{m.processo}</TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
-                          {formatNumberPtBrFixed(m.quantidade, 2)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap align-middle">{m.filialNome}</TableCell>
-                        <TableCell className="whitespace-nowrap font-mono tabular-nums align-middle">
-                          {String(m.codigoTunel).padStart(4, "0")}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
-                          {formatNumberPtBrFixed(m.saldo, 2)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
-                          {formatNumberPtBrFixed(m.custoUnitario, 2)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
-                          {formatNumberPtBrFixed(m.valorTotal, 2)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right align-middle">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void onExcluir(m.id);
-                            }}
+                        {showMovCol("item") ? (
+                          <TableCell className="whitespace-nowrap font-mono tabular-nums align-middle">
+                            {m.docEntry}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("data") ? (
+                          <TableCell className="whitespace-nowrap tabular-nums align-middle">
+                            {formatIsoDateOnlyPtBr(m.dataMovimento)}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("codigo") ? (
+                          <TableCell className="whitespace-nowrap font-mono align-middle">{m.codigoProduto}</TableCell>
+                        ) : null}
+                        {showMovCol("descricao") ? (
+                          <TableCell className="whitespace-nowrap align-middle">{m.descricaoItem}</TableCell>
+                        ) : null}
+                        {showMovCol("un") ? (
+                          <TableCell className="whitespace-nowrap align-middle">{m.unidadeMedida}</TableCell>
+                        ) : null}
+                        {showMovCol("grupo") ? (
+                          <TableCell className="whitespace-nowrap align-middle">{m.grupoItens}</TableCell>
+                        ) : null}
+                        {showMovCol("lote") ? (
+                          <TableCell className="whitespace-nowrap align-middle">{m.lote || "—"}</TableCell>
+                        ) : null}
+                        {showMovCol("fabricacao") ? (
+                          <TableCell className="whitespace-nowrap tabular-nums align-middle">
+                            {m.dataFabricacao ? formatIsoDateOnlyPtBr(m.dataFabricacao) : "—"}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("vencimento") ? (
+                          <TableCell className="whitespace-nowrap tabular-nums align-middle">
+                            {m.dataVencimento ? formatIsoDateOnlyPtBr(m.dataVencimento) : "—"}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("difDias") ? (
+                          <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
+                            {m.diferencaDiasFabVenc}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("statusValidade") ? (
+                          <TableCell
+                            className={cn(
+                              "whitespace-nowrap align-middle",
+                              statusVal === "Vencido" && "text-destructive font-semibold"
+                            )}
+                            title="Calculado pela data da movimentação em relação ao vencimento do lote"
                           >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
+                            {statusVal}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("processo") ? (
+                          <TableCell className="whitespace-nowrap capitalize align-middle">{m.processo}</TableCell>
+                        ) : null}
+                        {showMovCol("qtd") ? (
+                          <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
+                            {formatNumberPtBrFixed(m.quantidade, 2)}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("filial") ? (
+                          <TableCell className="whitespace-nowrap align-middle">{m.filialNome}</TableCell>
+                        ) : null}
+                        {showMovCol("tunel") ? (
+                          <TableCell className="whitespace-nowrap font-mono tabular-nums align-middle">
+                            {String(m.codigoTunel).padStart(4, "0")}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("saldo") ? (
+                          <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
+                            {formatNumberPtBrFixed(m.saldo, 2)}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("custo") ? (
+                          <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
+                            {formatNumberPtBrFixed(m.custoUnitario, 2)}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("total") ? (
+                          <TableCell className="whitespace-nowrap text-right tabular-nums align-middle">
+                            {formatNumberPtBrFixed(m.valorTotal, 2)}
+                          </TableCell>
+                        ) : null}
+                        {showMovCol("acao") ? (
+                          <TableCell className="whitespace-nowrap text-right align-middle">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void onExcluir(m.id);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        ) : null}
                       </TableRow>
                       );
                     })}
