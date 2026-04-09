@@ -52,6 +52,7 @@ import {
   saveDraft,
   getProducaoHistory,
   getOcphDocIdsComBiHoraria,
+  getDistinctBiHorariaDocumentsFromOcph,
   getBiHorariaResumoPorPeriodo,
   getDashboardStats,
   subscribeOCPDRealtime,
@@ -155,6 +156,14 @@ interface BiHorariaRegistroItem {
   dataDia: string;
   hora: string;
   quantidadeRealizada: number | string;
+}
+
+/** YYYY-MM-DD no fuso local (evita “hoje” errado com `toISOString()` em UTC). */
+function localIsoDate(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 /** Cinco linhas fixas (uma por intervalo), para novo documento ou estado inicial. */
@@ -631,9 +640,7 @@ function Producao() {
   const [latasRealizadas, setLatasRealizadas] = useState("");
   const [latasBatidas, setLatasBatidas] = useState("");
   const [totalCortado, setTotalCortado] = useState("");
-  const [dataCabecalhoSelecionada, setDataCabecalhoSelecionada] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+  const [dataCabecalhoSelecionada, setDataCabecalhoSelecionada] = useState<string>(localIsoDate());
   const [percentualMeta, setPercentualMeta] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -2668,6 +2675,54 @@ function Producao() {
         });
       } else {
         setOcpdFilialNomeCarregada("");
+        // Sem OCPD neste dia/doc (ex.: só bi-horária): ainda aplicar OCPH e zerar formulário — antes ficava o dia/quantidades anteriores.
+        const loadedBiRows: BiHorariaRegistroItem[] =
+          result.biHorariaRegistros && Array.isArray(result.biHorariaRegistros) && result.biHorariaRegistros.length > 0
+            ? result.biHorariaRegistros.map((r: any, idx: number) => {
+                const dataLinha =
+                  r.data != null || r.data_dia != null
+                    ? String(r.data ?? r.data_dia).split("T")[0]
+                    : dataToLoad;
+                return {
+                  id: Date.now() + idx,
+                  numero: Number(r.numero ?? idx + 1),
+                  dataDia: dataLinha,
+                  hora: normalizeIntervaloBiHoraria(r.hora),
+                  quantidadeRealizada: formatNumber(r.qtd_realizada ?? 0),
+                };
+              })
+            : [];
+        const day = dataToLoad.split("T")[0];
+        const mergedBi = mergeBiHorariaToFiveFixedRows(day, loadedBiRows).map((r) => ({ ...r, dataDia: day }));
+        setBiHorariaRegistros(mergedBi);
+        setItems([
+          {
+            id: 1,
+            numero: 1,
+            dataDia: day,
+            op: "",
+            codigoItem: "",
+            descricaoItem: "",
+            linha: "",
+            quantidadePlanejada: 0,
+            quantidadeRealizada: 0,
+            diferenca: 0,
+            horasTrabalhadas: "",
+            restanteHoras: "",
+            horaFinal: "",
+            calculo1HorasEditMode: false,
+            observacao: "",
+          },
+        ]);
+        setReprocessos([]);
+        setLatasPrevista("");
+        setLatasRealizadas("");
+        setLatasBatidas("");
+        setTotalCortado("");
+        setPercentualMeta("");
+        setTotalReprocesso("");
+        setObservacao("");
+        setAvailableDates((prev) => new Set([...prev, day]));
       }
     } catch (error: any) {
       console.error("Erro ao carregar produção:", error);
@@ -2977,20 +3032,26 @@ function Producao() {
   // Sem filtro de filial para o grid mostrar todos os documentos da data (BELA, Petruz, etc.)
   const loadAllRecords = async (): Promise<any[]> => {
     try {
-      const result = await getProducaoHistory({ limit: 3000 });
+      const [historyResult, ocphBiDocs] = await Promise.all([
+        getProducaoHistory({ limit: 3000 }),
+        getDistinctBiHorariaDocumentsFromOcph().catch((e) => {
+          console.error("Erro ao listar documentos bi-horária (OCPH):", e);
+          return [];
+        }),
+      ]);
 
-      if (Array.isArray(result) && result.length > 0) {
-        const recordsMap = new Map<string, any>();
-        const dates = new Set<string>();
+      const recordsMap = new Map<string, any>();
+      const dates = new Set<string>();
 
-        result.forEach((item: any) => {
+      if (Array.isArray(historyResult)) {
+        historyResult.forEach((item: any) => {
           const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
           if (dateStr) {
             dates.add(dateStr);
 
-            const filialNome = (item.filial_nome || '').trim();
+            const filialNome = (item.filial_nome || "").trim();
             const docId = item.doc_id ?? null;
-            const recordKey = `${dateStr}_${filialNome}_${docId ?? 'legacy'}`;
+            const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}`;
 
             if (!recordsMap.has(recordKey)) {
               recordsMap.set(recordKey, {
@@ -3002,23 +3063,49 @@ function Producao() {
             }
           }
         });
-
-        const allRecordsSorted = Array.from(recordsMap.values()).sort((a, b) => {
-          const dateA = parseDateString(a.recordDate);
-          const dateB = parseDateString(b.recordDate);
-          if (dateA.getTime() !== dateB.getTime()) {
-            return dateA.getTime() - dateB.getTime();
-          }
-          const cmpFilial = (a.filial_nome || '').localeCompare(b.filial_nome || '');
-          if (cmpFilial !== 0) return cmpFilial;
-          return (a.id || 0) - (b.id || 0);
-        });
-
-        setAllRecords(allRecordsSorted);
-        setAvailableDates(dates);
-        return allRecordsSorted;
       }
-      return [];
+
+      // Bi-horária só na OCPH (sem OCPD): entra na navegação e no grid como documento sintético
+      for (const stub of ocphBiDocs) {
+        const dateStr = normalizeDataDia(stub.data_dia);
+        if (!dateStr) continue;
+        dates.add(dateStr);
+        const filialNome = (stub.filial_nome || "").trim();
+        const docId = stub.doc_id;
+        const recordKey = `${dateStr}_${filialNome}_${docId}`;
+        if (!recordsMap.has(recordKey)) {
+          recordsMap.set(recordKey, {
+            id: `bi-${docId}`,
+            data_dia: dateStr,
+            filial_nome: filialNome,
+            doc_id: docId,
+            recordDate: dateStr,
+            recordKey,
+            biHorariaSomenteOcph: true,
+          });
+        }
+      }
+
+      if (recordsMap.size === 0) {
+        setAllRecords([]);
+        return [];
+      }
+
+      const allRecordsSorted = Array.from(recordsMap.values()).sort((a, b) => {
+        const dateA = parseDateString(a.recordDate);
+        const dateB = parseDateString(b.recordDate);
+        if (dateA.getTime() !== dateB.getTime()) {
+          return dateA.getTime() - dateB.getTime();
+        }
+        const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "");
+        if (cmpFilial !== 0) return cmpFilial;
+        if (typeof a.id === "number" && typeof b.id === "number") return (a.id || 0) - (b.id || 0);
+        return String(a.doc_id ?? "").localeCompare(String(b.doc_id ?? ""));
+      });
+
+      setAllRecords(allRecordsSorted);
+      setAvailableDates(dates);
+      return allRecordsSorted;
     } catch (error: any) {
       console.error("Erro ao carregar registros:", error);
       return [];
@@ -3217,7 +3304,10 @@ function Producao() {
     setCurrentRecordIndex(-1);
     setCurrentRecordId(null);
     setCurrentDocId(crypto.randomUUID());
-    const hoje = new Date().toISOString().split("T")[0];
+    const hoje =
+      (dataCabecalhoSelecionada && String(dataCabecalhoSelecionada).trim())
+        ? String(dataCabecalhoSelecionada).trim().split("T")[0]
+        : localIsoDate();
     setDataCabecalhoSelecionada(hoje);
     setItems([
       {
@@ -3433,10 +3523,11 @@ function Producao() {
       }
       loadFromDatabase(dataCabecalhoSelecionada, undefined, currentDocId ?? undefined);
       const index = findCurrentRecordIndex();
+      const navList = getRecordsForDocNav();
       if (index >= 0) {
         setCurrentRecordIndex(index);
-        if (allRecords[index]) {
-          setCurrentRecordId(allRecords[index].id);
+        if (navList[index]) {
+          setCurrentRecordId(navList[index].id);
         }
       }
     }

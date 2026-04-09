@@ -879,11 +879,13 @@ export async function loadBiHorariaFromOcph(params: {
 
   let q = supabase.from("OCPH").select("*").like("observacoes", "Bi-horária nº%").order("id", { ascending: true });
   if (filial) q = q.eq("filial_nome", filial);
+  /** Sempre o dia do cabeçalho: com doc_id, evita mostrar bi-horária de outro data_dia do mesmo documento. */
+  q = q.eq("data_dia", day);
 
   if (params.docId != null && params.docId !== "") {
     q = q.eq("doc_id", String(params.docId).trim());
   } else {
-    q = q.is("doc_id", null).eq("data_dia", day);
+    q = q.is("doc_id", null);
   }
 
   const { data, error } = await q;
@@ -917,8 +919,9 @@ async function syncBiHorariaToOcph(params: {
 
   let delQ = supabase.from("OCPH").delete().like("observacoes", "Bi-horária nº%");
   if (filial) delQ = delQ.eq("filial_nome", filial);
+  /** Com doc_id, apagar só o dia salvo — não remover bi-horária do mesmo doc em outras datas. */
   if (docId != null && String(docId).trim() !== "") {
-    delQ = delQ.eq("doc_id", String(docId).trim());
+    delQ = delQ.eq("doc_id", String(docId).trim()).eq("data_dia", day);
   } else {
     delQ = delQ.is("doc_id", null).eq("data_dia", day);
   }
@@ -963,7 +966,8 @@ export async function saveBiHorariaDocumento(params: {
 
   const payload = (params.biHorariaRegistros ?? []).map((r, idx) => ({
     numero: Number(r.numero ?? idx + 1),
-    data: String(r.dataDia ?? r.data ?? day).split("T")[0],
+    /** Cabeçalho da tela é a fonte da verdade (evita linhas com data do dia anterior após trocar a data). */
+    data: day,
     hora: String(r.hora ?? ""),
     qtd_realizada: parseBrazilNumber(r.quantidadeRealizada ?? r.qtd_realizada ?? 0),
   }));
@@ -987,6 +991,46 @@ export async function getOcphDocIdsComBiHoraria(): Promise<Set<string>> {
     .like("observacoes", "Bi-horária nº%");
   if (error) throw error;
   return new Set((data ?? []).map((r: { doc_id: string | null }) => String(r.doc_id ?? "")).filter(Boolean));
+}
+
+/**
+ * Documentos que têm bi-horária na OCPH mas podem não ter linha na OCPD (só OCPH).
+ * Usado para incluir esses docs na lista/navegação e no grid da Bi-horária.
+ */
+export async function getDistinctBiHorariaDocumentsFromOcph(): Promise<
+  Array<{ data_dia: string; filial_nome: string | null; doc_id: string }>
+> {
+  const pageSize = 1000;
+  let from = 0;
+  const byKey = new Map<string, { data_dia: string; filial_nome: string | null; doc_id: string }>();
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from("OCPH")
+      .select("data_dia, filial_nome, doc_id")
+      .like("observacoes", "Bi-horária nº%")
+      .not("doc_id", "is", null)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const chunk = data ?? [];
+    for (const row of chunk as Array<Record<string, unknown>>) {
+      const docId = row.doc_id != null ? String(row.doc_id).trim() : "";
+      if (!docId) continue;
+      const dayRaw = row.data_dia != null ? String(row.data_dia) : "";
+      const day = dayRaw.split("T")[0];
+      if (!day) continue;
+      const filial = row.filial_nome != null ? String(row.filial_nome).trim() : "";
+      const key = `${day}_${filial}_${docId}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, { data_dia: day, filial_nome: filial || null, doc_id: docId });
+      }
+    }
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return Array.from(byKey.values());
 }
 
 export async function getBiHorariaResumoPorPeriodo(params: {
