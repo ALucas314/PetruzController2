@@ -692,6 +692,58 @@ export async function loadProducao(params: { data?: string; filialNome?: string;
   return { data: rows, count: rows.length, reprocessos, biHorariaRegistros };
 }
 
+/**
+ * Soma `qtd_planejada` na OCPD para o KPI "meta" na tela Bi-horária.
+ * Com `doc_id`: tenta o mesmo UUID; se vier 0 (bi sem OCPD ligado), usa a meta agregada do dia na filial (todas as linhas OCPD daquele dia).
+ * Sem `doc_id`: só documento legado (`doc_id` nulo).
+ */
+export async function getTotalPlanejadaOcpdParaBiHoraria(params: {
+  dataDia: string;
+  filialNome: string | null | undefined;
+  docId: string | null | undefined;
+}): Promise<number> {
+  const day = String(params.dataDia ?? "").split("T")[0].trim();
+  const filial = String(params.filialNome ?? "").trim();
+  if (!day || !filial) return 0;
+
+  const sumWithFilter = async (applyDocFilter: boolean, uuid: string | null): Promise<{ sum: number; rowCount: number }> => {
+    const pageSize = 1000;
+    let from = 0;
+    let sum = 0;
+    let rowCount = 0;
+    for (;;) {
+      let q = supabase.from("OCPD").select("qtd_planejada").eq("data_dia", day).eq("filial_nome", filial);
+      if (applyDocFilter) {
+        if (uuid) q = q.eq("doc_id", uuid);
+        else q = q.is("doc_id", null);
+      }
+      const { data, error } = await q.order("id", { ascending: true }).range(from, from + pageSize - 1);
+      if (error) throw error;
+      const chunk = data ?? [];
+      rowCount += chunk.length;
+      for (const row of chunk as Array<{ qtd_planejada?: unknown }>) {
+        sum += parseBrazilNumber(row.qtd_planejada);
+      }
+      if (chunk.length < pageSize) break;
+      from += pageSize;
+    }
+    return { sum, rowCount };
+  };
+
+  const docId =
+    params.docId != null && String(params.docId).trim() !== "" ? String(params.docId).trim() : null;
+
+  if (docId) {
+    const { sum: bySameDoc, rowCount } = await sumWithFilter(true, docId);
+    if (rowCount > 0) return bySameDoc;
+    const { sum: agregado } = await sumWithFilter(false, null);
+    return agregado;
+  }
+
+  const { sum } = await sumWithFilter(true, null);
+  return sum;
+}
+
 /** Linha do reprocesso: mesma regra do filtro da tela de produção (valor salvo vs código/id/nome da OCLP). */
 function reprocessoLinhaMatchesFilter(
   linhaStored: unknown,

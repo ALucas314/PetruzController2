@@ -60,6 +60,7 @@ import {
   REALTIME_COLLAPSE_MS,
   REALTIME_SUPPRESS_OWN_WRITE_MS,
   loadBiHorariaFromOcph,
+  getTotalPlanejadaOcpdParaBiHoraria,
   getOCTPByInicio,
   getOCTPByDateRange,
   insertOCTP,
@@ -742,6 +743,8 @@ function Producao() {
   const [reprocessos, setReprocessos] = useState<ReprocessoItem[]>([]);
   /** Registros agregados por turno (Manhã/Tarde/Noite/Madrugada) — não substituem as linhas da tabela principal */
   const [biHorariaRegistros, setBiHorariaRegistros] = useState<BiHorariaRegistroItem[]>([]);
+  /** Soma qtd_planejada na OCPD (data + filial + doc), para o KPI na Bi-horária — não depende do estado `items`. */
+  const [metaPlanejadaBihoraria, setMetaPlanejadaBihoraria] = useState(0);
   // Filtros do card de reprocesso (tipo, linha, grupo, código) — valores do formulário
   const [reprocessoFiltroTipo, setReprocessoFiltroTipo] = useState<"" | "Cortado" | "Usado">("");
   const [reprocessoFiltroLinha, setReprocessoFiltroLinha] = useState<string>("");
@@ -2191,6 +2194,33 @@ function Producao() {
     () => biHorariaRealizadoPorTurnoChart.reduce((sum, r) => sum + (r.valor ?? 0), 0),
     [biHorariaRealizadoPorTurnoChart]
   );
+
+  useEffect(() => {
+    if (currentView !== "bihoraria") return;
+    const data = dataCabecalhoSelecionada?.trim();
+    const filialNome = filialSelecionadaObj?.nome?.trim();
+    if (!data || !filialNome) {
+      setMetaPlanejadaBihoraria(0);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const total = await getTotalPlanejadaOcpdParaBiHoraria({
+          dataDia: data,
+          filialNome,
+          docId: currentDocId,
+        });
+        if (!cancelled) setMetaPlanejadaBihoraria(total);
+      } catch (e) {
+        console.error("Erro ao carregar meta planejada (OCPD) para bi-horária:", e);
+        if (!cancelled) setMetaPlanejadaBihoraria(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentView, dataCabecalhoSelecionada, filialSelecionadaObj?.nome, currentDocId]);
 
   // Calcular totais da produção
   const calcularTotaisProducao = () => {
@@ -4029,6 +4059,11 @@ function Producao() {
           title="Total Qtd. realizada"
           value={formatTotal(totalBiHorariaRealizadoPorTurnoBase)}
           icon={ClipboardList}
+        />
+        <KpiCard
+          title="Total Qtd. meta (planejado)"
+          value={formatTotal(metaPlanejadaBihoraria)}
+          icon={Target}
         />
       </div>
 
