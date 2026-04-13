@@ -52,7 +52,8 @@ import {
   saveDraft,
   getProducaoHistory,
   getOcphDocIdsComBiHoraria,
-  getDistinctBiHorariaDocumentsFromOcph,
+  getBiHorariaDocumentosCabecalho,
+  type BiHorariaOcphCabecalho,
   getBiHorariaResumoPorPeriodo,
   getDashboardStats,
   subscribeOCPDRealtime,
@@ -192,7 +193,7 @@ function mergeBiHorariaToFiveFixedRows(dataDia: string, loaded: BiHorariaRegistr
         id: match.id,
         numero: idx + 1,
         hora: opt.value,
-        dataDia: typeof match.dataDia === "string" ? match.dataDia.split("T")[0] : day,
+        dataDia: day,
       };
     }
     return {
@@ -203,6 +204,66 @@ function mergeBiHorariaToFiveFixedRows(dataDia: string, loaded: BiHorariaRegistr
       quantidadeRealizada: "",
     };
   });
+}
+
+/** Navegação e grid: data crescente, depois filial (pt-BR: Bela antes de Petruz), depois ordem/nº do doc. */
+function compareProducaoDocNavRecords(a: any, b: any): number {
+  const dayKey = (r: any): string => {
+    const raw = r?.recordDate ?? r?.data_dia ?? r?.data_cabecalho ?? r?.data;
+    if (raw == null || raw === "") return "";
+    if (typeof raw === "string") return raw.split("T")[0];
+    try {
+      return new Date(raw as Date).toISOString().split("T")[0];
+    } catch {
+      return "";
+    }
+  };
+  const da = dayKey(a);
+  const db = dayKey(b);
+  if (da !== db) return da.localeCompare(db);
+  const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "", "pt-BR");
+  if (cmpFilial !== 0) return cmpFilial;
+  const ordA = Number(a.doc_ordem_global ?? a.doc_numero ?? 0) || 0;
+  const ordB = Number(b.doc_ordem_global ?? b.doc_numero ?? 0) || 0;
+  if (ordA !== ordB) return ordA - ordB;
+  return (a.id || 0) - (b.id || 0);
+}
+
+/** Acompanhamento diário: exclui “fantasmas” só com cabeçalho bi (OCPH) sem OCPD — evitam Doc. UUID na lista. */
+function includeRecordInProducaoAcompanhamentoNav(r: any): boolean {
+  if (r?.ocphHeaderOnly === true) return false;
+  const hasDocId = r?.doc_id != null && String(r.doc_id).trim() !== "";
+  if (hasDocId && (r.line_id == null || r.line_id === "")) return false;
+  return true;
+}
+
+/** Documentos só na OCPH entram na mesma lista que vem da OCPD (navegação bi-horária). */
+function mergeOcphBiCabecalhosIntoRecordsMap(
+  recordsMap: Map<string, any>,
+  headers: BiHorariaOcphCabecalho[],
+  dates: Set<string>
+): void {
+  for (const h of headers) {
+    const day = String(h.data_dia || "").split("T")[0];
+    if (!day) continue;
+    const filial = (h.filial_nome || "").trim();
+    const docId = String(h.doc_id || "").trim();
+    if (!docId) continue;
+    const recordKey = `${day}_${filial}_${docId}`;
+    if (!recordsMap.has(recordKey)) {
+      recordsMap.set(recordKey, {
+        id: h.id,
+        doc_id: docId,
+        filial_nome: filial,
+        data_dia: day,
+        recordDate: day,
+        recordKey,
+        /** Só existe na OCPH (bi); sem linha OCPD — não listar no grid/navegação do acompanhamento diário. */
+        ocphHeaderOnly: true,
+      });
+    }
+    dates.add(day);
+  }
 }
 
 interface ProductionLine {
@@ -887,14 +948,15 @@ function Producao() {
     if (typeof dateValue === "string") return dateValue.split("T")[0];
     return new Date(dateValue).toISOString().split("T")[0];
   };
-  // Base do grid: na Bi-horária mostra somente docs com registro na OCPH.
+  // Base do grid: mesma ordem da navegação (data → filial pt-BR → nº doc).
   const baseRecordsForGrid = useMemo(() => {
-    if (currentView === "bihoraria") {
-      return allRecords.filter(
-        (r) => r.doc_id != null && String(r.doc_id).trim() !== "" && ocphDocIdsComBi.has(String(r.doc_id))
-      );
-    }
-    return allRecords;
+    const base =
+      currentView === "bihoraria"
+        ? allRecords.filter(
+            (r) => r.doc_id != null && String(r.doc_id).trim() !== "" && ocphDocIdsComBi.has(String(r.doc_id))
+          )
+        : allRecords.filter(includeRecordInProducaoAcompanhamentoNav);
+    return [...base].sort(compareProducaoDocNavRecords);
   }, [allRecords, currentView, ocphDocIdsComBi]);
 
   // Documentos no intervalo aplicado (De/Até) — só atualiza ao clicar em Filtrar
@@ -903,7 +965,7 @@ function Producao() {
     const de = gridDataDeApplied.split("T")[0];
     const ate = gridDataAteApplied.split("T")[0];
     return baseRecordsForGrid.filter((r) => {
-      const dateStr = normalizeDataDia(r.data_dia || r.data_cabecalho || r.data);
+      const dateStr = normalizeDataDia(r.recordDate || r.data_dia || r.data_cabecalho || r.data);
       if (!dateStr) return false;
       return dateStr >= de && dateStr <= ate;
     });
@@ -2703,6 +2765,68 @@ function Producao() {
           itemCount: result.count,
           filialNome,
         });
+      } else if (
+        result.biHorariaRegistros &&
+        Array.isArray(result.biHorariaRegistros) &&
+        result.biHorariaRegistros.length > 0
+      ) {
+        /** Só OCPH (bi-horária sem linhas na OCPD): ainda assim exibe intervalos e totais. */
+        const day = (dataToLoad || "").split("T")[0];
+        setItems([
+          {
+            id: 1,
+            numero: 1,
+            dataDia: day,
+            op: "",
+            codigoItem: "",
+            descricaoItem: "",
+            linha: "",
+            quantidadePlanejada: 0,
+            quantidadeRealizada: 0,
+            diferenca: 0,
+            horasTrabalhadas: "",
+            restanteHoras: "",
+            horaFinal: "",
+            calculo1HorasEditMode: false,
+            observacao: "",
+          },
+        ]);
+        if (docId != null && String(docId).trim() !== "") {
+          setCurrentDocId(String(docId).trim());
+        }
+        const fn = (filialNomeToUse ?? "").trim();
+        if (fn) {
+          const filialEncontrada = filiais.find((f) => (f.nome || "").trim() === fn);
+          if (filialEncontrada) {
+            setFilialSelecionada(
+              filialEncontrada.codigo?.trim() ? filialEncontrada.codigo.trim() : `id:${filialEncontrada.id}`
+            );
+          }
+          setOcpdFilialNomeCarregada(fn);
+        } else {
+          setOcpdFilialNomeCarregada("");
+        }
+        setLatasPrevista("");
+        setLatasRealizadas("");
+        setLatasBatidas("");
+        setTotalCortado("");
+        setPercentualMeta("");
+        setTotalReprocesso("");
+        setObservacao("");
+        setReprocessos([]);
+        const loadedBiRowsOnly: BiHorariaRegistroItem[] = result.biHorariaRegistros.map((r: any, idx: number) => {
+          const dataLinha =
+            r.data != null || r.data_dia != null ? String(r.data ?? r.data_dia).split("T")[0] : day;
+          return {
+            id: Date.now() + idx,
+            numero: Number(r.numero ?? idx + 1),
+            dataDia: dataLinha,
+            hora: normalizeIntervaloBiHoraria(r.hora),
+            quantidadeRealizada: formatNumber(r.qtd_realizada ?? 0),
+          };
+        });
+        setBiHorariaRegistros(mergeBiHorariaToFiveFixedRows(day, loadedBiRowsOnly));
+        setAvailableDates((prev) => new Set([...prev, day]));
       } else {
         setOcpdFilialNomeCarregada("");
         // Sem OCPD neste dia/doc (ex.: só bi-horária): ainda aplicar OCPH e zerar formulário — antes ficava o dia/quantidades anteriores.
@@ -2958,42 +3082,43 @@ function Producao() {
   const loadDocumentsForDate = useCallback(async (date: string) => {
     if (!date || !date.match(/^\d{4}-\d{2}-\d{2}$/)) return;
     try {
-      const result = await getProducaoHistory({
-        dataInicio: date,
-        dataFim: date,
-        limit: 2000,
-      });
-      if (!Array.isArray(result) || result.length === 0) return;
+      const [result, ocphHeaders] = await Promise.all([
+        getProducaoHistory({
+          dataInicio: date,
+          dataFim: date,
+          limit: 2000,
+        }),
+        getBiHorariaDocumentosCabecalho({ dataInicio: date, dataFim: date }),
+      ]);
+      const hasOcpd = Array.isArray(result) && result.length > 0;
+      if (!hasOcpd && ocphHeaders.length === 0) return;
       setAllRecords((prev) => {
         const recordsMap = new Map<string, any>();
+        const datesMerge = new Set<string>();
         prev.forEach((r) => {
           const key = r.recordKey ?? `${normalizeDataDia(r.data_dia || r.data_cabecalho)}_${(r.filial_nome || "").trim()}_${r.doc_id ?? "legacy"}`;
           recordsMap.set(key, { ...r, recordKey: key });
         });
-        result.forEach((item: any) => {
-          const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
-          if (!dateStr) return;
-          const filialNome = (item.filial_nome || "").trim();
-          const docId = item.doc_id ?? null;
-          const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}`;
-          if (!recordsMap.has(recordKey)) {
-            recordsMap.set(recordKey, {
-              ...item,
-              doc_id: docId,
-              recordDate: dateStr,
-              recordKey,
-            });
-          }
-        });
-        const merged = Array.from(recordsMap.values()).sort((a, b) => {
-          const dateA = parseDateString(a.recordDate || "");
-          const dateB = parseDateString(b.recordDate || "");
-          if (dateA.getTime() !== dateB.getTime()) return dateA.getTime() - dateB.getTime();
-          const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "");
-          if (cmpFilial !== 0) return cmpFilial;
-          return (a.id || 0) - (b.id || 0);
-        });
-        return merged;
+        if (hasOcpd) {
+          result.forEach((item: any) => {
+            const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+            if (!dateStr) return;
+            const filialNome = (item.filial_nome || "").trim();
+            const docId = item.doc_id ?? null;
+            const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}`;
+            if (!recordsMap.has(recordKey)) {
+              recordsMap.set(recordKey, {
+                ...item,
+                doc_id: docId,
+                recordDate: dateStr,
+                recordKey,
+              });
+            }
+            datesMerge.add(dateStr);
+          });
+        }
+        mergeOcphBiCabecalhosIntoRecordsMap(recordsMap, ocphHeaders, datesMerge);
+        return Array.from(recordsMap.values()).sort(compareProducaoDocNavRecords);
       });
       setAvailableDates((prev) => new Set([...prev, date]));
     } catch (e) {
@@ -3008,50 +3133,59 @@ function Producao() {
     if (!deNorm || !ateNorm || !/^\d{4}-\d{2}-\d{2}$/.test(deNorm) || !/^\d{4}-\d{2}-\d{2}$/.test(ateNorm)) return;
     if (deNorm > ateNorm) return;
     try {
-      const result = await getProducaoHistory({
-        dataInicio: deNorm,
-        dataFim: ateNorm,
-        limit: 2000,
-        ...(codigoItem != null && String(codigoItem).trim() !== "" ? { codigoItem: String(codigoItem).trim() } : {}),
-        ...(linha != null && String(linha).trim() !== "" ? { linha: String(linha).trim() } : {}),
-      });
-      if (!Array.isArray(result) || result.length === 0) return;
+      const [result, ocphHeaders] = await Promise.all([
+        getProducaoHistory({
+          dataInicio: deNorm,
+          dataFim: ateNorm,
+          limit: 2000,
+          ...(codigoItem != null && String(codigoItem).trim() !== "" ? { codigoItem: String(codigoItem).trim() } : {}),
+          ...(linha != null && String(linha).trim() !== "" ? { linha: String(linha).trim() } : {}),
+        }),
+        getBiHorariaDocumentosCabecalho({ dataInicio: deNorm, dataFim: ateNorm }),
+      ]);
+      const hasOcpd = Array.isArray(result) && result.length > 0;
+      if (!hasOcpd && ocphHeaders.length === 0) return;
       setAllRecords((prev) => {
         const recordsMap = new Map<string, any>();
         prev.forEach((r) => {
           const key = r.recordKey ?? `${normalizeDataDia(r.data_dia || r.data_cabecalho)}_${(r.filial_nome || "").trim()}_${r.doc_id ?? "legacy"}`;
           recordsMap.set(key, { ...r, recordKey: key });
         });
-        result.forEach((item: any) => {
-          const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
-          if (!dateStr) return;
-          const filialNome = (item.filial_nome || "").trim();
-          const docId = item.doc_id ?? null;
-          const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}`;
-          if (!recordsMap.has(recordKey)) {
-            recordsMap.set(recordKey, {
-              ...item,
-              doc_id: docId,
-              recordDate: dateStr,
-              recordKey,
-            });
-          }
-        });
-        const merged = Array.from(recordsMap.values()).sort((a, b) => {
-          const dateA = parseDateString(a.recordDate || "");
-          const dateB = parseDateString(b.recordDate || "");
-          if (dateA.getTime() !== dateB.getTime()) return dateA.getTime() - dateB.getTime();
-          const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "");
-          if (cmpFilial !== 0) return cmpFilial;
-          return (a.id || 0) - (b.id || 0);
-        });
-        return merged;
+        if (hasOcpd) {
+          result.forEach((item: any) => {
+            const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+            if (!dateStr) return;
+            const filialNome = (item.filial_nome || "").trim();
+            const docId = item.doc_id ?? null;
+            const recordKey = `${dateStr}_${filialNome}_${docId ?? "legacy"}`;
+            if (!recordsMap.has(recordKey)) {
+              recordsMap.set(recordKey, {
+                ...item,
+                doc_id: docId,
+                recordDate: dateStr,
+                recordKey,
+              });
+            }
+          });
+        }
+        const datesMerge = new Set<string>();
+        if (hasOcpd) {
+          result.forEach((item: any) => {
+            const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+            if (dateStr) datesMerge.add(dateStr);
+          });
+        }
+        mergeOcphBiCabecalhosIntoRecordsMap(recordsMap, ocphHeaders, datesMerge);
+        return Array.from(recordsMap.values()).sort(compareProducaoDocNavRecords);
       });
       const newDates = new Set<string>();
-      result.forEach((item: any) => {
-        const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
-        if (dateStr) newDates.add(dateStr);
-      });
+      if (Array.isArray(result)) {
+        result.forEach((item: any) => {
+          const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
+          if (dateStr) newDates.add(dateStr);
+        });
+      }
+      for (const h of ocphHeaders) newDates.add(h.data_dia);
       if (newDates.size > 0) setAvailableDates((prev) => new Set([...prev, ...newDates]));
     } catch (e) {
       console.error("Erro ao carregar documentos do período:", e);
@@ -3062,19 +3196,19 @@ function Producao() {
   // Sem filtro de filial para o grid mostrar todos os documentos da data (BELA, Petruz, etc.)
   const loadAllRecords = async (): Promise<any[]> => {
     try {
-      const [historyResult, ocphBiDocs] = await Promise.all([
+      const [result, ocphHeaders] = await Promise.all([
         getProducaoHistory({ limit: 3000 }),
-        getDistinctBiHorariaDocumentsFromOcph().catch((e) => {
+        getBiHorariaDocumentosCabecalho().catch((e) => {
           console.error("Erro ao listar documentos bi-horária (OCPH):", e);
-          return [];
+          return [] as BiHorariaOcphCabecalho[];
         }),
       ]);
 
       const recordsMap = new Map<string, any>();
       const dates = new Set<string>();
 
-      if (Array.isArray(historyResult)) {
-        historyResult.forEach((item: any) => {
+      if (Array.isArray(result)) {
+        result.forEach((item: any) => {
           const dateStr = normalizeDataDia(item.data_dia || item.data_cabecalho || item.data);
           if (dateStr) {
             dates.add(dateStr);
@@ -3095,44 +3229,9 @@ function Producao() {
         });
       }
 
-      // Bi-horária só na OCPH (sem OCPD): entra na navegação e no grid como documento sintético
-      for (const stub of ocphBiDocs) {
-        const dateStr = normalizeDataDia(stub.data_dia);
-        if (!dateStr) continue;
-        dates.add(dateStr);
-        const filialNome = (stub.filial_nome || "").trim();
-        const docId = stub.doc_id;
-        const recordKey = `${dateStr}_${filialNome}_${docId}`;
-        if (!recordsMap.has(recordKey)) {
-          recordsMap.set(recordKey, {
-            id: `bi-${docId}`,
-            data_dia: dateStr,
-            filial_nome: filialNome,
-            doc_id: docId,
-            recordDate: dateStr,
-            recordKey,
-            biHorariaSomenteOcph: true,
-          });
-        }
-      }
+      mergeOcphBiCabecalhosIntoRecordsMap(recordsMap, ocphHeaders, dates);
 
-      if (recordsMap.size === 0) {
-        setAllRecords([]);
-        return [];
-      }
-
-      const allRecordsSorted = Array.from(recordsMap.values()).sort((a, b) => {
-        const dateA = parseDateString(a.recordDate);
-        const dateB = parseDateString(b.recordDate);
-        if (dateA.getTime() !== dateB.getTime()) {
-          return dateA.getTime() - dateB.getTime();
-        }
-        const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "");
-        if (cmpFilial !== 0) return cmpFilial;
-        if (typeof a.id === "number" && typeof b.id === "number") return (a.id || 0) - (b.id || 0);
-        return String(a.doc_id ?? "").localeCompare(String(b.doc_id ?? ""));
-      });
-
+      const allRecordsSorted = Array.from(recordsMap.values()).sort(compareProducaoDocNavRecords);
       setAllRecords(allRecordsSorted);
       setAvailableDates(dates);
       return allRecordsSorted;
@@ -3174,10 +3273,11 @@ function Producao() {
     r.doc_id != null && String(r.doc_id).trim() !== "" && ocphDocIdsComBi.has(String(r.doc_id));
 
   const getRecordsForDocNav = (): any[] => {
-    if (currentView === "bihoraria") {
-      return allRecords.filter(recordHasBiHorariaInDb);
-    }
-    return allRecords;
+    const base =
+      currentView === "bihoraria"
+        ? allRecords.filter(recordHasBiHorariaInDb)
+        : allRecords.filter(includeRecordInProducaoAcompanhamentoNav);
+    return [...base].sort(compareProducaoDocNavRecords);
   };
 
   /** Índice atual válido dentro da lista de navegação do header (evita usar índice herdado de outra lista). */
@@ -3224,7 +3324,7 @@ function Producao() {
     const currentDate = dataCabecalhoSelecionada;
     const currentFilialNome = filialSelecionadaObj?.nome ?? '';
     const index = list.findIndex((r) => {
-      const recordDate = r.data_dia || r.data_cabecalho || r.data;
+      const recordDate = r.recordDate || r.data_dia || r.data_cabecalho || r.data;
       const dateStr = typeof recordDate === 'string'
         ? recordDate.split('T')[0]
         : new Date(recordDate).toISOString().split('T')[0];
@@ -3239,7 +3339,7 @@ function Producao() {
   const indexOfRecordInDocNavList = (record: any): number => {
     const list = getRecordsForDocNav();
     if (!record) return -1;
-    const recDate = record.data_dia || record.data_cabecalho || record.data;
+    const recDate = record.recordDate || record.data_dia || record.data_cabecalho || record.data;
     const dateStrRec =
       typeof recDate === 'string' ? recDate.split('T')[0] : new Date(recDate).toISOString().split('T')[0];
     const recFilial = (record.filial_nome || '').trim();
@@ -3248,7 +3348,7 @@ function Producao() {
       if (byKey >= 0) return byKey;
     }
     return list.findIndex((r) => {
-      const recordDate = r.data_dia || r.data_cabecalho || r.data;
+      const recordDate = r.recordDate || r.data_dia || r.data_cabecalho || r.data;
       const dateStr = typeof recordDate === 'string'
         ? recordDate.split('T')[0]
         : new Date(recordDate).toISOString().split('T')[0];
@@ -3266,7 +3366,7 @@ function Producao() {
     isNewDocumentRef.current = false;
     setShowDocumentGridForDate(false);
     justLoadedByIndexRef.current = true;
-    const recordDate = record.data_dia || record.data_cabecalho || record.data;
+    const recordDate = record.recordDate || record.data_dia || record.data_cabecalho || record.data;
     const dateStr = typeof recordDate === 'string'
       ? recordDate.split('T')[0]
       : new Date(recordDate).toISOString().split('T')[0];
@@ -4054,7 +4154,7 @@ function Producao() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <KpiCard
           title="Total Qtd. realizada"
           value={formatTotal(totalBiHorariaRealizadoPorTurnoBase)}

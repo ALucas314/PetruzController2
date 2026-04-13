@@ -352,7 +352,8 @@ export function ControleEmpacotamento() {
     setDataDocumento(new Date().toISOString().split("T")[0]);
     setFilialNome("");
     setLines([newEmptyLine(crypto.randomUUID())]);
-  }, []);
+    void refreshCodigoNovoDocumento("");
+  }, [refreshCodigoNovoDocumento]);
 
   const docGroups = useMemo(() => groupOcteRowsByDocument(rows), [rows]);
   const rowsFiltradasPorFilial = useMemo(() => {
@@ -924,7 +925,7 @@ export function ControleEmpacotamento() {
                     readOnly
                     value={codigoDocumento}
                     className="h-9 font-mono text-xs sm:text-sm bg-muted tabular-nums cursor-default"
-                    title="Gerado por filial (0001, 0002, … na filial selecionada). Todos os registros salvos juntos compartilham este código."
+                    title="Próximo número livre só na filial escolhida (0001, 0002, …). Sem filial, mostra 0001 até você selecionar — assim apagar o 0001 na filial não ‘pula’ por causa de outra filial no banco."
                     aria-readonly
                   />
                 </div>

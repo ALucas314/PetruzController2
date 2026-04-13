@@ -36,6 +36,7 @@ import {
   updateControleEstoque,
   deleteControleEstoque,
   getControleEstoque,
+  getNextFreeOcceDocEntry,
   getFiliais,
   getItemByCode,
   getTuneis,
@@ -754,9 +755,20 @@ export default function ControleEstoque() {
     [tuneis, form.filial]
   );
 
-  const proximoDocumento = useMemo(() => {
-    if (movs.length === 0) return 1;
-    return Math.max(...movs.map((r) => r.docEntry)) + 1;
+  /** Próximo `doc_entry` livre (reaproveita buracos após exclusão; consulta a tabela inteira em páginas). */
+  const [proximoDocumento, setProximoDocumento] = useState(1);
+  useEffect(() => {
+    let cancelled = false;
+    void getNextFreeOcceDocEntry()
+      .then((n) => {
+        if (!cancelled) setProximoDocumento(n);
+      })
+      .catch(() => {
+        if (!cancelled) setProximoDocumento(1);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [movs]);
 
   const documentoExibido = selectedRow ? selectedRow.docEntry : proximoDocumento;
@@ -994,7 +1006,8 @@ export default function ControleEstoque() {
         await updateControleEstoque(selectedMovId, payload);
         toast({ title: "Sucesso", description: "Movimentação atualizada na OCCE." });
       } else {
-        await createControleEstoque(payload);
+        const docEntry = await getNextFreeOcceDocEntry();
+        await createControleEstoque({ ...payload, doc_entry: docEntry });
         setSelectedMovId(null);
         setForm((p) => ({ ...emptyForm(), filial: p.filial }));
         toast({ title: "Sucesso", description: "Movimentação gravada na OCCE." });
@@ -1052,7 +1065,12 @@ export default function ControleEstoque() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   <div className="space-y-1.5">
                     <Label>Item (documento)</Label>
-                    <Input readOnly value={String(documentoExibido)} className="bg-muted font-mono" />
+                    <Input
+                      readOnly
+                      value={String(documentoExibido)}
+                      className="bg-muted font-mono"
+                      title="Número do documento (doc_entry) na OCCE: ao incluir nova movimentação, usa o menor número ainda não usado — apagar um documento libera o número de novo."
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <Label>Data</Label>

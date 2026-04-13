@@ -74,6 +74,36 @@ export interface OCCERow {
   updatedAt: string | null;
 }
 
+/**
+ * Menor `doc_entry` positivo ainda não usado na OCCE (varre a tabela em páginas).
+ * Permite reutilizar 1, 2, … após excluir movimentos de teste — ao contrário de `max+1`
+ * ou do DEFAULT `nextval`, que “pulam” números.
+ */
+export async function getNextFreeOcceDocEntry(): Promise<number> {
+  const used = new Set<number>();
+  const pageSize = 1000;
+  let from = 0;
+  for (let p = 0; p < 200; p++) {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("doc_entry")
+      .not("doc_entry", "is", null)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(fmtErr(error as { message?: string; details?: string; hint?: string; code?: string }));
+    const rows = data || [];
+    for (const r of rows) {
+      const n = Math.trunc(Number((r as { doc_entry?: unknown }).doc_entry));
+      if (Number.isInteger(n) && n > 0) used.add(n);
+    }
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  let next = 1;
+  while (used.has(next)) next += 1;
+  return next;
+}
+
 export async function getControleEstoque(params?: {
   filialNome?: string;
   dataInicio?: string;
@@ -89,6 +119,8 @@ export async function getControleEstoque(params?: {
 }
 
 export async function createControleEstoque(payload: {
+  /** Se informado, grava este `doc_entry` (menor livre). Se omitido, o banco usa a sequência. */
+  doc_entry?: number;
   data_movimento: string;
   codigo_produto: string;
   descricao_item: string;
@@ -106,7 +138,7 @@ export async function createControleEstoque(payload: {
   filial_nome: string;
   codigo_tunel: number;
 }): Promise<OCCERow> {
-  const row = {
+  const row: Record<string, unknown> = {
     data_movimento: String(payload.data_movimento ?? "").split("T")[0],
     codigo_produto: String(payload.codigo_produto ?? "").trim(),
     descricao_item: String(payload.descricao_item ?? "").trim(),
@@ -124,6 +156,10 @@ export async function createControleEstoque(payload: {
     filial_nome: String(payload.filial_nome ?? "").trim(),
     codigo_tunel: Math.trunc(Number(payload.codigo_tunel)),
   };
+  if (payload.doc_entry != null) {
+    const d = Math.trunc(Number(payload.doc_entry));
+    if (Number.isInteger(d) && d > 0) row.doc_entry = d;
+  }
   const { data, error } = await supabase.from(TABLE).insert(row).select(SELECT_LIST).single();
   if (error) throw new Error(fmtErr(error as { message?: string; details?: string; hint?: string; code?: string }));
   return mapRow(data as Record<string, unknown>);

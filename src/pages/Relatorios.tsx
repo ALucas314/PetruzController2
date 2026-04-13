@@ -26,6 +26,7 @@ import {
   getFiliais,
   getMovimentacoesTuneis,
   getOcppByDateRange,
+  getBiHorariaDocumentosCabecalho,
   getOcphDocIdsComBiHoraria,
   getOCTEByDateRange,
   getProducaoHistory,
@@ -150,6 +151,30 @@ export default function Relatorios() {
             });
           }
         });
+        /** Bi-horária sem linhas na OCPD: entra só pela OCPH. */
+        if (docGridTipoFilterApplied === "bihoraria") {
+          const ocphHeaders = await getBiHorariaDocumentosCabecalho({
+            dataInicio: primeiroDiaMes,
+            dataFim: ate,
+          });
+          for (const h of ocphHeaders) {
+            const dateStr = normalizeDataDia(h.data_dia);
+            if (!dateStr) continue;
+            const filialNome = (h.filial_nome || "").trim();
+            const docId = h.doc_id;
+            const recordKey = `bihoraria_${dateStr}_${filialNome}_${docId}`;
+            if (!recordsMap.has(recordKey)) {
+              recordsMap.set(recordKey, {
+                recordKey,
+                tipoDocumento: "bihoraria",
+                data_dia: dateStr,
+                filial_nome: filialNome,
+                doc_id: docId,
+                id: h.id,
+              });
+            }
+          }
+        }
       } else if (docGridTipoFilterApplied === "empacotamento") {
         const result = await getOCTEByDateRange(de, ate);
         result.forEach((item) => {
@@ -215,7 +240,7 @@ export default function Relatorios() {
         const tA = new Date(a.data_dia).getTime();
         const tB = new Date(b.data_dia).getTime();
         if (tA !== tB) return tA - tB;
-        const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "");
+        const cmpFilial = (a.filial_nome || "").localeCompare(b.filial_nome || "", "pt-BR");
         if (cmpFilial !== 0) return cmpFilial;
         const ordA = a.doc_ordem_global ?? a.doc_numero ?? 0;
         const ordB = b.doc_ordem_global ?? b.doc_numero ?? 0;

@@ -88,21 +88,31 @@ export interface OCTERow {
 /**
  * Próximo código de documento (0001, 0002, …) com base em códigos já usados que são só dígitos
  * (UUIDs e outros formatos são ignorados).
- * Com `filialNome`, considera apenas linhas daquela filial (mesma regra da conta na tela).
+ *
+ * **Sempre filtra por filial** quando `filialNome` não está vazio: o “menor número livre” é **por filial**,
+ * assim apagar o 0001 de teste na mesma filial volta a oferecer 0001.
+ *
+ * Sem filial (`null`, `undefined` ou string vazia): retorna `0001` e **não** consulta o banco — evita
+ * juntar códigos de todas as filiais (comportamento antigo que fazia o próximo vir 0002 mesmo com 0001
+ * livre na filial que você usa).
  */
 export async function getNextOCTEDocumentCode(filialNome?: string | null): Promise<string> {
+  const filial = filialNome != null ? String(filialNome).trim() : "";
+  if (!filial) {
+    return "0001";
+  }
+
   const codes = new Set<string>();
   const pageSize = 1000;
   let from = 0;
-  const filial = filialNome != null ? String(filialNome).trim() : "";
   for (let p = 0; p < 100; p++) {
     let q = supabase
       .from(TABLE)
       .select("codigo_documento")
       .not("codigo_documento", "is", null)
+      .eq("filial_nome", filial)
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
-    if (filial) q = q.eq("filial_nome", filial);
     const { data, error } = await q;
     if (error) throw error;
     const rows = data || [];

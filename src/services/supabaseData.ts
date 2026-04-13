@@ -89,6 +89,7 @@ export {
 export type { OCCERow } from "./occe";
 export {
   getControleEstoque,
+  getNextFreeOcceDocEntry,
   createControleEstoque,
   updateControleEstoque,
   deleteControleEstoque,
@@ -1031,6 +1032,13 @@ export async function saveBiHorariaDocumento(params: {
     biHorariaPayload: payload,
   });
 
+  /** Mesma data no OCPD: a lista e o grid usam `getProducaoHistory` (OCPD); sem isso o doc fica na data antiga na navegação. */
+  const docUuid = params.docId != null && String(params.docId).trim() !== "" ? String(params.docId).trim() : null;
+  if (docUuid) {
+    const { error: ocpdErr } = await supabase.from("OCPD").update({ data_dia: day }).eq("doc_id", docUuid);
+    if (ocpdErr) throw ocpdErr;
+  }
+
   return { success: true };
 }
 
@@ -1045,44 +1053,64 @@ export async function getOcphDocIdsComBiHoraria(): Promise<Set<string>> {
   return new Set((data ?? []).map((r: { doc_id: string | null }) => String(r.doc_id ?? "")).filter(Boolean));
 }
 
-/**
- * Documentos que têm bi-horária na OCPH mas podem não ter linha na OCPD (só OCPH).
- * Usado para incluir esses docs na lista/navegação e no grid da Bi-horária.
- */
-export async function getDistinctBiHorariaDocumentsFromOcph(): Promise<
-  Array<{ data_dia: string; filial_nome: string | null; doc_id: string }>
-> {
-  const pageSize = 1000;
-  let from = 0;
-  const byKey = new Map<string, { data_dia: string; filial_nome: string | null; doc_id: string }>();
+/** Um documento bi-horária na OCPH (pode não existir linha na OCPD). `id` = menor id OCPH do grupo (para navegação). */
+export interface BiHorariaOcphCabecalho {
+  id: number;
+  doc_id: string;
+  filial_nome: string;
+  data_dia: string;
+}
 
-  for (;;) {
-    const { data, error } = await supabase
-      .from("OCPH")
-      .select("data_dia, filial_nome, doc_id")
-      .like("observacoes", "Bi-horária nº%")
-      .not("doc_id", "is", null)
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    const chunk = data ?? [];
-    for (const row of chunk as Array<Record<string, unknown>>) {
-      const docId = row.doc_id != null ? String(row.doc_id).trim() : "";
-      if (!docId) continue;
-      const dayRaw = row.data_dia != null ? String(row.data_dia) : "";
-      const day = dayRaw.split("T")[0];
-      if (!day) continue;
-      const filial = row.filial_nome != null ? String(row.filial_nome).trim() : "";
-      const key = `${day}_${filial}_${docId}`;
-      if (!byKey.has(key)) {
-        byKey.set(key, { data_dia: day, filial_nome: filial || null, doc_id: docId });
+/**
+ * Cabeçalhos distintos (data + filial + doc_id) vindos só da OCPH.
+ * Sem período: até 8000 linhas OCPH (deduplicadas); com período: filtra por data_dia.
+ */
+export async function getBiHorariaDocumentosCabecalho(params?: {
+  dataInicio?: string;
+  dataFim?: string;
+}): Promise<BiHorariaOcphCabecalho[]> {
+  let q = supabase
+    .from("OCPH")
+    .select("id, doc_id, filial_nome, data_dia")
+    .like("observacoes", "Bi-horária nº%")
+    .not("doc_id", "is", null)
+    .order("id", { ascending: true })
+    .limit(8000);
+
+  const di = params?.dataInicio?.split("T")[0];
+  const df = params?.dataFim?.split("T")[0];
+  if (di) q = q.gte("data_dia", di);
+  if (df) q = q.lte("data_dia", df);
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const map = new Map<string, BiHorariaOcphCabecalho>();
+  for (const row of data ?? []) {
+    const r = row as Record<string, unknown>;
+    const docId = String(r.doc_id ?? "").trim();
+    if (!docId) continue;
+    const filial = String(r.filial_nome ?? "").trim();
+    const raw = r.data_dia;
+    let day = "";
+    if (raw != null && raw !== "") {
+      if (typeof raw === "string") {
+        day = raw.split("T")[0];
+      } else {
+        const d = new Date(String(raw));
+        day = Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
       }
     }
-    if (chunk.length < pageSize) break;
-    from += pageSize;
+    if (!day) continue;
+    const k = `${day}_${filial}_${docId}`;
+    const id = Number(r.id);
+    if (!Number.isFinite(id)) continue;
+    const prev = map.get(k);
+    if (prev == null || id < prev.id) {
+      map.set(k, { id, doc_id: docId, filial_nome: filial, data_dia: day });
+    }
   }
-
-  return Array.from(byKey.values());
+  return Array.from(map.values());
 }
 
 export async function getBiHorariaResumoPorPeriodo(params: {
